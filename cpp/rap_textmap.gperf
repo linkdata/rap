@@ -1,0 +1,125 @@
+%language=ANSI-C
+%includes
+%compare-lengths
+%readonly-tables
+%global-table
+%define class-name rap_textmap
+%define lookup-function-name rap_textmap_in_word_set
+%define word-array-name rap_textmap_words
+%define length-table-name rap_textmap_lengths
+%%
+GET
+HEAD
+POST
+PUT
+DELETE
+TRACE
+OPTIONS
+CONNECT
+PATCH
+Accept
+Accept-Charset
+Accept-Encoding
+Accept-Language
+Accept-Ranges
+Access-Control-Allow-Origin
+Age
+Allow
+Authorization
+Cache-Control
+Connection
+Content-Disposition
+Content-Encoding
+Content-Language
+Content-Length
+Content-Location
+Content-Md5
+Content-Range
+Content-Security-Policy
+Content-Type
+Cookie
+Date
+Dnt
+Etag
+Expect
+Expires
+From
+Host
+If-Match
+If-Modified-Since
+If-None-Match
+If-Range
+If-Unmodified-Since
+Last-Modified
+Link
+Location
+Max-Forwards
+Origin
+Pragma
+Proxy-Authenticate
+Proxy-Authorization
+Public-Key-Pins
+Range
+Referer
+Refresh
+Retry-After
+Server
+Set-Cookie
+Session-Id
+Status
+Strict-Transport-Security
+Te
+Trailer
+Transfer-Encoding
+Upgrade
+User-Agent
+Vary
+Via
+Www-Authenticate
+X-Csrf-Token
+X-Forwarded-For
+X-Forwarded-Proto
+X-Powered-By
+X-Requested-With
+X-Ua-Compatible
+X-Xss-Protection
+close
+gzip, deflate
+http
+https
+keep-alive
+upgrade
+websocket
+%%
+
+unsigned int rap_textmap_max_key() {
+  return MAX_HASH_VALUE + 2;
+}
+
+const char* rap_textmap_from_key(register unsigned int key, register size_t* p_len) {
+  if (key < 2 || key > MAX_HASH_VALUE + 2) {
+    *p_len = 0;
+    return key == 1 ? "" : 0;
+  }
+  *p_len = rap_textmap_lengths[key - 2];
+  return rap_textmap_words[key - 2];
+}
+
+unsigned int rap_textmap_to_key(register const char* str, register size_t len)
+{
+  if (!len)
+    return 1;
+  if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH) {
+    unsigned int key = hash (str, (unsigned int)len);
+    if (key <= MAX_HASH_VALUE)
+      if (len == rap_textmap_lengths[key]) {
+        register const char* s = rap_textmap_words[key];
+        while (len--) {
+          if (*str++ != *s++)
+            return 0;
+        }
+        return 2 + key;
+      }
+  }
+  return 0;
+}
