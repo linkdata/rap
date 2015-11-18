@@ -44,6 +44,7 @@ type Exchange struct {
 	fdr              FrameData   // FrameData being read from by fr
 	fr               FrameReader // Frame payload reader (into fdr)
 	hasStarted       bool        // true if the exchange has sent or received the first frame
+	hasReceived      bool        // true if the exchange has received the first frame
 	hasSentClose     bool        // true if we have sent our final frame
 	hasReceivedClose bool        // true if the peer has sent a it's final frame
 }
@@ -131,6 +132,7 @@ func (e *Exchange) Start(h Handler) error {
 		return ErrMissingFrameHead
 	}
 	e.hasStarted = true
+	e.hasReceived = true
 	switch e.fr.ReadRecordType() {
 	case RecordTypeHTTPRequest:
 		req, err := e.fr.ReadRequest()
@@ -498,6 +500,7 @@ func (e *Exchange) Stop() (err error) {
 		}
 	}
 	e.hasStarted = false
+	e.hasReceived = false
 	e.hasSentClose = false
 	e.hasReceivedClose = false
 	if e.sendWindow != SendWindowSize {
