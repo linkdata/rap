@@ -23,6 +23,7 @@
         "kestrel": "Microsoft.AspNet.Hosting --server Microsoft.AspNet.Server.Kestrel --server.urls http://*:5004"
     },
     "frameworks": {
-        "dnxcore50": { }
+        "dnxcore50": { },
+        "dnx451": { }
     }
 }
