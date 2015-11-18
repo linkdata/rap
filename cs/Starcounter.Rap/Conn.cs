@@ -12,6 +12,7 @@ namespace Starcounter.Rap
         private ByteBuffer _writing = new ByteBuffer(0x10000);
         private SocketAsyncEventArgs _rdargs = new SocketAsyncEventArgs();
         private SocketAsyncEventArgs _wrargs = new SocketAsyncEventArgs();
+        private object _lock;
 
         public Conn(Server server, Socket socket)
         {
@@ -57,16 +58,22 @@ namespace Starcounter.Rap
 
         private void ReadCompleted(object sender, SocketAsyncEventArgs e)
         {
-            if (e.LastOperation != SocketAsyncOperation.Receive)
-                throw new ArgumentException("The last operation completed on the socket was not a receive");
-            ProcessReceive(e);
+            lock (_lock)
+            {
+                if (e.LastOperation != SocketAsyncOperation.Receive)
+                    throw new ArgumentException("The last operation completed on the socket was not a receive");
+                ProcessReceive(e);
+            }
         }
 
         private void WriteCompleted(object sender, SocketAsyncEventArgs e)
         {
-            if (e.LastOperation != SocketAsyncOperation.Send)
-                throw new ArgumentException("The last operation completed on the socket was not a send");
-            ProcessSend(e);
+            lock (_lock)
+            {
+                if (e.LastOperation != SocketAsyncOperation.Send)
+                    throw new ArgumentException("The last operation completed on the socket was not a send");
+                ProcessSend(e);
+            }
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
