@@ -8,11 +8,11 @@ namespace Starcounter.Rap
         private Server _server;
         private Socket _socket;
         private ByteBuffer _rdbuf = new ByteBuffer(0x10000);
-        private ByteBuffer _towrite = new ByteBuffer(0x10000);
         private ByteBuffer _writing = new ByteBuffer(0x10000);
+        private ByteBuffer _towrite = new ByteBuffer(0x10000);
         private SocketAsyncEventArgs _rdargs = new SocketAsyncEventArgs();
         private SocketAsyncEventArgs _wrargs = new SocketAsyncEventArgs();
-        private object _lock;
+        private object _wrlock = new object();
 
         public Conn(Server server, Socket socket)
         {
@@ -25,26 +25,31 @@ namespace Starcounter.Rap
         
         public void Write(byte[] srcbuf)
         {
-            _towrite.Write(srcbuf);
+            lock (_wrlock)
+                _towrite.Write(srcbuf);
             WriteSome();
         }
 
         public void Write(byte[] srcbuf, int srcpos, int srclen)
         {
-            _towrite.Write(srcbuf, srcpos, srclen);
+            lock (_wrlock)
+                _towrite.Write(srcbuf, srcpos, srclen);
             WriteSome();
         }
 
         private void WriteSome()
         {
-            if (!_writing.IsEmpty || _towrite.IsEmpty)
-                return;
-            var temp = _towrite;
-            _towrite = _writing;
-            _writing = temp;
-            _wrargs.SetBuffer(_writing.Buffer, 0, _writing.Length);
-            if (!_socket.SendAsync(_wrargs))
-                ProcessSend(_wrargs);
+            lock (_wrlock)
+            {
+                if (!_writing.IsEmpty || _towrite.IsEmpty)
+                    return;
+                var temp = _towrite;
+                _towrite = _writing;
+                _writing = temp;
+                _wrargs.SetBuffer(_writing.Buffer, 0, _writing.Length);
+                if (!_socket.SendAsync(_wrargs))
+                    ProcessSend(_wrargs);
+            }
         }
 
         private void ReadSome()
@@ -58,22 +63,16 @@ namespace Starcounter.Rap
 
         private void ReadCompleted(object sender, SocketAsyncEventArgs e)
         {
-            lock (_lock)
-            {
-                if (e.LastOperation != SocketAsyncOperation.Receive)
-                    throw new ArgumentException("The last operation completed on the socket was not a receive");
-                ProcessReceive(e);
-            }
+            if (e.LastOperation != SocketAsyncOperation.Receive)
+                throw new ArgumentException("The last operation completed on the socket was not a receive");
+            ProcessReceive(e);
         }
 
         private void WriteCompleted(object sender, SocketAsyncEventArgs e)
         {
-            lock (_lock)
-            {
-                if (e.LastOperation != SocketAsyncOperation.Send)
-                    throw new ArgumentException("The last operation completed on the socket was not a send");
-                ProcessSend(e);
-            }
+            if (e.LastOperation != SocketAsyncOperation.Send)
+                throw new ArgumentException("The last operation completed on the socket was not a send");
+            ProcessSend(e);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -88,7 +87,7 @@ namespace Starcounter.Rap
             if (e.BytesTransferred > 0)
             {
                 // Console.WriteLine("ProcessReceive {0}", e.BytesTransferred);
-                _server.StatReadBytesAdd(e.BytesTransferred);
+                _server.StatReadBytesAdd((Int64)e.BytesTransferred);
                 _rdbuf.Produce(e.BytesTransferred);
                 int pos = 0;
                 while (pos + Frame.HeaderSize <= _rdbuf.Length)
@@ -101,39 +100,42 @@ namespace Starcounter.Rap
                 }
                 _rdbuf.Consume(pos);
             }
-            
             ReadSome();
         }
         
         private void ProcessFrame(byte[] buffer, int offset)
         {
             var frame = new Frame(buffer, offset);
-            if (frame.IsFinal)
+            if (frame.HasHead)
+                _server.StatHeadCountInc();
+            lock (_wrlock)
             {
-                // Header
-                _towrite.Write((UInt16)8);
-                _towrite.Write((UInt16)(frame.ExchangeId | 0x8000 | 0x4000));
-                // Record type
-                _towrite.Write(Frame.HeadTypeHTTPResponse);
-                // Code
-                _towrite.Write((UInt16)204);
-                // Headers
-                _towrite.Write(0);
-                _towrite.Write(0);
-                // Status text
-                _towrite.Write(0);
-                _towrite.Write(0);
-                // Content Length
-                _towrite.Write(0);
-                WriteSome();
+                if (frame.IsFinal)
+                {
+                    // Header
+                    _towrite.Write((UInt16)8);
+                    _towrite.Write((UInt16)(frame.ExchangeId | 0x8000 | 0x4000));
+                    // Record type
+                    _towrite.Write(Frame.HeadTypeHTTPResponse);
+                    // Code
+                    _towrite.Write((UInt16)204);
+                    // Headers
+                    _towrite.Write(0);
+                    _towrite.Write(0);
+                    // Status text
+                    _towrite.Write(0);
+                    _towrite.Write(0);
+                    // Content Length
+                    _towrite.Write(0);
+                }
+                else
+                {
+                    // send ack
+                    _towrite.Write((UInt16)0);
+                    _towrite.Write((UInt16)(frame.ExchangeId));
+                }
             }
-            else
-            {
-                // send ack
-                _towrite.Write((UInt16)0);
-                _towrite.Write((UInt16)(frame.ExchangeId));
-                WriteSome();
-            }
+            WriteSome();
         }
 
         private void ProcessSend(SocketAsyncEventArgs e)
@@ -141,8 +143,9 @@ namespace Starcounter.Rap
             if (e.SocketError == SocketError.Success)
             {
                 // Console.WriteLine("ProcessSend {0}", e.BytesTransferred);
-                _server.StatWriteBytesAdd(e.BytesTransferred);
-                _writing.Consume(e.BytesTransferred);
+                _server.StatWriteBytesAdd((Int64)e.BytesTransferred);
+                lock (_wrlock)
+                    _writing.Consume(e.BytesTransferred);
                 WriteSome();
             }
             else

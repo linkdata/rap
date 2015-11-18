@@ -10,9 +10,10 @@ namespace Starcounter.Rap
         private readonly string _host;
         private readonly int _port;
         private Socket _listenSocket;
-        private int _statReadBytes = 0;
-        private int _statWriteBytes = 0;
-        private int _statConnCount = 0;
+        private Int64 _statConnCount = 0;
+        private Int64 _statReadBytes = 0;
+        private Int64 _statWriteBytes = 0;
+        private Int64 _statHeadCount = 0;
     
         public Server(string hostnameOrAdress = null, int port = 10111)
         {
@@ -20,16 +21,6 @@ namespace Starcounter.Rap
             _port = port;
         }
         
-        public void StatReadBytesAdd(int n)
-        {
-            Interlocked.Add(ref _statReadBytes, n);
-        }
-
-        public void StatWriteBytesAdd(int n)
-        {
-            Interlocked.Add(ref _statWriteBytes, n);
-        }
-
         public void StatConnCountInc()
         {
             Interlocked.Increment(ref _statConnCount);
@@ -40,6 +31,31 @@ namespace Starcounter.Rap
             Interlocked.Decrement(ref _statConnCount);
         }
         
+        public void StatReadBytesAdd(Int64 n)
+        {
+            Interlocked.Add(ref _statReadBytes, n);
+        }
+
+        public void StatWriteBytesAdd(Int64 n)
+        {
+            Interlocked.Add(ref _statWriteBytes, n);
+        }
+
+        public void StatHeadCountInc()
+        {
+            Interlocked.Increment(ref _statHeadCount);
+        }
+        
+        public Int64 StatHeadCount
+        {
+            get { return _statHeadCount; }
+        }
+        
+        public Int64 StatReadBytes
+        {
+            get { return _statReadBytes; }
+        }
+
         public void Run()
         {
             try {
@@ -51,9 +67,9 @@ namespace Starcounter.Rap
                 }
                 IPEndPoint localEndPoint = new IPEndPoint(ipAddress, _port);
                 _listenSocket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                Console.WriteLine("Server.Run(): Starting to listen {0}", localEndPoint);
                 _listenSocket.Bind(localEndPoint);
                 _listenSocket.Listen(5);
-                // Console.WriteLine("Server.Start(): Accepting on {0}", localEndPoint);
                 StartAccept(null);
             } catch (Exception e) {
                 Console.WriteLine(e.ToString());
