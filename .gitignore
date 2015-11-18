@@ -20,6 +20,8 @@ _cgo_export.*
 
 _testmain.go
 
+project.lock.json
+
 *.exe
 *.test
 *.prof
