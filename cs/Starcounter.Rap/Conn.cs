@@ -26,30 +26,32 @@ namespace Starcounter.Rap
         public void Write(byte[] srcbuf)
         {
             lock (_wrlock)
+            {
                 _towrite.Write(srcbuf);
-            WriteSome();
+                WriteSome();
+            }
         }
 
         public void Write(byte[] srcbuf, int srcpos, int srclen)
         {
             lock (_wrlock)
+            {
                 _towrite.Write(srcbuf, srcpos, srclen);
-            WriteSome();
+                WriteSome();
+            }
         }
 
+        // requires _wrlock to be held
         private void WriteSome()
         {
-            lock (_wrlock)
-            {
-                if (!_writing.IsEmpty || _towrite.IsEmpty)
-                    return;
-                var temp = _towrite;
-                _towrite = _writing;
-                _writing = temp;
-                _wrargs.SetBuffer(_writing.Buffer, 0, _writing.Length);
-                if (!_socket.SendAsync(_wrargs))
-                    ProcessSend(_wrargs);
-            }
+            if (!_writing.IsEmpty || _towrite.IsEmpty)
+                return;
+            var temp = _towrite;
+            _towrite = _writing;
+            _writing = temp;
+            _wrargs.SetBuffer(_writing.Buffer, 0, _writing.Length);
+            if (!_socket.SendAsync(_wrargs))
+                ProcessSend(_wrargs);
         }
 
         private void ReadSome()
@@ -134,8 +136,8 @@ namespace Starcounter.Rap
                     _towrite.Write((UInt16)0);
                     _towrite.Write((UInt16)(frame.ExchangeId));
                 }
+                WriteSome();
             }
-            WriteSome();
         }
 
         private void ProcessSend(SocketAsyncEventArgs e)
@@ -145,8 +147,10 @@ namespace Starcounter.Rap
                 // Console.WriteLine("ProcessSend {0}", e.BytesTransferred);
                 _server.StatWriteBytesAdd((Int64)e.BytesTransferred);
                 lock (_wrlock)
+                {
                     _writing.Consume(e.BytesTransferred);
-                WriteSome();
+                    WriteSome();
+                }
             }
             else
             {
