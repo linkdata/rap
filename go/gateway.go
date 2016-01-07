@@ -109,7 +109,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		errorText += " responseErr=" + responseErr.Error()
 	}
 	log.Print(errorText)
-	if !e.hasStarted {
+	if !e.hasReceived {
 		http.Error(w, errorText, http.StatusInternalServerError)
 	}
 }
