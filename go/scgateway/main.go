@@ -46,6 +46,7 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/profile"
 	"github.com/starcounter/rap/go"
+	"github.com/valyala/fasthttp"
 )
 
 const (
@@ -184,6 +185,7 @@ var allRequests = make(map[int]string)
 
 var mainReply = []byte("<html><body><h1>It works!</h1>\n<p>This is the default web page for this server.</p>\n<p>The web server software is running but no content has been added, yet.</p>\n</body></html>\n\n")
 var mainReplyLength = strconv.Itoa(len(mainReply))
+var helloWorld = []byte("Hello World!")
 
 func serveHome(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	atomic.AddInt64(&requestCount, 1)
@@ -298,6 +300,14 @@ func (eh *echoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Millisecond * time.Duration(eh.sleepTime))
 	}
 
+	if strings.HasPrefix(r.RequestURI, "/plaintext") {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Length", "13")
+		w.Write([]byte("Hello, World!"))
+		return
+	}
+
 	if strings.HasPrefix(r.RequestURI, "/html") {
 		eh.fileHandler.ServeHTTP(w, r)
 		return
@@ -396,6 +406,20 @@ func modeEcho() {
 
 	go func() {
 		log.Print("starting RAP echo server on ", *flagRAP)
+		log.Fatal(s.ListenAndServe())
+	}()
+
+	go func() {
+		log.Print("starting FastHTTP echo server on :8081")
+		m := func(ctx *fasthttp.RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/plaintext":
+				ctx.Write(helloWorld)
+			default:
+				ctx.Error("not found", fasthttp.StatusNotFound)
+			}
+		}
+		fasthttp.ListenAndServe(":8081", m)
 		log.Fatal(s.ListenAndServe())
 	}()
 
