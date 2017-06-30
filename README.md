@@ -117,6 +117,8 @@ Before an exchange is done and it's id may be reused, both sides must send and r
 
 ## License
 
-The RAP specification is Copyright :copyright: 2015 Starcounter AB
+OSS license TBD.
 
-Questions can be directed to the author, [Johan Lindh](https://github.com/linkdata)
+The RAP specification is Copyright :copyright: 2015-2017 Johan Lindh
+
+Big thanks to Starcounter AB for allowing me to open-source this!
