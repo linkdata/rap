@@ -25,3 +25,4 @@ project.lock.json
 *.exe
 *.test
 *.prof
+*.zip
