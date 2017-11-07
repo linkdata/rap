@@ -92,7 +92,7 @@ func (c *Client) offlineError() error {
 	if c.firstAttempt == c.lastAttempt {
 		return c.lastError
 	}
-	return fmt.Errorf("Upstream server has been unresponsive for %v, last error was:\r\n\"%v\"\r\n",
+	return fmt.Errorf("upstream server has been unresponsive for %v, last error was: \"%v\"",
 		time.Now().Sub(c.firstAttempt), c.lastError)
 }
 

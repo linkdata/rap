@@ -66,10 +66,7 @@ func (e *Exchange) WriteResponse(r *http.Response) (err error) {
 func (e *Exchange) WriteResponseData(code int, contentLength int64, header http.Header) (err error) {
 	// log.Print("Exchange.WriteResponseData() ", e)
 	e.writeStart()
-	if err := e.fdw.WriteResponse(code, contentLength, header); err != nil {
-		return err
-	}
-	return nil
+	return e.fdw.WriteResponse(code, contentLength, header)
 }
 
 func serveHTTP(h http.Handler, rw *ResponseWriter, req *http.Request) {
