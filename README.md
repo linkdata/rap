@@ -6,13 +6,13 @@ The REST Aggregation Protocol, or *RAP* for short, is an asymmetric HTTP and Web
 
 Parsing HTTP and correctly implementing all the features of a HTTP server uses up significant resources on the server. Simply handling the TCP protocol requirements for tens of thousands of connections can consume significant CPU resources on the server.
 
-Traditional web applications simply accept this as an unavoidable fact and focus on finding ways to add more servers. But that brings it's own set of problems and isn't a viable solution for Starcounter.
+Traditional web applications simply accept this as an unavoidable fact and focus on finding ways to add more servers. But that brings it's own set of problems and isn't a viable solution for a CPU-bound server where scaling out isn't an option.
 
-In Starcounter, it is generally not possible to decouple the application code that processes HTTP requests from the database that holds the data. So everything that runs on the same machine must be as efficient as possble. Unfortunately, even the most efficient web servers today use far too much CPU.
+In some architectures it may not be possible to decouple the application code that processes HTTP requests from the database that holds the data. So everything that runs on the same machine must be as efficient as possble. Unfortunately, even the most efficient web servers today use far too much CPU.
 
-Our solution is to move the web server to other machine(s) and to simplify the request-response scheme to support only what we need while making sure that receiving and routing the incoming requests use as few resources as possible. Where HTTP tries to be very generic in it's design, RAP focuses on handling large amounts of small request-reply exchanges.
+This projectaims to move the web server to other machine(s) and to simplify the request-response scheme to support only what we need while making sure that receiving and routing the incoming requests use as few resources as possible. Where HTTP tries to be very generic in it's design, RAP focuses on handling large amounts of small request-reply exchanges.
 
-We initially looked to HTTP/2 as a likely candidate for multiplexing HTTP requests, but found that it used too much CPU and that the HPACK algorithm made the stream stateful, which meant synchronization mechanisms would be needed in order to use more than one thread per stream on the upstream server.
+I looked to HTTP/2 as a likely candidate for multiplexing HTTP requests, but found that it used too much CPU and that the HPACK algorithm made the stream stateful, which meant synchronization mechanisms would be needed in order to use more than one thread per stream on the upstream server.
 
 ## Overview
 
@@ -121,4 +121,4 @@ OSS license TBD.
 
 The RAP specification is Copyright :copyright: 2015-2017 Johan Lindh
 
-Big thanks to Starcounter AB for allowing me to open-source this!
+Big thanks to Starcounter AB for transferring the copyright to me and allowing me to open-source this project!
