@@ -45,7 +45,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/profile"
-	"github.com/starcounter/rap/go"
+	"github.com/linkdata/rap/go"
 	"github.com/valyala/fasthttp"
 )
 
@@ -208,8 +208,8 @@ func serveGwTest(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Length", "36")
-	w.Write([]byte("Starcounter gateway test response :)"))
+	w.Header().Set("Content-Length", "28")
+	w.Write([]byte("RAP gateway test response :)"))
 }
 
 func serveReturn(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {

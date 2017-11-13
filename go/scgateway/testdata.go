@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/naoina/denco"
-	_ "github.com/starcounter/scgateway"
+	_ "github.com/linkdata/rap/go"
 )
 
 type testStruct struct {

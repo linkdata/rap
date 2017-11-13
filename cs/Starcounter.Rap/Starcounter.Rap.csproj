@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>ASP.NET 5 REST Aggregation Protocol consumer.</Description>
+    <TargetFrameworks>netcoreapp2.0</TargetFrameworks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>Starcounter.Rap</AssemblyName>
+    <PackageId>Starcounter.Rap</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="1.1.1" /> 
+  </ItemGroup>
+
+</Project>
