@@ -28,5 +28,6 @@ project.lock.json
 *.zip
 
 .vscode/
+build/
 obj/
 bin/
