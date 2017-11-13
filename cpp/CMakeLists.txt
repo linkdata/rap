@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 2.8.10)
 set(CMAKE_VERBOSE_MAKEFILE OFF)
 set(CMAKE_CONFIGURATION_TYPES Debug Release)
 
-project(rap)
+project(rapper)
 enable_testing()
 
 link_directories(${CMAKE_ARCHIVE_OUTPUT_DIRECTORY})
