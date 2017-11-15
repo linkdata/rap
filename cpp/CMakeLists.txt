@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.10)
+cmake_minimum_required(VERSION 3.8.2)
 
 set(CMAKE_VERBOSE_MAKEFILE OFF)
 set(CMAKE_CONFIGURATION_TYPES Debug Release)
@@ -12,7 +12,6 @@ if(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601 -D_CRT_SECURE_NO_WARNINGS)
 endif()
 
-set(Boost_ADDITIONAL_VERSIONS 1.59)
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS system)
 include_directories(${Boost_INCLUDE_DIRS})
@@ -23,6 +22,7 @@ endif()
 
 # build the sample echo server 'rapper'
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories($ENV{INCLUDE})
 add_executable(rapper
   rap.hpp
   rap_conn.hpp
