@@ -69,7 +69,9 @@ public:
       else
       {
         // exchange id out of range
+#ifndef NDEBUG
         fprintf(stderr, "rap::conn::read_stream_ok(): exchange id %04x out of range\n", id);
+#endif
         return;
       }
       src_ptr += src_len;

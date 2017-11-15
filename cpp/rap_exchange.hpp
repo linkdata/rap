@@ -57,7 +57,9 @@ public:
       return e;
     if (send_window_ < 1)
     {
+#ifndef NDEBUG
       fprintf(stderr, "exchange %04x waiting for ack\n", id_);
+#endif
       framelink::enqueue(&queue_, f);
       return rap_err_ok;
     }
