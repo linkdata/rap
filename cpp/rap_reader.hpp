@@ -16,15 +16,29 @@ class reader
 {
 public:
   reader(const rap::frame *f)
-      : frame_(f), src_ptr_(f->payload()), src_end_(f->payload() + f->payload_size()), error_(rap_err_ok)
+      : frame_(f)
+      , src_ptr_(f->payload())
+      , src_end_(f->payload() + f->payload_size())
+      , error_(rap_err_ok)
   {
   }
 
-  char read_char() { return *src_ptr_++; }
+  char read_char()
+  {
+    assert(!error_);
+    return *src_ptr_++;
+  }
 
-  unsigned char read_uchar() { return static_cast<unsigned char>(*src_ptr_++); }
+  unsigned char read_uchar()
+  {
+    assert(!error_);
+    return static_cast<unsigned char>(*src_ptr_++);
+  }
 
-  record::tag read_tag() { return error_ ? record::tag_unknown : read_char(); }
+  record::tag read_tag()
+  {
+    return error_ ? record::tag_unknown : read_char();
+  }
 
   uint16_t read_uint16()
   {
@@ -150,7 +164,9 @@ private:
 
   void set_error(rap::error e)
   {
+#ifndef NDEBUG
     fprintf(stderr, "rap::reader::set_error(%d)\n", e);
+#endif
     error_ = e;
   }
 };
