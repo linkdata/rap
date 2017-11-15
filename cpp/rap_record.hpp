@@ -2,47 +2,37 @@
 #define RAP_HEAD_HPP
 
 #include "rap.hpp"
-#include "rap_text.hpp"
 #include "rap_frame.hpp"
+#include "rap_text.hpp"
 
 #include <cassert>
 #include <streambuf>
 
-namespace rap
-{
+namespace rap {
 
-class record
-{
-public:
+class record {
+ public:
   typedef char tag;
 
-  enum
-  {
+  enum {
     tag_http_request = tag('\x01'),
     tag_http_response = tag('\x02'),
     tag_unknown = tag(0)
   } tags;
 
-  static void write(std::streambuf &sb, char ch)
-  {
-    sb.sputc(ch);
-  }
+  static void write(std::streambuf &sb, char ch) { sb.sputc(ch); }
 
-  static void write(std::streambuf &sb, uint16_t n)
-  {
+  static void write(std::streambuf &sb, uint16_t n) {
     sb.sputc(static_cast<char>(n >> 8));
     sb.sputc(static_cast<char>(n));
   }
 
-  explicit record(const rap::frame *f)
-      : frame_(f)
-  {
-  }
+  explicit record(const rap::frame *f) : frame_(f) {}
 
-protected:
+ protected:
   const rap::frame *frame_;
 };
 
-} // namespace rap
+}  // namespace rap
 
-#endif // RAP_HEAD_HPP
+#endif  // RAP_HEAD_HPP

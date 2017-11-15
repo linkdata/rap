@@ -4,14 +4,14 @@
 #include <cstdint>
 #include <string>
 
-namespace rap
-{
+namespace rap {
 
-enum
-{
-  rap_frame_header_size = 4,                                               /**< Number of octets in a rap frame header. */
-  rap_frame_max_size = 0x10000,                                            /**< Maximum frame size on the wire. */
-  rap_frame_max_payload_size = rap_frame_max_size - rap_frame_header_size, /**< Maximum allowed frame payload size. */
+enum {
+  rap_frame_header_size = 4,    /**< Number of octets in a rap frame header. */
+  rap_frame_max_size = 0x10000, /**< Maximum frame size on the wire. */
+  rap_frame_max_payload_size =
+      rap_frame_max_size -
+      rap_frame_header_size, /**< Maximum allowed frame payload size. */
 };
 
 typedef enum {
@@ -45,15 +45,13 @@ typedef enum {
   rap_frame_flag_body = 0x20,
 } rap_frame_flag;
 
-enum
-{
+enum {
   rap_conn_exchange_id = 0x1fff,
   rap_max_exchange_id = rap_conn_exchange_id - 1
 };
 
 typedef char record_type;
-enum
-{
+enum {
   RecordTypeHTTPRequest = record_type(0x01),
   RecordTypeHTTPResponse = record_type(0x02),
 };
@@ -72,6 +70,6 @@ class conn;
 template <typename server_t, typename conn_t, typename exchange_t>
 class server;
 
-} // namespace rap
+}  // namespace rap
 
-#endif // RAP_HPP
+#endif  // RAP_HPP

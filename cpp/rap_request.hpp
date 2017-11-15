@@ -2,23 +2,26 @@
 #define RAP_REQUEST_HPP
 
 #include "rap.hpp"
-#include "rap_text.hpp"
 #include "rap_kvv.hpp"
-#include "rap_record.hpp"
 #include "rap_reader.hpp"
+#include "rap_record.hpp"
+#include "rap_text.hpp"
 
 #include <cassert>
 #include <cstring>
 
-namespace rap
-{
+namespace rap {
 
-class request : public record
-{
-public:
+class request : public record {
+ public:
   request(reader &r)
-      : record(r.frame()), method_(r.read_text()), path_(r.read_text()), query_(r), headers_(r), host_(r.read_text()), content_length_(r.read_int64())
-  {
+      : record(r.frame()),
+        method_(r.read_text()),
+        path_(r.read_text()),
+        query_(r),
+        headers_(r),
+        host_(r.read_text()),
+        content_length_(r.read_int64()) {
     assert(!method_.empty());
     assert(!path_.empty());
     assert(content_length_ >= -1);
@@ -32,10 +35,8 @@ public:
   text host() const { return host_; }
   int64_t content_length() const { return content_length_; }
 
-  void render(string_t &out) const
-  {
-    if (method().is_null())
-      return;
+  void render(string_t &out) const {
+    if (method().is_null()) return;
     assert(!path().is_null());
     assert(content_length() >= -1);
     method().render(out);
@@ -44,18 +45,15 @@ public:
     query().render(out);
     out += '\n';
     headers().render(out);
-    if (!host().empty())
-    {
+    if (!host().empty()) {
       out += "Host: ";
       host().render(out);
       out += '\n';
     }
-    if (content_length() >= 0)
-    {
+    if (content_length() >= 0) {
       char buf[64];
       int n = sprintf(buf, "%lld", content_length());
-      if (n > 0)
-      {
+      if (n > 0) {
         out += "Content-Length: ";
         out.append(buf, n);
         out += '\n';
@@ -63,7 +61,7 @@ public:
     }
   }
 
-private:
+ private:
   text method_;
   text path_;
   rap::query query_;
@@ -72,6 +70,6 @@ private:
   int64_t content_length_;
 };
 
-} // namespace rap
+}  // namespace rap
 
-#endif // RAP_REQUEST_HPP
+#endif  // RAP_REQUEST_HPP

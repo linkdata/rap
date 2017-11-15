@@ -1,24 +1,21 @@
 #ifndef RAPPER_SERVER_HPP
 #define RAPPER_SERVER_HPP
 
+#include "rap_server.hpp"
 #include "rapper.hpp"
 #include "rapper_conn.hpp"
-#include "rap_server.hpp"
 
-#include <boost/bind.hpp>
 #include <boost/asio.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/bind.hpp>
 #include <boost/enable_shared_from_this.hpp>
+#include <boost/shared_ptr.hpp>
 
-namespace rapper
-{
+namespace rapper {
 
 template <typename exchange_t>
-class server
-    : public boost::enable_shared_from_this<server<exchange_t>>,
-      public config<exchange_t>::server_base
-{
-public:
+class server : public boost::enable_shared_from_this<server<exchange_t>>,
+               public config<exchange_t>::server_base {
+ public:
   typedef typename config<exchange_t>::server_type server_type;
   typedef typename config<exchange_t>::server_ptr server_ptr;
   typedef typename config<exchange_t>::conn_type conn_type;
@@ -27,18 +24,22 @@ public:
   virtual ~server() {}
 
   server(boost::asio::io_service &io_service, short port)
-      : io_service_(io_service), acceptor_(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)), timer_(io_service), last_head_count_(0), last_read_bytes_(0), last_write_bytes_(0), stat_rps_(0), stat_mbps_in_(0), stat_mbps_out_(0)
-  {
-  }
+      : io_service_(io_service),
+        acceptor_(io_service, boost::asio::ip::tcp::endpoint(
+                                  boost::asio::ip::tcp::v4(), port)),
+        timer_(io_service),
+        last_head_count_(0),
+        last_read_bytes_(0),
+        last_write_bytes_(0),
+        stat_rps_(0),
+        stat_mbps_in_(0),
+        stat_mbps_out_(0) {}
 
-  void start()
-  {
+  void start() {
     timer_.expires_from_now(boost::posix_time::seconds(1));
-    timer_.async_wait(
-        boost::bind(
-            &server_type::handle_timeout,
-            this->shared_from_this(),
-            boost::asio::placeholders::error));
+    timer_.async_wait(boost::bind(&server_type::handle_timeout,
+                                  this->shared_from_this(),
+                                  boost::asio::placeholders::error));
     start_accept();
   }
 
@@ -47,7 +48,7 @@ public:
   const boost::asio::io_service &io_service() const { return io_service_; }
   boost::asio::io_service &io_service() { return io_service_; }
 
-protected:
+ protected:
   uint64_t last_head_count_;
   uint64_t last_read_iops_;
   uint64_t last_read_bytes_;
@@ -59,30 +60,23 @@ protected:
   uint64_t stat_iops_out_;
   uint64_t stat_mbps_out_;
 
-private:
+ private:
   boost::asio::io_service &io_service_;
   boost::asio::ip::tcp::acceptor acceptor_;
   boost::asio::deadline_timer timer_;
 
-  void start_accept()
-  {
+  void start_accept() {
     conn_ptr conn(new conn_type(this->shared_from_this()));
     acceptor_.async_accept(
         conn->socket(),
-        boost::bind(
-            &server_type::handle_accept,
-            this->shared_from_this(),
-            conn,
-            boost::asio::placeholders::error));
+        boost::bind(&server_type::handle_accept, this->shared_from_this(), conn,
+                    boost::asio::placeholders::error));
     return;
   }
 
-  void handle_accept(
-      conn_ptr new_conn,
-      const boost::system::error_code &error)
-  {
-    if (!error)
-    {
+  void handle_accept(conn_ptr new_conn,
+                     const boost::system::error_code &error) {
+    if (!error) {
       new_conn->start();
     }
 
@@ -90,10 +84,8 @@ private:
     return;
   }
 
-  void handle_timeout(const boost::system::error_code &e)
-  {
-    if (e != boost::asio::error::operation_aborted)
-    {
+  void handle_timeout(const boost::system::error_code &e) {
+    if (e != boost::asio::error::operation_aborted) {
       uint64_t n;
 
       n = this->stat_head_count();
@@ -119,14 +111,12 @@ private:
       once_per_second();
     }
     timer_.expires_from_now(boost::posix_time::seconds(1));
-    timer_.async_wait(
-        boost::bind(
-            &server_type::handle_timeout,
-            this->shared_from_this(),
-            boost::asio::placeholders::error));
+    timer_.async_wait(boost::bind(&server_type::handle_timeout,
+                                  this->shared_from_this(),
+                                  boost::asio::placeholders::error));
   }
 };
 
-} // namespace rapper
+}  // namespace rapper
 
-#endif // RAPPER_SERVER_HPP
+#endif  // RAPPER_SERVER_HPP

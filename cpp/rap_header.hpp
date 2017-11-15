@@ -6,28 +6,24 @@
 #include <cassert>
 #include <cstdint>
 
-namespace rap
-{
+namespace rap {
 
-class header
-{
-public:
+class header {
+ public:
   // these masks apply to buf_[2]
   static const unsigned char mask_final = 0x80;
   static const unsigned char mask_head = 0x40;
   static const unsigned char mask_body = 0x20;
   static const unsigned char mask_id = (rap_conn_exchange_id >> 8);
 
-  header()
-  {
+  header() {
     buf_[0] = 0;
     buf_[1] = 0;
     buf_[2] = 0;
     buf_[3] = 0;
   }
 
-  explicit header(uint16_t id)
-  {
+  explicit header(uint16_t id) {
     buf_[0] = 0;
     buf_[1] = 0;
     buf_[2] = static_cast<unsigned char>((id >> 8) & mask_id);
@@ -41,16 +37,18 @@ public:
   bool has_payload() const { return (buf_[2] & (mask_head | mask_body)) != 0; }
   size_t payload_size() const { return has_payload() ? size_value() : 0; }
 
-  size_t size_value() const { return static_cast<size_t>(buf_[0]) << 8 | buf_[1]; }
-  void set_size_value(size_t n)
-  {
+  size_t size_value() const {
+    return static_cast<size_t>(buf_[0]) << 8 | buf_[1];
+  }
+  void set_size_value(size_t n) {
     buf_[0] = static_cast<unsigned char>(n >> 8);
     buf_[1] = static_cast<unsigned char>(n);
   }
 
-  uint16_t id() const { return static_cast<uint16_t>(buf_[2] & mask_id) << 8 | buf_[3]; }
-  void set_id(uint16_t id)
-  {
+  uint16_t id() const {
+    return static_cast<uint16_t>(buf_[2] & mask_id) << 8 | buf_[3];
+  }
+  void set_id(uint16_t id) {
     buf_[2] = static_cast<unsigned char>(id >> 8) & mask_id;
     buf_[3] = static_cast<unsigned char>(id);
   }
@@ -64,10 +62,10 @@ public:
   bool has_body() const { return (buf_[2] & mask_body) != 0; }
   void set_body() { buf_[2] |= mask_body; }
 
-private:
+ private:
   unsigned char buf_[4];
 };
 
-} // namespace rap
+}  // namespace rap
 
-#endif // RAP_HEADER_HPP
+#endif  // RAP_HEADER_HPP
