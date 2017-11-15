@@ -215,7 +215,7 @@ unsigned int rap_textmap_max_key() {
   return MAX_HASH_VALUE + 2;
 }
 
-const char* rap_textmap_from_key(register unsigned int key, register size_t* p_len) {
+const char* rap_textmap_from_key(unsigned int key, size_t* p_len) {
   if (key < 2 || key > MAX_HASH_VALUE + 2) {
     *p_len = 0;
     return key == 1 ? "" : 0;
@@ -224,7 +224,7 @@ const char* rap_textmap_from_key(register unsigned int key, register size_t* p_l
   return rap_textmap_words[key - 2];
 }
 
-unsigned int rap_textmap_to_key(register const char* str, register size_t len)
+unsigned int rap_textmap_to_key(const char* str, size_t len)
 {
   if (!len)
     return 1;

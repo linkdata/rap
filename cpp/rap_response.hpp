@@ -10,40 +10,43 @@
 
 #include <ostream>
 
-namespace rap {
+namespace rap
+{
 
-class response : public record {
+class response : public record
+{
 public:
-  response(reader& r)
-    : record(r.frame())
-    , code_(r.read_uint16())
-    , headers_(r)
-    , status_(r.read_text())
-    , content_length_(-1)
-  {}
+  response(reader &r)
+      : record(r.frame()), code_(r.read_uint16()), headers_(r), status_(r.read_text()), content_length_(-1)
+  {
+  }
 
   response(uint16_t code = 200, int64_t content_length = -1)
-    : record(NULL)
-    , code_(code)
-    , content_length_(content_length)
-  {}
+      : record(NULL), code_(code), content_length_(content_length)
+  {
+  }
 
-  void render(string_t& out) const {
+  void render(string_t &out) const
+  {
     char buf[64];
     int n = sprintf(buf, "%03d", code());
-    if (n > 0) out.append(buf, n);
+    if (n > 0)
+      out.append(buf, n);
     out += ' ';
     status().render(out);
     out += '\n';
     headers().render(out);
-    if (!status().empty()) {
+    if (!status().empty())
+    {
       out += "Status: ";
       status().render(out);
       out += '\n';
     }
-    if (content_length() >= 0) {
+    if (content_length() >= 0)
+    {
       n = sprintf(buf, "%lld", content_length());
-      if (n > 0) {
+      if (n > 0)
+      {
         out += "Content-Length: ";
         out.append(buf, n);
         out += '\n';
@@ -54,7 +57,7 @@ public:
 
   uint16_t code() const { return code_; }
   void set_code(uint16_t code) { code_ = code; }
-  const rap::headers& headers() const { return headers_; }
+  const rap::headers &headers() const { return headers_; }
   text status() const { return status_; }
   void set_status(text txt) { status_ = txt; }
   int64_t content_length() const { return content_length_; }
@@ -69,7 +72,8 @@ private:
 
 } // namespace rap
 
-const rap::writer& operator<<(const rap::writer& w, const rap::response& res) {
+const rap::writer &operator<<(const rap::writer &w, const rap::response &res)
+{
   w << static_cast<char>(rap::record::tag_http_response)
     << res.code()
     << res.headers()
@@ -79,4 +83,3 @@ const rap::writer& operator<<(const rap::writer& w, const rap::response& res) {
 }
 
 #endif // RAP_RESPONSE_HPP
-

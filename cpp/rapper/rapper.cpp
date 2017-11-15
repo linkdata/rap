@@ -24,11 +24,13 @@ class rap_exchange
     : public rapper_cfg::exchange_base
 {
 public:
-  explicit rap_exchange(rapper_cfg::conn_type& conn)
-    : rapper_cfg::exchange_base(conn)
-  {}
+  explicit rap_exchange(rapper_cfg::conn_type &conn)
+      : rapper_cfg::exchange_base(conn)
+  {
+  }
 
-  rap::error process_head(rap::reader& r) {
+  rap::error process_head(rap::reader &r)
+  {
     if (r.read_tag() != rap::record::tag_http_request)
       return rap::rap_err_unknown_frame_type;
     rap::request req(r);
@@ -45,7 +47,8 @@ public:
     return r.error();
   }
 
-  rap::error process_body(rap::reader& r) {
+  rap::error process_body(rap::reader &r)
+  {
     assert(r.size() > 0);
     header().set_body();
     sputn(r.data(), r.size());
@@ -53,7 +56,8 @@ public:
     return r.error();
   }
 
-  rap::error process_final(rap::reader& r) {
+  rap::error process_final(rap::reader &r)
+  {
     assert(r.size() == 0);
     header().set_final();
     pubsync();
@@ -71,24 +75,26 @@ public:
   typedef boost::shared_ptr<rap_server> ptr;
   virtual ~rap_server() {}
 
-  rap_server(boost::asio::io_service& io_service, short port)
-    : rapper_cfg::server_type(io_service, port)
-  {}
+  rap_server(boost::asio::io_service &io_service, short port)
+      : rapper_cfg::server_type(io_service, port)
+  {
+  }
 
-  virtual void once_per_second() {
-    if (stat_rps_ || stat_mbps_in_ || stat_mbps_out_) {
+  virtual void once_per_second()
+  {
+    if (stat_rps_ || stat_mbps_in_ || stat_mbps_out_)
+    {
       fprintf(stderr, "%llu Rps - IN: %llu Mbps, %llu iops - OUT: %llu Mbps, %llu iops\n",
               stat_rps_,
               stat_mbps_in_, stat_iops_in_,
-              stat_mbps_out_, stat_iops_out_
-              );
+              stat_mbps_out_, stat_iops_out_);
     }
   }
 };
 
-int main(int, char*[])
+int main(int, char *[])
 {
-  assert(sizeof(rap::text) == sizeof(const char*) + sizeof(size_t));
+  assert(sizeof(rap::text) == sizeof(const char *) + sizeof(size_t));
   assert(sizeof(rap::header) == 4);
   try
   {
@@ -97,7 +103,7 @@ int main(int, char*[])
     s->start();
     io_service.run();
   }
-  catch (std::exception& e)
+  catch (std::exception &e)
   {
     std::cerr << "Exception: " << e.what() << "\n";
   }

@@ -5,13 +5,17 @@
 
 #include <boost/shared_ptr.hpp>
 
-namespace rapper {
+namespace rapper
+{
 
-template<typename exchange_t> class server;
-template<typename exchange_t> class conn;
+template <typename exchange_t>
+class server;
+template <typename exchange_t>
+class conn;
 
-template<typename exchange_t>
-struct config {
+template <typename exchange_t>
+struct config
+{
   typedef rapper::server<exchange_t> server_type;
   typedef rapper::conn<exchange_t> conn_type;
   typedef boost::shared_ptr<server_type> server_ptr;
@@ -24,4 +28,3 @@ struct config {
 } // namespace rapper
 
 #endif // RAPPER_HPP
-
