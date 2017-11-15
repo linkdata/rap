@@ -42,30 +42,27 @@ public:
 
   uint64_t read_uint64()
   {
-    uint64_t accum = 0;
-    unsigned char s = 0;
-    for (;;)
+    if (!error_)
     {
-      if (src_ptr_ >= src_end_)
+      uint64_t accum = 0;
+      unsigned char s = 0;
+      while (src_ptr_ < src_end_)
       {
-        set_error(rap_err_incomplete_number);
-        return 0;
+        unsigned char uch = read_uchar();
+        if (uch < 0x80)
+        {
+          return accum | uint64_t(uch) << s;
+        }
+        accum |= uint64_t(uch & 0x7f) << s;
+        s += 7;
       }
-      unsigned char uch = read_uchar();
-      if (uch < 0x80)
-      {
-        return accum | uint64_t(uch) << s;
-      }
-      accum |= uint64_t(uch & 0x7f) << s;
-      s += 7;
+      set_error(rap_err_incomplete_number);
     }
-    return accum;
+    return 0;
   }
 
   int64_t read_int64()
   {
-    if (error_)
-      return 0;
     uint64_t val = read_uint64();
     if (val & 1)
       return -static_cast<int64_t>(val >> 1);
