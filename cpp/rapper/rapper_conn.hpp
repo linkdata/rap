@@ -71,7 +71,7 @@ private:
   void handle_read(const boost::system::error_code& error, size_t bytes_transferred)
   {
     if (error) {
-      fprintf(stderr, "rapper::conn::handle_read(%s, %lu)\n", error.message().c_str(), bytes_transferred);
+      fprintf(stderr, "rapper::conn::handle_read(%s, %lu)\n", error.message().c_str(), static_cast<unsigned long>(bytes_transferred));
       return;
     }
     this->read_stream_ok(bytes_transferred);
@@ -82,7 +82,7 @@ private:
   void handle_write(const boost::system::error_code& error, size_t bytes_transferred)
   {
     if (error) {
-      fprintf(stderr, "rapper::conn::handle_write(%s, %lu)\n", error.message().c_str(), bytes_transferred);
+      fprintf(stderr, "rapper::conn::handle_write(%s, %lu)\n", error.message().c_str(), static_cast<unsigned long>(bytes_transferred));
       return;
     }
     this->write_stream_ok(bytes_transferred);
