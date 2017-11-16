@@ -6,16 +6,6 @@ import (
 	"io"
 )
 
-// RecordType enumerates the known frame head record types
-type RecordType byte
-
-const (
-	// RecordTypeHTTPRequest is a HTTP request record
-	RecordTypeHTTPRequest = RecordType(0x01)
-	// RecordTypeHTTPResponse is a HTTP response record
-	RecordTypeHTTPResponse = RecordType(0x02)
-)
-
 // FrameReader implements reading frame payload from a byte slice
 type FrameReader []byte
 

@@ -29,7 +29,7 @@ class reader {
     return static_cast<unsigned char>(*src_ptr_++);
   }
 
-  record::tag read_tag() { return error_ ? record::tag_unknown : read_char(); }
+  record::tag read_tag() { return error_ ? record::tag_invalid : read_char(); }
 
   uint16_t read_uint16() {
     if (!error_) {
