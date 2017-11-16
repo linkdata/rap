@@ -43,15 +43,19 @@ If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the c
 
 A RAP *record* type defines how the data bytes are encoded. The records have fields that are encoded using *RAP data types* such as *string* or *uint16*. Their definitions can be found in the section *RAP data types*.
 
-### Setup record
+### Invalid record (0x00)
 
-Set up the string lookup table for a stream. May be sent once (and only once) from the server immediately after accepting a connection from a gateway and before any other records are sent. Once received by the gateway, the gateway may use the string lookup table provided in further frames.
+Never a valid record to send. If received, the connection is terminated immediately.
+
+### Set string record (0x01)
+
+Set one or more string lookups for a connection. Once set, a string lookup value must not be changed. Note that each side maintains both it's own lookup table and the peer's lookup table. Receiving this record adds to the table used when sending strings to the peer. When receiving strings, each side must be able to resolve lookups that has previously been sent.
 * One or more of:
- * `byte` Lookup index. Must be a value between 2 and 255, inclusive.
- * `string` Lookup string.
+ * `byte` Lookup index. Must be a value between 2 and 255, inclusive. Must not previously have been set.
+ * `string` Lookup string. Must not be the null string or the empty string.
 * `0x00` Terminator. Signals the end of the table.
 
-### HTTP request record
+### HTTP request record (0x02)
 
 Sent from the gateway to start a new HTTP exchange. The record structure contains enough information to transparently carry a HTTP/1.1 request. Since the gateway must validate incoming requests and format them into request records, the upstream server receiving them may rely on the structure being correct.
 * `string` HTTP method, e.g. `GET`.
@@ -61,13 +65,17 @@ Sent from the gateway to start a new HTTP exchange. The record structure contain
 * `string` HTTP `Host` header value.
 * `int64` HTTP `Content-Length` header value. If `-1`, then `Content-Length` header is not present.
 
-### HTTP response record
+### HTTP response record (0x03)
 
 Sent from the upstream server in response to a HTTP request record.
 * `uint16` HTTP status code. Must be in the range 100-599, inclusive.
 * `kvv` HTTP response headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. The gateway must supply any required headers that are omitted, so that upstream need not send `Date` or `Server`.
 * `string` HTTP `Status` header value. If the `Status` HTTP header is not present, and this value is not a NULL string, the gateway will insert a `Status` header with the value given.
 * `int64` HTTP `Content-Length` header value. If the `Content-Length` HTTP header is not present, and this value is not negative, the gateway will insert a `Content-Length` header with the value given.
+
+### User first record (0x80)
+
+Marks the first user record value available for the application using the RAP protocol. Unhandled user records are discarded silently. The last user record value is `0xFF`.
 
 ## RAP data types
 
