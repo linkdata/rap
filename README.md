@@ -52,7 +52,7 @@ Never a valid record to send. If received, the connection is terminated immediat
 Set one or more string lookups for a connection. Once set, a string lookup value must not be changed. Note that each side maintains both it's own lookup table and the peer's lookup table. Receiving this record adds to the table used when sending strings to the peer. When receiving strings, each side must be able to resolve lookups that has previously been sent.
 * One or more of:
  * `byte` Lookup index. Must be a value between 2 and 255, inclusive. Must not previously have been set.
- * `string` Lookup string. Must not be the null string or the empty string.
+ * `string` Lookup string. Must not be a zero-length string.
 * `0x00` Terminator. Signals the end of the table.
 
 ### HTTP request record (0x02)
