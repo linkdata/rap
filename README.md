@@ -77,7 +77,7 @@ Sent from the gateway to start a new HTTP exchange. The record structure contain
 ### HTTP response record (0x04)
 
 Sent from the upstream server in response to a HTTP request record.
-* `length` HTTP status code - 100. Must be in the range 0-499, inclusive.
+* `length` HTTP status code. Must be in the range 100-599, inclusive.
 * `kvv` HTTP response headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. The gateway must supply any required headers that are omitted, so that upstream need not send `Date` or `Server`.
 * `string` HTTP `Status` header value. If the `Status` HTTP header is not present, and this value is not a NULL string, the gateway will insert a `Status` header with the value given.
 * `int64` HTTP `Content-Length` header value. If the `Content-Length` HTTP header is not present, and this value is not negative, the gateway will insert a `Content-Length` header with the value given.
