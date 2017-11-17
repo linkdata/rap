@@ -68,7 +68,7 @@ Set one or more route lookups for a connection. Once set, a route lookup value m
 
 Sent from the gateway to start a new HTTP exchange. The record structure contains enough information to transparently carry a HTTP/1.1 request. Since the gateway must validate incoming requests and format them into request records, the upstream server receiving them may rely on the structure being correct.
 * `string` HTTP method, e.g. `GET`.
-* `string` URI path component using `/` as a separator. It must be URI-decoded (no `%xx`). Must be absolute (start with a `/`) and normalized, meaning it must not contain any `.` or `..` elements.
+* `route` The URI path or route information.
 * `kvv` URI query component. Both keys and values must be URI-encoded. An empty `kvv` implies no query portion was present. This means the protocol cannot distinguish `/some/path` from `/some/path?`.
 * `kvv` HTTP request headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. Note that the `Host` and `Content-Length` headers are provided separately at the end, and must not appear here.
 * `string` HTTP `Host` header value.
