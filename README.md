@@ -59,8 +59,8 @@ Set one or more string lookups for a connection. Once set, a string lookup value
 
 Set one or more route lookups for a connection. Once set, a route lookup value must not be changed. Only the upstream server may send this message to a connected gateway.
 * One or more of:
-  * `length` Lookup index. Must not previously have been set.
-  * `string` Host name. If zero length, route applies to all host names.
+  * `length` Lookup index. Must be a value greater than zero. Must not previously have been set.
+  * `string` Host name. If the empty string (`0x00 0x01`), route applies to all host names.
   * `string` Route definition string. Must be a legal [naoina/denco URL pattern](https://github.com/naoina/denco#url-patterns).
 * `0x00` Terminator. Signals the end of the table.
 
@@ -129,13 +129,13 @@ A key-value-value structure used to encode request query parameters and request-
 ### `route`
 
 Either:
-* `string` A non zero-length string with the URI path component using `/` as a separator. It must be URI-decoded (no `%xx`). Must be absolute (start with a `/`) and normalized, meaning it must not contain any `.` or `..` elements.
-
-Or:
-* `string` Null string (`0x00 0x00`).
-* `length` Index of a registered route.
+* `length` Index of a registered route. Must be greater than zero.
 * Zero or more of:
   * `string` the parameter values associated with the route, in the order they appeared in the route string when it was registered.
+
+Or:
+* `0x00` A `length` value of zero.
+* `string` A non zero-length string with the URI path component using `/` as a separator. It must be URI-decoded (no `%xx`). Must be absolute (start with a `/`) and normalized, meaning it must not contain any `.` or `..` elements.
 
 ## Flow control
 
