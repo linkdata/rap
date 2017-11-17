@@ -144,11 +144,11 @@ Or:
 
 ## Flow control
 
-Each side of an exchange maintains a count of non-final data frames sent but not acknowledged. Frames sent with the exchange id set to 0x1fff, those with the final bit set, or those without payload are not counted.
+Each side of an *exchange* maintains a count of non-final data *frames* sent but not acknowledged. Frames sent with the exchange id set to `0x1FFF`, those with the final bit set, or those without payload are not counted.
 
-A receiver must be able to buffer the full window size count of frames per exchange. When a received frame that is counted is processed, the receiver must acknowledge receipt of it by sending a frame header with the same exchange id, control bits set to `000` (not final, no head data, no body data) and the size value set to zero. This is called a *flow control frame*.
+A receiver must be able to buffer the full window size count of *frames* per *exchange*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *exchange id*, control bits set to `000` (not final, no head data, no body data) and the size value set to zero. This is called a *flow control frame*.
 
-Before an exchange is done and it's id may be reused, both sides must send and receive a frame with the final control bit set. After the final frame is sent, only flow control frames may be sent. Upon receiving a final frame, we must either send a final frame in response if we haven't already, or release the exchange for reuse. After sending a final frame, we must wait for a final frame in response if we haven't already got one, and then wait for the flow control window to drain.
+Before an *exchange* is done and it's id may be reused, both sides must send and receive a *frame* with the *final* control bit set. This is known as the *final frame*. After the *final frame* is sent, only flow control frames may be sent. Upon receiving a *final frame*, we must either send a *final frame* in response if we haven't already, or release the exchange for reuse. After sending a *final frame*, we must wait for a *final frame* in response if we haven't already got one, and then wait for the flow control window to drain.
 
 ## License
 
