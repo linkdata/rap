@@ -140,7 +140,7 @@ Either:
 
 Or:
 * `0x00` A `length` value of zero.
-* `string` A non zero-length string with the URI path component using `/` as a separator. It must be URI-decoded (no `%xx`). Must be absolute (start with a `/`) and normalized, meaning it must not contain any `.` or `..` elements.
+* `string` A non-zero length string with the URI path component using `/` as a separator. It must be URI-decoded (no `%xx`). Must be absolute (start with a `/`) and normalized, meaning it must not contain any `.` or `..` elements.
 
 ## Flow control
 
