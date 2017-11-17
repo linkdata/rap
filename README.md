@@ -41,7 +41,7 @@ If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the c
 
 ## RAP records
 
-A RAP *record* type defines how the data bytes are encoded. The records have fields that are encoded using *RAP data types* such as *string* or *uint16*. Their definitions can be found in the section *RAP data types*.
+A RAP *record* type defines how the data bytes are encoded. The records have fields that are encoded using *RAP data types* such as *string* or *length*. Their definitions can be found in the section *RAP data types*.
 
 ### Invalid record (0x00)
 
@@ -77,7 +77,7 @@ Sent from the gateway to start a new HTTP exchange. The record structure contain
 ### HTTP response record (0x04)
 
 Sent from the upstream server in response to a HTTP request record.
-* `uint16` HTTP status code. Must be in the range 100-599, inclusive.
+* `length` HTTP status code - 100. Must be in the range 0-499, inclusive.
 * `kvv` HTTP response headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. The gateway must supply any required headers that are omitted, so that upstream need not send `Date` or `Server`.
 * `string` HTTP `Status` header value. If the `Status` HTTP header is not present, and this value is not a NULL string, the gateway will insert a `Status` header with the value given.
 * `int64` HTTP `Content-Length` header value. If the `Content-Length` HTTP header is not present, and this value is not negative, the gateway will insert a `Content-Length` header with the value given.
@@ -97,16 +97,20 @@ MSB encoded 7 bits at a time, with the high bit functioning as a stop bit. For e
 If the value is zero or positive, shift the value left one bit and encode as a `uint64`.
 If the value is negative, shift the absolute value left one bit and set the lowest bit to one, then encode as a `uint64`.
 
-### `uint16`
-
-MSB encoded. Used for encoding HTTP status codes.
-
 ### `length`
 
 Used to encode non-negative small integers primarily for string lengths.
 A negative value or a value greater than 32767 cannot be encoded and is an error.
 If the value is less than 128, write it as a single byte.
-Otherwise, set bit 15 and encode it using `uint16`.
+Otherwise, encode it using two bytes in MSB order, with the first byte having the high bit set.
+
+Examples:
+* `0x0000` -> `0x00`
+* `0x0001` -> `0x01`
+* `0x007F` -> `0x7F`
+* `0x0080` -> `0x8080`
+* `0x7FFF` -> `0xFFFF`
+* `0x8000` or more -> *error*
 
 ### `string`
 
