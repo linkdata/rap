@@ -112,15 +112,17 @@ Otherwise, set bit 15 and encode it using `uint16`.
 
 A string encoding starts with a `length`. If the length is nonzero, then that many binary bytes follow.
 A zero length signals special case handling and is followed by another `length` value, interpreted as follows:
-* `0x00` Null string. Used to mark the end of a list of strings.
+* `0x00` Null string. Used to mark the end of a list of strings or signal other special cases.
 * `0x01` Empty string, i.e. `""`.
 * Other values refer to entries in the connection string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the stream must be closed.
 
 ### `kvv`
 
 A key-value-value structure used to encode request query parameters and request-response headers.
-* Zero or more of: `string` Key. Each key has zero or more values.
-  * Zero or more of: `string` Value. Unordered value associated with the key.
+* Zero or more of:
+  * `string` Key. 
+  * Each key has zero or more values:
+    * `string` Value. Unordered value associated with the key.
   * `string` Null string (`0x00 0x00`) marking the end of values for the key.
 * `string` Null string (`0x00 0x00`) marking the end of keys for this `kvv` set.
 
@@ -132,7 +134,8 @@ Either:
 Or:
 * `string` Null string (`0x00 0x00`).
 * `length` Index of a registered route.
-  * Zero or more of: `string` the parameter values associated with the route, in the order they appeared in the route string when it was registered.
+* Zero or more of:
+  * `string` the parameter values associated with the route, in the order they appeared in the route string when it was registered.
 
 ## Flow control
 
