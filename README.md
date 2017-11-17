@@ -60,6 +60,7 @@ Set one or more string lookups for a connection. Once set, a string lookup value
 Set one or more route lookups for a connection. Once set, a route lookup value must not be changed. Only the upstream server may send this message to a connected gateway.
 * One or more of:
   * `length` Lookup index. Must not previously have been set.
+  * `string` Host name. If zero length, route applies to all host names.
   * `string` Route definition string. Must be a legal [naoina/denco URL pattern](https://github.com/naoina/denco#url-patterns).
 * `0x00` Terminator. Signals the end of the table.
 
@@ -110,10 +111,10 @@ Otherwise, set bit 15 and encode it using `uint16`.
 ### `string`
 
 A string encoding starts with a `length`. If the length is nonzero, then that many binary bytes follow.
-A zero length signals special case handling and is followed by a single byte, interpreted as follows:
+A zero length signals special case handling and is followed by another `length` value, interpreted as follows:
 * `0x00` Null string. Used to mark the end of a list of strings.
 * `0x01` Empty string, i.e. `""`.
-* Other values refer to entries in the stream string lookup table. If an undefined string lookup value is seen, it is a fatal error and the stream must be closed.
+* Other values refer to entries in the connection string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the stream must be closed.
 
 ### `kvv`
 
