@@ -16,8 +16,9 @@ class record {
 
   enum {
     tag_set_string = tag('\x01'),
-    tag_http_request = tag('\x02'),
-    tag_http_response = tag('\x03'),
+    tag_set_route = tag('\x02'),
+    tag_http_request = tag('\x03'),
+    tag_http_response = tag('\x04'),
     tag_user_first = tag('\x80'),
     tag_invalid = tag(0)
   } tags;
