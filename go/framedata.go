@@ -74,15 +74,6 @@ func (fd *FrameData) WriteInt64(x int64) {
 	return
 }
 
-// WriteUint16 writes an uint16 to a FrameData using a portable encoding.
-func (fd *FrameData) WriteUint16(x uint16) {
-	*fd = append(*fd,
-		byte(x>>8),
-		byte(x),
-	)
-	return
-}
-
 // WriteLen writes a nonnegative integer less than 0x8000 to a FrameData
 // using a portable encoding.
 func (fd *FrameData) WriteLen(x int) error {
@@ -114,7 +105,7 @@ func (fd *FrameData) WriteString(s string) {
 }
 
 // WriteByteArrayString writes a byte array that is considered a string
-// to a FrameData. The byte array must be less than 0x8000 bytes long. 
+// to a FrameData. The byte array must be less than 0x8000 bytes long.
 func (fd *FrameData) WriteByteArrayString(ba []byte) {
 	if len(ba) == 0 {
 		*fd = append(*fd, byte(0), byte(1))
@@ -194,4 +185,3 @@ func (fd FrameData) WriteTo(w io.Writer) (int64, error) {
 	}
 	return int64(n), nil
 }
-
