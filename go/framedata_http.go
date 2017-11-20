@@ -1,11 +1,11 @@
 package rap
 
 import (
+	"io"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
-    "io"
 )
 
 // WriteRequest writes a FrameTypeRequest record to a FrameData given a http.Request.
@@ -79,7 +79,7 @@ func (fd *FrameData) WriteResponse(code int, contentLength int64, header http.He
 	// log.Print("FrameData.WriteResponse(", code, ", ", contentLength, ", ", header)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPResponse)
-	fd.WriteUint16(uint16(code))
+	fd.WriteLen(code)
 	statusText := ""
 	for k, vv := range header {
 		if k == "Status" {
