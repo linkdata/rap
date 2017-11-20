@@ -44,9 +44,8 @@ import (
 	"github.com/SlyMarbo/spdy"
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
-	"github.com/pkg/profile"
 	"github.com/linkdata/rap/go"
-	"github.com/valyala/fasthttp"
+	"github.com/pkg/profile"
 )
 
 const (
@@ -406,20 +405,6 @@ func modeEcho() {
 
 	go func() {
 		log.Print("starting RAP echo server on ", *flagRAP)
-		log.Fatal(s.ListenAndServe())
-	}()
-
-	go func() {
-		log.Print("starting FastHTTP echo server on :8081")
-		m := func(ctx *fasthttp.RequestCtx) {
-			switch string(ctx.Path()) {
-			case "/plaintext":
-				ctx.Write(helloWorld)
-			default:
-				ctx.Error("not found", fasthttp.StatusNotFound)
-			}
-		}
-		fasthttp.ListenAndServe(":8081", m)
 		log.Fatal(s.ListenAndServe())
 	}()
 
