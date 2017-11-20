@@ -419,4 +419,3 @@ func (e *Exchange) Release() {
 	e.Stop()
 	e.Conn.releaseExchange(e)
 }
-
