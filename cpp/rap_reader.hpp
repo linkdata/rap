@@ -31,19 +31,6 @@ class reader {
 
   record::tag read_tag() { return error_ ? record::tag_invalid : read_char(); }
 
-  uint16_t read_uint16() {
-    if (!error_) {
-      if (src_ptr_ + 2 <= src_end_) {
-        uint16_t r_val =
-            static_cast<uint16_t>(static_cast<unsigned char>(*src_ptr_++)) << 8;
-        return r_val |
-               static_cast<uint16_t>(static_cast<unsigned char>(*src_ptr_++));
-      }
-      set_error(rap_err_incomplete_length);
-    }
-    return 0;
-  }
-
   uint64_t read_uint64() {
     if (!error_) {
       uint64_t accum = 0;

@@ -16,7 +16,7 @@ class response : public record {
  public:
   response(reader &r)
       : record(r.frame()),
-        code_(r.read_uint16()),
+        code_(static_cast<uint16_t>(r.read_length())),
         headers_(r),
         status_(r.read_text()),
         content_length_(-1) {}
