@@ -96,15 +96,13 @@ func (fr *FrameReader) ReadLen() (n int) {
 func (fr *FrameReader) ReadString() (s string, isNull bool) {
 	n := fr.ReadLen()
 	if n < 1 {
-		code := (*fr)[0]
-		(*fr) = (*fr)[1:]
-		if code < 2 {
-			s = ""
-			if code < 1 {
-				isNull = true
-			}
-		} else {
-			s = ""
+		code := fr.ReadLen()
+		if code > 1 {
+			// TODO: string table lookup
+		}
+		s = ""
+		if code < 1 {
+			isNull = true
 		}
 	} else {
 		s = string((*fr)[:n])
@@ -128,4 +126,3 @@ func (fr *FrameReader) ProxyBody(w io.Writer) (err error) {
 	}
 	return
 }
-
