@@ -49,9 +49,10 @@ class reader {
   }
 
   int64_t read_int64() {
-    uint64_t val = read_uint64();
-    if (val & 1) return -static_cast<int64_t>(val >> 1);
-    return static_cast<int64_t>(val >> 1);
+    uint64_t ux = read_uint64();
+    int64_t ix = static_cast<int64_t>(ux >> 1);
+    if (ux & 1) ix = ~ix;
+    return ix;
   }
 
   size_t read_length() {

@@ -78,10 +78,10 @@ class writer {
   }
 
   const rap::writer &operator<<(int64_t n) const {
-    if (n >= 0)
-      write_uint64((static_cast<uint64_t>(n) << 1));
-    else
-      write_uint64((static_cast<uint64_t>(-n) << 1) | 1);
+    uint64_t ux = static_cast<uint64_t>(n) << 1;
+    if (n < 0)
+      ux = ~ux;
+    write_uint64(ux);
     return *this;
   }
 
