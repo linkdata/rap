@@ -90,7 +90,7 @@ func (fd *FrameData) WriteLen(x int) error {
 		return ErrLengthNegative
 	case x < 0x80:
 		*fd = append(*fd, byte(x))
-	case x < 0x7fff:
+	case x <= 0x7fff:
 		*fd = append(*fd, byte(x>>8)|0x80, byte(x))
 	default:
 		return ErrLengthOverflow
@@ -100,13 +100,14 @@ func (fd *FrameData) WriteLen(x int) error {
 
 // WriteString writes a string to a FrameData. The string must be
 // less than 0x8000 bytes long.
-func (fd *FrameData) WriteString(s string) {
+func (fd *FrameData) WriteString(s string) (err error) {
 	if len(s) == 0 {
 		*fd = append(*fd, byte(0), byte(1))
 		return
 	}
 	// TODO implement string lookup
-	if fd.WriteLen(len(s)) == nil {
+	err = fd.WriteLen(len(s))
+	if err == nil {
 		*fd = append(*fd, s...)
 	}
 	return

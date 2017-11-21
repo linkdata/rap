@@ -1,6 +1,7 @@
 package rap
 
 import (
+	"bytes"
 	"io"
 	"io/ioutil"
 	"testing"
@@ -77,7 +78,7 @@ func TestFrameDataPayloadAndWriteTo(t *testing.T) {
 	assert.Equal(t, ErrFrameTooBig, err)
 }
 
-func TestFrameDataUint64(t *testing.T) {
+func TestFrameDataWriteUint64(t *testing.T) {
 	// Test encodings
 	for i := uint(0); i < 64; i++ {
 		for j := uint64(0); j < 3; j++ {
@@ -101,7 +102,7 @@ func TestFrameDataUint64(t *testing.T) {
 	assert.Panics(t, func() { fr.ReadUint64() })
 }
 
-func TestFrameDataInt64(t *testing.T) {
+func TestFrameDataWriteInt64(t *testing.T) {
 	// Test encodings
 	for i := uint(0); i < 64; i++ {
 		for j := int64(0); j < 3; j++ {
@@ -111,6 +112,82 @@ func TestFrameDataInt64(t *testing.T) {
 				fd.WriteInt64(n)
 				fr := NewFrameReader(fd)
 				assert.Equal(t, n, fr.ReadInt64())
+			}
+		}
+	}
+}
+
+func TestFrameDataWriteLen(t *testing.T) {
+	for i := uint(0); i < 16; i++ {
+		for j := int(-1); j < 3; j++ {
+			n := (((1 << i) - 1) + j)
+			fd := NewFrameData()
+			err := fd.WriteLen(n)
+			if n < 0 || n > 0x7fff {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				fr := NewFrameReader(fd)
+				assert.Equal(t, n, fr.ReadLen())
+			}
+		}
+	}
+}
+
+func TestFrameDataWriteStringNull(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteStringNull()
+	fr := NewFrameReader(fd)
+	s, isNull := fr.ReadString()
+	assert.True(t, isNull)
+	assert.Equal(t, "", s)
+}
+
+func TestFrameDataWriteStringEmpty(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteString("")
+	fr := NewFrameReader(fd)
+	s, isNull := fr.ReadString()
+	assert.False(t, isNull)
+	assert.Equal(t, "", s)
+}
+
+func TestFrameDataWriteStringAscii(t *testing.T) {
+	const helloWorld = "Hello world"
+	fd := NewFrameData()
+	fd.WriteString(helloWorld)
+	fr := NewFrameReader(fd)
+	s, isNull := fr.ReadString()
+	assert.False(t, isNull)
+	assert.Equal(t, helloWorld, s)
+}
+
+func TestFrameDataWriteStringUnicode(t *testing.T) {
+	const helloWorld = "Hello world Åäö!"
+	fd := NewFrameData()
+	fd.WriteString(helloWorld)
+	fr := NewFrameReader(fd)
+	s, isNull := fr.ReadString()
+	assert.False(t, isNull)
+	assert.Equal(t, helloWorld, s)
+}
+
+func TestFrameDataWriteStringOverflow(t *testing.T) {
+	var buffer bytes.Buffer
+	for j := 0; j < 0x8002; j++ {
+		buffer.WriteString("a")
+		if j > 0x7ffd {
+			expected := buffer.String()
+			fd := NewFrameData()
+			err := fd.WriteString(expected)
+			if len(expected) < 0x8000 {
+				assert.NoError(t, err)
+				fr := NewFrameReader(fd)
+				s, isNull := fr.ReadString()
+				assert.False(t, isNull)
+				assert.Equal(t, expected, s)
+			} else {
+				assert.Error(t, err)
 			}
 		}
 	}
