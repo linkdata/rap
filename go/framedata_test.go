@@ -79,12 +79,12 @@ func TestFrameDataPayloadAndWriteTo(t *testing.T) {
 
 func TestFrameDataUint64(t *testing.T) {
 	for i := uint(0); i < 64; i++ {
-		n := (uint64(1) << i) - 1
 		for j := uint64(0); j < 3; j++ {
+			n := ((uint64(1) << i) - 1) + j
 			fd := NewFrameData()
-			fd.WriteUint64(n + j)
+			fd.WriteUint64(n)
 			fr := NewFrameReader(fd)
-			assert.Equal(t, n+j, fr.ReadUint64())
+			assert.Equal(t, n, fr.ReadUint64())
 		}
 	}
 }
