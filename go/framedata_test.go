@@ -51,6 +51,7 @@ func (t *shortWriter) Write(p []byte) (n int, err error) {
 	t.n -= int64(n)
 	return
 }
+
 func TestFrameDataPayloadAndWriteTo(t *testing.T) {
 	fd := NewFrameData()
 	assert.NotNil(t, fd.Payload())
@@ -74,4 +75,30 @@ func TestFrameDataPayloadAndWriteTo(t *testing.T) {
 
 	_, err = fd.WriteTo(ioutil.Discard)
 	assert.Equal(t, ErrFrameTooBig, err)
+}
+
+func TestFrameDataUint64(t *testing.T) {
+	for i := uint(0); i < 64; i++ {
+		n := (uint64(1) << i) - 1
+		for j := uint64(0); j < 3; j++ {
+			fd := NewFrameData()
+			fd.WriteUint64(n + j)
+			fr := NewFrameReader(fd)
+			assert.Equal(t, n+j, fr.ReadUint64())
+		}
+	}
+}
+
+func TestFrameDataInt64(t *testing.T) {
+	for i := uint(0); i < 64; i++ {
+		for j := int64(0); j < 3; j++ {
+			for k := int64(-1); k < 2; k += 2 {
+				n := (((int64(1) << i) - 1) + j) * k
+				fd := NewFrameData()
+				fd.WriteInt64(n)
+				fr := NewFrameReader(fd)
+				assert.Equal(t, n, fr.ReadInt64())
+			}
+		}
+	}
 }

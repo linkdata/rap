@@ -74,11 +74,11 @@ func (fd *FrameData) WriteUint64(x uint64) {
 
 // WriteInt64 writes an int64 to a FrameData using a portable encoding.
 func (fd *FrameData) WriteInt64(x int64) {
-	if x >= 0 {
-		fd.WriteUint64(uint64(x) << 1)
-	} else {
-		fd.WriteUint64(uint64(-x)<<1 | 1)
+	ux := uint64(x) << 1
+	if x < 0 {
+		ux = ^ux
 	}
+	fd.WriteUint64(ux)
 	return
 }
 

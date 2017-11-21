@@ -78,8 +78,8 @@ func (fr *FrameReader) ReadRecordType() (rt RecordType) {
 func (fr *FrameReader) ReadInt64() (x int64) {
 	ux := fr.ReadUint64()
 	ix := int64(ux >> 1)
-	if (ux & 1) == 1 {
-		return -ix
+	if (ux & 1) != 0 {
+		ix = ^ix
 	}
 	return ix
 }
