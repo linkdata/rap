@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"path"
 	"strconv"
@@ -30,9 +29,9 @@ func NewFrameData() FrameData {
 func (fd FrameData) String() string {
 	var contents string
 	if len(fd) > 32 {
-		contents = hex.EncodeToString(fd[:32]) + "..."
+		contents = hex.EncodeToString(fd[FrameHeaderSize:32]) + "..."
 	} else {
-		hex.EncodeToString(fd)
+		contents = hex.EncodeToString(fd[FrameHeaderSize:])
 	}
 	return fmt.Sprintf("[FrameData %v %v]", fd.Header(), contents)
 }
@@ -173,11 +172,11 @@ var ErrFrameTooBig = errors.New("rap: frame too big")
 
 // WriteTo implements io.WriterTo for FrameData.
 func (fd FrameData) WriteTo(w io.Writer) (int64, error) {
+	if len(fd) < FrameHeaderSize {
+		panic("FrameData.WriteTo(): frame has incomplete header")
+	}
 	if fd.Header().HasPayload() {
 		payloadLength := int32(len(fd)) - FrameHeaderSize
-		if payloadLength < 0 {
-			log.Fatal("FrameData.WriteTo(): negative payload length")
-		}
 		if payloadLength > FrameMaxPayloadSize {
 			return 0, ErrFrameTooBig
 		}
