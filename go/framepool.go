@@ -1,10 +1,5 @@
 package rap
 
-// NewFrameData allocates a new FrameData.
-func newFrameData() FrameData {
-	return FrameData(make([]byte, FrameHeaderSize, FrameMaxSize))
-}
-
 // Provides a buffer of allocated but unused FrameData.
 var frameDataPool chan FrameData
 
@@ -22,7 +17,7 @@ func FrameDataAlloc() FrameData {
 	case fd := <-frameDataPool:
 		return fd[:FrameHeaderSize]
 	default:
-		return newFrameData()
+		return NewFrameData()
 	}
 }
 

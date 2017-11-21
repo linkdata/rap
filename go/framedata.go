@@ -22,6 +22,11 @@ var (
 // FrameData is a byte array used as a network data frame.
 type FrameData []byte
 
+// NewFrameData allocates a new FrameData.
+func NewFrameData() FrameData {
+	return FrameData(make([]byte, FrameHeaderSize, FrameMaxSize))
+}
+
 func (fd FrameData) String() string {
 	var contents string
 	if len(fd) > 32 {
