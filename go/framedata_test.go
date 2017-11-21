@@ -78,6 +78,7 @@ func TestFrameDataPayloadAndWriteTo(t *testing.T) {
 }
 
 func TestFrameDataUint64(t *testing.T) {
+	// Test encodings
 	for i := uint(0); i < 64; i++ {
 		for j := uint64(0); j < 3; j++ {
 			n := ((uint64(1) << i) - 1) + j
@@ -87,18 +88,21 @@ func TestFrameDataUint64(t *testing.T) {
 			assert.Equal(t, n, fr.ReadUint64())
 		}
 	}
+	// Test unterminated
 	fd := NewFrameData()
 	for i := 0; i < 11; i++ {
 		fd.WriteByte(0xff)
 	}
 	fr := NewFrameReader(fd)
 	assert.Panics(t, func() { fr.ReadUint64() })
+	// Test overflow
 	fd.WriteByte(0x00)
 	fr = NewFrameReader(fd)
 	assert.Panics(t, func() { fr.ReadUint64() })
 }
 
 func TestFrameDataInt64(t *testing.T) {
+	// Test encodings
 	for i := uint(0); i < 64; i++ {
 		for j := int64(0); j < 3; j++ {
 			for k := int64(-1); k < 2; k += 2 {
