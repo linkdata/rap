@@ -31,14 +31,7 @@ var (
 	MaxExchangeID = ExchangeID(ProtocolMaxExchangeID) // usually ProtocolMaxExchangeID
 	// SendWindowSize is the maximum number of frames allowed in flight.
 	SendWindowSize = MaxSendWindowSize // usually MaxSendWindowSize
-	// raceEnabled will be true if -race is enabled (see race.go)
-	raceEnabled bool
 )
-
-// RaceEnabled will return true if -race is enabled.
-func RaceEnabled() bool {
-	return raceEnabled
-}
 
 // sanity check the configuration
 func init() {
