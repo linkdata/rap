@@ -238,9 +238,7 @@ func modeGateway(addr string) {
 		addr += defaultDispatchPort
 	}
 
-	gw := &rap.Gateway{
-		Client: rap.NewClient(addr),
-	}
+	gw := rap.NewGateway(addr)
 
 	go func() {
 		s := &http.Server{

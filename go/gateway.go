@@ -14,6 +14,16 @@ type Gateway struct {
 	Client *Client
 }
 
+// NewGateway returns a new RAP Gateway. The Gateway implements the
+// http.Handler interface, and will forward HTTP requests to the
+// upstream RAP server at the address given, relaying the responses
+// back to the HTTP clients.
+func NewGateway(addr string) *Gateway {
+	return &Gateway{
+		Client: NewClient(addr),
+	}
+}
+
 func proxyFrameData(w http.ResponseWriter, fd FrameData) {
 	/*
 		fr := NewFrameReader(fd)
