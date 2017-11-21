@@ -8,7 +8,7 @@
 
 	----------------------------------------------------------
 	Client-1 Client-2 Client-3 Client-4 Client-5 Client-6
-	  (( HTTP, HTTP(S), SPDY etc over public networks ))
+	  (( HTTP, HTTP(S), HTTP/2 etc over public networks ))
 			Gateway-1     Gateway-2     Gateway-3
        (( Aggregation protocol over private networks ))
 				         Dispatcher
@@ -41,7 +41,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/SlyMarbo/spdy"
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
 	"github.com/linkdata/rap/go"
@@ -254,7 +253,7 @@ func modeGateway(addr string) {
 
 	go func() {
 		log.Print("starting HTTPS listener on ", *flagHTTPS)
-		log.Fatal(spdy.ListenAndServeTLS(*flagHTTPS, "cert.pem", "key.pem", gw))
+		log.Fatal(http.ListenAndServeTLS(*flagHTTPS, "cert.pem", "key.pem", gw))
 	}()
 }
 
