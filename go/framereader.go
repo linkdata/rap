@@ -34,8 +34,7 @@ func (fr *FrameReader) ReadUint64() (x uint64) {
 	for i, b := range *fr {
 		if b < 0x80 {
 			if i > 9 || i == 9 && b > 1 {
-				// overflow
-				return 0
+				panic("ReadUint64(): uint64 overflow")
 			}
 			*fr = (*fr)[i+1:]
 			return x | uint64(b)<<s
@@ -43,7 +42,8 @@ func (fr *FrameReader) ReadUint64() (x uint64) {
 		x |= uint64(b&0x7f) << s
 		s += 7
 	}
-	return 0 //, 0
+	// Did not end with a byte < 0x80
+	panic("ReadUint64(): unterminated uint64")
 }
 
 // ReadUint32 reads an uint32

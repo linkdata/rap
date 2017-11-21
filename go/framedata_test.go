@@ -87,6 +87,15 @@ func TestFrameDataUint64(t *testing.T) {
 			assert.Equal(t, n, fr.ReadUint64())
 		}
 	}
+	fd := NewFrameData()
+	for i := 0; i < 11; i++ {
+		fd.WriteByte(0xff)
+	}
+	fr := NewFrameReader(fd)
+	assert.Panics(t, func() { fr.ReadUint64() })
+	fd.WriteByte(0x00)
+	fr = NewFrameReader(fd)
+	assert.Panics(t, func() { fr.ReadUint64() })
 }
 
 func TestFrameDataInt64(t *testing.T) {
