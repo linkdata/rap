@@ -138,6 +138,9 @@ func (fh FrameHeader) ExchangeID() ExchangeID {
 // SetExchangeID sets the exchange ID.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) SetExchangeID(exchangeID ExchangeID) {
+	if exchangeID > MaxExchangeID {
+		panic("SetExchangeID(): exchangeID > MaxExchangeID")
+	}
 	fh[2] = (fh[2] & FrameFlagMask) | byte(exchangeID>>8)
 	fh[3] = byte(exchangeID)
 }
