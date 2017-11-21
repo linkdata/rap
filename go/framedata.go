@@ -113,20 +113,6 @@ func (fd *FrameData) WriteString(s string) (err error) {
 	return
 }
 
-// WriteByteArrayString writes a byte array that is considered a string
-// to a FrameData. The byte array must be less than 0x8000 bytes long.
-func (fd *FrameData) WriteByteArrayString(ba []byte) {
-	if len(ba) == 0 {
-		*fd = append(*fd, byte(0), byte(1))
-		return
-	}
-	// TODO implement string lookup
-	if fd.WriteLen(len(ba)) == nil {
-		*fd = append(*fd, ba...)
-	}
-	return
-}
-
 // WriteStringNull writes a NULL string to a FrameData. A NULL string
 // is used as a marker is the protocol and is distinct from an empty
 // string.
