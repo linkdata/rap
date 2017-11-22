@@ -26,6 +26,11 @@ func NewFrameData() FrameData {
 	return FrameData(make([]byte, FrameHeaderSize, FrameMaxSize))
 }
 
+// Clear removes everything except the header in a frame
+func (fd *FrameData) Clear() {
+	*fd = (*fd)[:FrameHeaderSize]
+}
+
 func (fd FrameData) String() string {
 	var contents string
 	if len(fd) > 32 {

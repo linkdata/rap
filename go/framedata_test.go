@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
@@ -200,6 +202,29 @@ func TestFrameDataWriteRecordTypeAndByteCount(t *testing.T) {
 	assert.Equal(t, uint64(FrameHeaderSize+1), fd.ByteCount())
 }
 
+func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData) {
+	r, w := io.Pipe()
+	defer r.Close()
+	var n1, n2 int64
+	var err1, err2 error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(pn1 *int64) {
+		defer w.Close()
+		*pn1, err1 = fd1.WriteTo(w)
+		assert.NoError(t, err1)
+		assert.NotZero(t, n1)
+		wg.Done()
+	}(&n1)
+	fd2 = NewFrameData()
+	n2, err2 = fd2.ReadFrom(r)
+	wg.Wait()
+	assert.NoError(t, err2)
+	assert.Equal(t, n1, n2)
+	assert.Equal(t, fd1.Payload(), fd2.Payload())
+	return
+}
+
 func TestFrameDataReadFrom(t *testing.T) {
 	fd1 := NewFrameData()
 	fd1.WriteHeader(0x1234)
@@ -212,22 +237,37 @@ func TestFrameDataReadFrom(t *testing.T) {
 	fd1.WriteString("")
 	fd1.WriteString("Hello world")
 	fd1.WriteUint64(0x123456789)
-	r, w := io.Pipe()
-	var n1, n2 int64
-	var err1, err2 error
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func(pn1 *int64) {
-		defer w.Close()
-		*pn1, err1 = fd1.WriteTo(w)
-		assert.NoError(t, err1)
-		assert.NotZero(t, n1)
-		wg.Done()
-	}(&n1)
-	fd2 := NewFrameData()
-	n2, err2 = fd2.ReadFrom(r)
-	wg.Wait()
-	assert.NoError(t, err2)
-	assert.Equal(t, n1, n2)
-	assert.Equal(t, fd1.Payload(), fd2.Payload())
+	pipeFrame(t, fd1)
+}
+
+func pipeRequest(t *testing.T, req *http.Request) (req2 *http.Request) {
+	var err error
+	fd1 := NewFrameData()
+	fd1.WriteHeader(0x1234)
+	fd1.WriteRequest(req)
+	fr := NewFrameReader(pipeFrame(t, fd1))
+	assert.Equal(t, RecordTypeHTTPRequest, fr.ReadRecordType())
+	req2, err = fr.ReadRequest()
+	assert.NoError(t, err)
+	assert.NotNil(t, req2)
+	assert.Equal(t, req.Method, req2.Method)
+	assert.Equal(t, req.URL.Path, req2.URL.Path)
+	assert.Equal(t, req.URL.Query(), req2.URL.Query())
+	return
+}
+
+func TestFrameDataWriteRequest(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Host = ""
+	req.ContentLength = -1
+	req.Header.Add("Content-Length", "0")
+	req.Header.Add("Host", "")
+	pipeRequest(t, req)
+	req = httptest.NewRequest("GET", "/foo/?bar=quux", bytes.NewBuffer([]byte("Hello world")))
+	req.Header.Add("Foo", "Bar")
+	req.Header.Add("Content-Length", "11")
+	pipeRequest(t, req)
+	req = httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", nil)
+	req.ContentLength = -1
+	pipeRequest(t, req)
 }

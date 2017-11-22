@@ -153,20 +153,24 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 		Close:      false,
 	}
 
-	for {
-		queryKey, isNull := fr.ReadString()
-		if isNull {
-			break
-		}
-		// log.Print("FrameReader.ReadRequest() queryKey ", queryKey)
+	if queryKey, isNull := fr.ReadString(); !isNull {
+		queryValues := url.Values{}
 		for {
-			queryValue, isNull := fr.ReadString()
+			// log.Print("FrameReader.ReadRequest() queryKey ", queryKey)
+			for {
+				queryValue, isNull := fr.ReadString()
+				if isNull {
+					break
+				}
+				// log.Print("FrameReader.ReadRequest() queryKey '", queryKey, "' queryValue '", queryValue, "'")
+				queryValues.Add(queryKey, queryValue)
+			}
+			queryKey, isNull = fr.ReadString()
 			if isNull {
 				break
 			}
-			// log.Print("FrameReader.ReadRequest() queryKey '", queryKey, "' queryValue '", queryValue, "'")
-			u.Query().Add(queryKey, queryValue)
 		}
+		u.RawQuery = queryValues.Encode()
 	}
 
 	for {
