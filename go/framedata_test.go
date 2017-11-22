@@ -2,6 +2,7 @@ package rap
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -202,7 +203,7 @@ func TestFrameDataWriteRecordTypeAndByteCount(t *testing.T) {
 	assert.Equal(t, uint64(FrameHeaderSize+1), fd.ByteCount())
 }
 
-func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData) {
+func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData, err error) {
 	r, w := io.Pipe()
 	defer r.Close()
 	var n1, n2 int64
@@ -212,16 +213,22 @@ func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData) {
 	go func(pn1 *int64) {
 		defer w.Close()
 		*pn1, err1 = fd1.WriteTo(w)
-		assert.NoError(t, err1)
-		assert.NotZero(t, n1)
+		if err1 == nil {
+			assert.NotZero(t, n1)
+		} else {
+			err = err1
+		}
 		wg.Done()
 	}(&n1)
 	fd2 = NewFrameData()
 	n2, err2 = fd2.ReadFrom(r)
 	wg.Wait()
-	assert.NoError(t, err2)
-	assert.Equal(t, n1, n2)
-	assert.Equal(t, fd1.Payload(), fd2.Payload())
+	if err2 == nil {
+		assert.Equal(t, n1, n2)
+		assert.Equal(t, fd1.Payload(), fd2.Payload())
+	} else if err == nil {
+		err = err2
+	}
 	return
 }
 
@@ -240,34 +247,76 @@ func TestFrameDataReadFrom(t *testing.T) {
 	pipeFrame(t, fd1)
 }
 
-func pipeRequest(t *testing.T, req *http.Request) (req2 *http.Request) {
-	var err error
+func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.Request, err error) {
+	var fd2 FrameData
 	fd1 := NewFrameData()
 	fd1.WriteHeader(0x1234)
 	fd1.WriteRequest(req)
-	fr := NewFrameReader(pipeFrame(t, fd1))
+	fd2, err = pipeFrame(t, fd1)
+	if err != nil {
+		return
+	}
+	fr := NewFrameReader(fd2)
 	assert.Equal(t, RecordTypeHTTPRequest, fr.ReadRecordType())
 	req2, err = fr.ReadRequest()
-	assert.NoError(t, err)
-	assert.NotNil(t, req2)
-	assert.Equal(t, req.Method, req2.Method)
-	assert.Equal(t, req.URL.Path, req2.URL.Path)
-	assert.Equal(t, req.URL.Query(), req2.URL.Query())
+	if err == nil {
+		assert.NotNil(t, req2)
+		if checkEqual {
+			checkRequestsAreEqual(t, req, req2)
+		}
+	}
 	return
 }
 
+func checkRequestsAreEqual(t *testing.T, req, req2 *http.Request) {
+	assert.Equal(t, req.Method, req2.Method)
+	assert.Equal(t, req.Host, req2.Host)
+	assert.Equal(t, req.ContentLength, req2.ContentLength)
+	assert.Equal(t, req.Header, req2.Header)
+	assert.Equal(t, req.URL.Host, req2.URL.Host)
+	assert.Equal(t, req.URL.Path, req2.URL.Path)
+	assert.Equal(t, req.URL.Query(), req2.URL.Query())
+}
+
 func TestFrameDataWriteRequest(t *testing.T) {
+	// If Host header is provided but req.Host is not set
+	// the header is used to set it, same with ContentLength
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Host = ""
 	req.ContentLength = -1
-	req.Header.Add("Content-Length", "0")
-	req.Header.Add("Host", "")
-	pipeRequest(t, req)
-	req = httptest.NewRequest("GET", "/foo/?bar=quux", bytes.NewBuffer([]byte("Hello world")))
+	req.Header.Add("Content-Length", "123")
+	req.Header.Add("Host", "Somehost")
+	req2, err := pipeRequest(t, req, false)
+	assert.Equal(t, "Somehost", req2.Host)
+	assert.Equal(t, int64(123), req2.ContentLength)
+	req.Host = req2.Host
+	req.ContentLength = req2.ContentLength
+	checkRequestsAreEqual(t, req, req2)
+
+	req = httptest.NewRequest("GET", "/foo/?bar=quux", bytes.NewBuffer([]byte("")))
+	req.Host = ""
 	req.Header.Add("Foo", "Bar")
-	req.Header.Add("Content-Length", "11")
-	pipeRequest(t, req)
+	req.Header.Add("Content-Length", "0")
+	pipeRequest(t, req, true)
+
 	req = httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", nil)
 	req.ContentLength = -1
-	pipeRequest(t, req)
+	req.AddCookie(&http.Cookie{Name: "FooCookie", Value: "FooCookieValue"})
+	req.AddCookie(&http.Cookie{Name: "BarCookie", Value: "BarCookieValue"})
+	req2, err = pipeRequest(t, req, true)
+	cookie, _ := req2.Cookie("FooCookie")
+	assert.Equal(t, "FooCookieValue", cookie.Value)
+	cookie, _ = req2.Cookie("BarCookie")
+	assert.Equal(t, "BarCookieValue", cookie.Value)
+
+	req = httptest.NewRequest("NotReallyAMethod", "/overflow", nil)
+	req.ContentLength = -1
+	for i := 0; i < 8000; i++ {
+		req.Header.Add(fmt.Sprint("Header", i), fmt.Sprint("Value", i))
+	}
+	_, err = pipeRequest(t, req, true)
+	assert.Equal(t, ErrFrameTooBig, err)
+}
+
+func TestFrameDataWriteResponse(t *testing.T) {
 }
