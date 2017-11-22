@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -191,4 +192,42 @@ func TestFrameDataWriteStringOverflow(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestFrameDataWriteRecordTypeAndByteCount(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteRecordType(RecordTypeHTTPRequest)
+	assert.Equal(t, uint64(FrameHeaderSize+1), fd.ByteCount())
+}
+
+func TestFrameDataReadFrom(t *testing.T) {
+	fd1 := NewFrameData()
+	fd1.WriteHeader(0x1234)
+	fd1.Header().SetBody()
+	fd1.WriteByte(0)
+	fd1.WriteInt64(-0x123456789)
+	fd1.WriteLen(0x12)
+	fd1.WriteRecordType(RecordTypeUserFirst)
+	fd1.WriteStringNull()
+	fd1.WriteString("")
+	fd1.WriteString("Hello world")
+	fd1.WriteUint64(0x123456789)
+	r, w := io.Pipe()
+	var n1, n2 int64
+	var err1, err2 error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(pn1 *int64) {
+		defer w.Close()
+		*pn1, err1 = fd1.WriteTo(w)
+		assert.NoError(t, err1)
+		assert.NotZero(t, n1)
+		wg.Done()
+	}(&n1)
+	fd2 := NewFrameData()
+	n2, err2 = fd2.ReadFrom(r)
+	wg.Wait()
+	assert.NoError(t, err2)
+	assert.Equal(t, n1, n2)
+	assert.Equal(t, fd1.Payload(), fd2.Payload())
 }
