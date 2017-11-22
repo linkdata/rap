@@ -220,14 +220,12 @@ func (fd *FrameData) WriteRequest(r *http.Request) error {
 					contentLength = n
 				}
 			}
-			continue
 		}
 		if !haveHostHeader && k == "Host" {
 			haveHostHeader = true
 			if host == "" {
 				host = vv[0]
 			}
-			continue
 		}
 		fd.WriteString(k)
 		for _, v := range vv {

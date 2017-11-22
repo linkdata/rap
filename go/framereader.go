@@ -197,8 +197,7 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 		}
 	}
 	if host, isNull := fr.ReadString(); !isNull {
-		u.Host = host
-		req.Header["Host"] = []string{host}
+		req.Host = host
 	}
 	req.ContentLength = fr.ReadInt64()
 	if req.ContentLength == 0 {
