@@ -2,6 +2,7 @@ package rap
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -252,6 +253,17 @@ func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.R
 	fd1 := NewFrameData()
 	fd1.WriteHeader(0x1234)
 	fd1.WriteRequest(req)
+	if req.Body != nil {
+		var bodyCopy bytes.Buffer
+		bodyBytes, err := ioutil.ReadAll(io.TeeReader(req.Body, &bodyCopy))
+		if err != nil {
+			return nil, err
+		}
+		println("write body ", hex.EncodeToString(bodyBytes))
+		fd1.Header().SetBody()
+		fd1.WriteBytes(bodyBytes)
+		req.Body = ioutil.NopCloser(&bodyCopy)
+	}
 	fd2, err = pipeFrame(t, fd1)
 	if err != nil {
 		return
@@ -261,6 +273,9 @@ func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.R
 	req2, err = fr.ReadRequest()
 	if err == nil {
 		assert.NotNil(t, req2)
+		if fd2.Header().HasBody() {
+			req2.Body = ioutil.NopCloser(bytes.NewBuffer(fr))
+		}
 		if checkEqual {
 			checkRequestsAreEqual(t, req, req2)
 		}
@@ -273,6 +288,16 @@ func checkRequestsAreEqual(t *testing.T, req, req2 *http.Request) {
 	assert.Equal(t, req.Host, req2.Host)
 	assert.Equal(t, req.ContentLength, req2.ContentLength)
 	assert.Equal(t, req.Header, req2.Header)
+	if body1, err1 := ioutil.ReadAll(req.Body); err1 == nil {
+		if body2, err2 := ioutil.ReadAll(req2.Body); err2 == nil {
+			assert.Equal(t, body1, body2)
+			println(len(body1), len(body2), hex.EncodeToString(body1))
+		} else {
+			assert.NoError(t, err2)
+		}
+	} else {
+		assert.NoError(t, err1)
+	}
 	assert.Equal(t, req.URL.Host, req2.URL.Host)
 	assert.Equal(t, req.URL.Path, req2.URL.Path)
 	assert.Equal(t, req.URL.Query(), req2.URL.Query())
@@ -299,7 +324,7 @@ func TestFrameDataWriteRequest(t *testing.T) {
 	req.Header.Add("Content-Length", "0")
 	pipeRequest(t, req, true)
 
-	req = httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", nil)
+	req = httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", ioutil.NopCloser(bytes.NewBufferString("Hello world body!")))
 	req.ContentLength = -1
 	req.AddCookie(&http.Cookie{Name: "FooCookie", Value: "FooCookieValue"})
 	req.AddCookie(&http.Cookie{Name: "BarCookie", Value: "BarCookieValue"})
