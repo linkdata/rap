@@ -345,4 +345,7 @@ func TestFrameDataWriteRequest(t *testing.T) {
 }
 
 func TestFrameDataWriteResponse(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0x1234)
+	fd.WriteResponse(200, 0, nil)
 }
