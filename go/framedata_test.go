@@ -2,7 +2,6 @@ package rap
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -259,7 +258,6 @@ func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.R
 		if err != nil {
 			return nil, err
 		}
-		println("write body ", hex.EncodeToString(bodyBytes))
 		fd1.Header().SetBody()
 		fd1.WriteBytes(bodyBytes)
 		req.Body = ioutil.NopCloser(&bodyCopy)
@@ -291,7 +289,6 @@ func checkRequestsAreEqual(t *testing.T, req, req2 *http.Request) {
 	if body1, err1 := ioutil.ReadAll(req.Body); err1 == nil {
 		if body2, err2 := ioutil.ReadAll(req2.Body); err2 == nil {
 			assert.Equal(t, body1, body2)
-			println(len(body1), len(body2), hex.EncodeToString(body1))
 		} else {
 			assert.NoError(t, err2)
 		}
