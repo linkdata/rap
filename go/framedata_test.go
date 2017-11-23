@@ -272,7 +272,11 @@ func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.R
 	if err == nil {
 		assert.NotNil(t, req2)
 		if fd2.Header().HasBody() {
-			req2.Body = ioutil.NopCloser(bytes.NewBuffer(fr))
+			var bodyBuffer bytes.Buffer
+			err = fr.ProxyBody(&bodyBuffer)
+			if err == nil {
+				req2.Body = ioutil.NopCloser(&bodyBuffer)
+			}
 		}
 		if checkEqual {
 			checkRequestsAreEqual(t, req, req2)
