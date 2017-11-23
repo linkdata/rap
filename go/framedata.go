@@ -132,6 +132,12 @@ func (fd *FrameData) WriteByte(b byte) error {
 	return nil
 }
 
+// WriteBytes appends a slice of bytes.
+func (fd *FrameData) WriteBytes(bs []byte) error {
+	*fd = append(*fd, bs...)
+	return nil
+}
+
 // WriteRecordType writes a frame record type constant.
 func (fd *FrameData) WriteRecordType(rt RecordType) {
 	*fd = append(*fd, byte(rt))
