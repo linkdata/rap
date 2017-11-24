@@ -15,7 +15,8 @@ func init() {
 func FrameDataAlloc() FrameData {
 	select {
 	case fd := <-frameDataPool:
-		return fd[:FrameHeaderSize]
+		fd.Clear()
+		return fd
 	default:
 		return NewFrameData()
 	}
