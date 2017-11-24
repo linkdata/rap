@@ -348,4 +348,24 @@ func TestFrameDataWriteResponse(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0x1234)
 	fd.WriteResponse(200, 0, nil)
+
+	h := http.Header{}
+
+	fd.Clear()
+	fd.WriteHeader(0x0123)
+	h.Add("Status", "Meh")
+	h.Add("Foo", "bar")
+	h.Add("Foo", "quux")
+	err := fd.WriteResponse(300, 0, h)
+	assert.NoError(t, err)
+
+	fd.Clear()
+	fd.WriteHeader(0x0012)
+	h = http.Header{}
+	const valueTemplate = "foobarquux-%d"
+	for i := 0; i < FrameMaxSize/len(valueTemplate); i++ {
+		h.Add("Foo", fmt.Sprintf(valueTemplate, i))
+	}
+	err = fd.WriteResponse(300, 0, h)
+	assert.Error(t, err)
 }
