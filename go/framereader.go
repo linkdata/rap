@@ -19,7 +19,14 @@ func NewFrameReader(fd FrameData) FrameReader {
 }
 
 func (fr FrameReader) String() string {
-	return fmt.Sprintf("[FrameReader %v %v]", len(fr), hex.EncodeToString(fr))
+	switch {
+	case len(fr) < 1:
+		return "[FrameReader 0]"
+	case len(fr) < 32:
+		return fmt.Sprintf("[FrameReader %v %v]", len(fr), hex.EncodeToString(fr))
+	default:
+		return fmt.Sprintf("[FrameReader %v %v...]", len(fr), hex.EncodeToString(fr[:32]))
+	}
 }
 
 func (fr *FrameReader) Read(p []byte) (n int, err error) {
