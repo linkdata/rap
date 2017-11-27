@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -119,7 +118,6 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 
 	u, err := url.Parse(urlString)
 	if err != nil {
-		log.Print("FrameReader.ReadRequest(): ", err.Error())
 		return
 	}
 	u.Scheme = "http"
