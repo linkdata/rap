@@ -35,6 +35,18 @@ class kvv {
 
   size_t size() const { return data_.size(); }
   text at(size_t n) const { return data_.at(n); }
+  size_t find(const char* key) const {
+    size_t i = 0;
+    while (i < data_.size()) {
+      if (data_.at(i).is_null())
+        break;
+      if (data_.at(i) == key)
+        return i + 1;
+      while (!data_.at(i).is_null())
+        ++i;
+    }
+    return 0;
+  }
 
  protected:
   std::vector<text> data_;

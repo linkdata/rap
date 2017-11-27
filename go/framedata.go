@@ -262,12 +262,7 @@ func (fd *FrameData) WriteResponse(code int, contentLength int64, header http.He
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPResponse)
 	fd.WriteLen(code)
-	statusText := ""
 	for k, vv := range header {
-		if k == "Status" {
-			statusText = vv[0]
-			continue
-		}
 		fd.WriteString(k)
 		for _, v := range vv {
 			fd.WriteString(v)
@@ -275,11 +270,6 @@ func (fd *FrameData) WriteResponse(code int, contentLength int64, header http.He
 		fd.WriteStringNull()
 	}
 	fd.WriteStringNull()
-	if statusText == "" {
-		fd.WriteStringNull()
-	} else {
-		fd.WriteString(statusText)
-	}
 	fd.WriteInt64(contentLength)
 	if len(*fd) > FrameMaxSize {
 		return io.ErrShortBuffer

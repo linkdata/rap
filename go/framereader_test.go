@@ -1,6 +1,8 @@
 package rap
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,4 +37,46 @@ func Test_FrameReader_ReadRequest_IllegalURL(t *testing.T) {
 	req, err := fr.ReadRequest()
 	assert.Nil(t, req)
 	assert.Error(t, err)
+}
+
+func Test_FrameReader_ProxyResponse(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0x1234)
+	fd.WriteResponse(200, 0, nil)
+	fr := NewFrameReader(fd)
+	rr := &httptest.ResponseRecorder{}
+	assert.Equal(t, RecordTypeHTTPResponse, fr.ReadRecordType())
+	fr.ProxyResponse(rr)
+
+	fd.Clear()
+	fd.WriteHeader(0x0123)
+	h := http.Header{}
+	h.Add("Status", "Meh")
+	h.Add("Foo", "bar")
+	h.Add("Foo", "quux")
+	err := fd.WriteResponse(300, 234, h)
+	assert.NoError(t, err)
+	rr = &httptest.ResponseRecorder{}
+	fr = NewFrameReader(fd)
+	assert.Equal(t, RecordTypeHTTPResponse, fr.ReadRecordType())
+	fr.ProxyResponse(rr)
+	assert.Equal(t, 300, rr.Code)
+	assert.Equal(t, "234", rr.Header().Get("Content-Length"))
+
+	fd.Clear()
+	fd.WriteHeader(0x0123)
+	fd.Header().SetHead()
+	fd.WriteRecordType(RecordTypeHTTPResponse)
+	fd.WriteLen(200)
+	fd.WriteString("Content-Length")
+	fd.WriteString("123")
+	fd.WriteStringNull()
+	fd.WriteStringNull()
+	fd.WriteInt64(-1)
+	rr = &httptest.ResponseRecorder{}
+	fr = NewFrameReader(fd)
+	assert.Equal(t, RecordTypeHTTPResponse, fr.ReadRecordType())
+	fr.ProxyResponse(rr)
+	assert.Equal(t, 200, rr.Code)
+	assert.Equal(t, "123", rr.Header().Get("Content-Length"))
 }

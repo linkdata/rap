@@ -159,15 +159,6 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 		if isNull {
 			break
 		}
-		/*
-			// RAP request records headers may not contain Host or Content-Length
-			if headerKey == "Host" {
-				panic("FrameReader.ReadRequest(): Host in headers")
-			}
-			if headerKey == "Content-Length" {
-				panic("FrameReader.ReadRequest(): Content-Length in headers")
-			}
-		*/
 		// log.Print("FrameReader.ReadRequest() headerKey ", headerKey)
 		for {
 			headerValue, isNull := fr.ReadString()
@@ -194,7 +185,6 @@ func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
 	header := w.Header()
 	statusCode := fr.ReadLen()
 	hasCL := false
-	hasStatus := false
 
 	for {
 		headerKey, isNull := fr.ReadString()
@@ -204,9 +194,6 @@ func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
 		if !hasCL && headerKey == "Content-Length" {
 			hasCL = true
 		}
-		if !hasStatus && headerKey == "Status" {
-			hasStatus = true
-		}
 		for {
 			headerValue, isNull := fr.ReadString()
 			if isNull {
@@ -214,10 +201,6 @@ func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
 			}
 			header.Add(headerKey, headerValue)
 		}
-	}
-
-	if statusText, isNull := fr.ReadString(); !isNull && !hasStatus {
-		header["Status"] = []string{statusText}
 	}
 
 	if contentLength := fr.ReadInt64(); contentLength >= 0 && !hasCL {
