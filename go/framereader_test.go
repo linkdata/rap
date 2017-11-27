@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFrameReaderString(t *testing.T) {
+func Test_FrameReader_String(t *testing.T) {
 	fd := NewFrameData()
 	fr := NewFrameReader(fd)
 	assert.Equal(t, "[FrameReader 0]", fr.String())
@@ -18,9 +18,8 @@ func TestFrameReaderString(t *testing.T) {
 	assert.Equal(t, "[FrameReader 34 012048656c6c6f20776f726c6420776974682061206c6f6e6765722073747269...]", fr.String())
 }
 
-func TestFrameReaderReadRequest(t *testing.T) {
+func Test_FrameReader_ReadRequest_IllegalURL(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteHeader(0x0123)
 	fd.WriteStringNull()  // method
 	fd.WriteString(":a:") // illegal url
 	fr := NewFrameReader(fd)
