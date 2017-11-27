@@ -60,13 +60,6 @@ func (fr *FrameReader) ReadUint32() (x uint32) {
 	return x
 }
 
-// ReadUint16 reads an uint16
-func (fr *FrameReader) ReadUint16() (x uint16) {
-	x = uint16((*fr)[0])<<8 | uint16((*fr)[1])
-	(*fr) = (*fr)[2:]
-	return x
-}
-
 // ReadByte reads an byte
 func (fr *FrameReader) ReadByte() (x byte, err error) {
 	x = (*fr)[0]
@@ -213,7 +206,7 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 // ProxyResponse reads a RAP response record and writes it to a http.ResponseWriter
 func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
 	header := w.Header()
-	statusCode := int(fr.ReadUint16())
+	statusCode := fr.ReadLen()
 	hasCL := false
 	hasStatus := false
 
