@@ -16,7 +16,7 @@ func getHeader(t *testing.T) (h FrameHeader) {
 	return
 }
 
-func TestFrameDataHeaderIsBlank(t *testing.T) {
+func Test_FrameHeader_IsBlank(t *testing.T) {
 	h := getHeader(t)
 	assert.Equal(t, ExchangeID(0), h.ExchangeID())
 	assert.False(t, h.HasBody())
@@ -26,7 +26,7 @@ func TestFrameDataHeaderIsBlank(t *testing.T) {
 	assert.False(t, h.IsConnControl())
 }
 
-func TestFrameDataHeaderExchangeIDRange(t *testing.T) {
+func Test_FrameHeader_ExchangeIDRange(t *testing.T) {
 	h := getHeader(t)
 	assert.Equal(t, ExchangeID(0), h.ExchangeID())
 	h.SetExchangeID(ExchangeID(1))
