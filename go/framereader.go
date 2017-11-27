@@ -124,17 +124,13 @@ func (fr *FrameReader) ReadString() (s string, isNull bool) {
 
 var zeroHeaderValue = []string{"0"}
 
-// ProxyBody sends the body data from the reader to a io.Writer
+// ProxyBody sends the remaining data from the FrameReader to a io.Writer
 func (fr *FrameReader) ProxyBody(w io.Writer) (err error) {
 	// log.Printf("FrameReader.ProxyBody() %v", hex.EncodeToString(*fr))
-	bodySize := len(*fr)
 	// log.Printf("FrameReader.ProxyBody() bodySize %v is %v", bodySize, hex.EncodeToString((*fr)[:bodySize]))
-	n, err := w.Write((*fr)[:bodySize])
+	n, err := w.Write((*fr))
 	(*fr) = (*fr)[n:]
 	// log.Printf("FrameReader.ProxyBody() remainder %v", hex.EncodeToString(*fr))
-	if n != bodySize {
-		err = io.ErrUnexpectedEOF
-	}
 	return
 }
 
