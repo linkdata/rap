@@ -35,3 +35,18 @@ func Test_FrameHeader_ExchangeIDRange(t *testing.T) {
 	assert.Equal(t, MaxExchangeID, h.ExchangeID())
 	assert.Panics(t, func() { h.SetExchangeID(MaxExchangeID + 1) })
 }
+
+func Test_FrameHeader_String(t *testing.T) {
+	h := getHeader(t)
+	assert.Equal(t, "[FrameHeader [ExchangeID 0000] ... 0 (4)]", h.String())
+	h.SetHead()
+	h.SetBody()
+	h.SetFinal()
+	h.SetSizeValue(12)
+	h.SetExchangeID(444)
+	assert.Equal(t, "[FrameHeader [ExchangeID 01bc] FHB 12 (4)]", h.String())
+	assert.Equal(t, 12, h.PayloadSize())
+	h.SetConnControl(ConnControlPing)
+	assert.Equal(t, "[FrameHeader [ExchangeID 1fff] Ping 12 (4)]", h.String())
+	assert.Equal(t, 0, h.PayloadSize())
+}
