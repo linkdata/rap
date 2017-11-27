@@ -53,13 +53,6 @@ func (fr *FrameReader) ReadUint64() (x uint64) {
 	panic("ReadUint64(): unterminated uint64")
 }
 
-// ReadUint32 reads an uint32
-func (fr *FrameReader) ReadUint32() (x uint32) {
-	x = uint32((*fr)[0])<<24 | uint32((*fr)[1])<<16 | uint32((*fr)[2])<<8 | uint32((*fr)[3])
-	(*fr) = (*fr)[4:]
-	return x
-}
-
 // ReadByte reads an byte
 func (fr *FrameReader) ReadByte() (x byte, err error) {
 	x = (*fr)[0]
