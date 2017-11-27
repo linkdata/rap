@@ -17,3 +17,14 @@ func TestFrameReaderString(t *testing.T) {
 	fr = NewFrameReader(fd)
 	assert.Equal(t, "[FrameReader 34 012048656c6c6f20776f726c6420776974682061206c6f6e6765722073747269...]", fr.String())
 }
+
+func TestFrameReaderReadRequest(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0x0123)
+	fd.WriteStringNull()  // method
+	fd.WriteString(":a:") // illegal url
+	fr := NewFrameReader(fd)
+	req, err := fr.ReadRequest()
+	assert.Nil(t, req)
+	assert.Error(t, err)
+}

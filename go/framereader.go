@@ -140,7 +140,7 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 
 	u, err := url.Parse(urlString)
 	if err != nil {
-		log.Fatal("FrameReader.ReadRequest(): ", err.Error())
+		log.Print("FrameReader.ReadRequest(): ", err.Error())
 		return
 	}
 	u.Scheme = "http"
