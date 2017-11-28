@@ -29,7 +29,14 @@ var (
 // ExchangeConnection is the interface that an Exchange needs in order to
 // communicate with the outside world and clean up.
 type ExchangeConnection interface {
+	// ExchangeWriteChannel returns the FrameData channel that Exchanges should
+	// use when producing output frames. Called once when Exchange is initialized.
 	ExchangeWriteChannel() chan FrameData
+	// ExchangeReadChannel returns the FrameData channel that an Exchange should
+	// use when reading input frames. Called once when Exchange is initialized.
+	ExchangeReadChannel() chan FrameData
+	// ExchangeRelease returns the Exchange to the Conn, allowing it to
+	// be re-used for other requests.
 	ExchangeRelease(*Exchange)
 }
 
@@ -66,7 +73,7 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) *Exchange {
 		releaser:   conn.ExchangeRelease,
 		writeCh:    conn.ExchangeWriteChannel(),
 		sendWindow: SendWindowSize,
-		readCh:     make(chan FrameData, MaxSendWindowSize),
+		readCh:     conn.ExchangeReadChannel(),
 		ackCh:      make(chan struct{}, MaxSendWindowSize),
 	}
 }

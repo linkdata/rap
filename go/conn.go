@@ -343,10 +343,16 @@ func (c *Conn) NewExchange() *Exchange {
 	}
 }
 
-// ExchangeWriteChannel returns the FrameData channel that Exchanges should
-// use when producing output frames.
+// ExchangeWriteChannel returns the FrameData channel that an Exchange should
+// use when producing output frames. Called once when Exchange is initialized.
 func (c *Conn) ExchangeWriteChannel() chan FrameData {
 	return c.writeCh
+}
+
+// ExchangeReadChannel returns the FrameData channel that an Exchange should
+// use when reading input frames. Called once when Exchange is initialized.
+func (c *Conn) ExchangeReadChannel() chan FrameData {
+	return make(chan FrameData, MaxSendWindowSize)
 }
 
 // ExchangeRelease returns the Exchange to the Conn, allowing it to
