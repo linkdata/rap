@@ -26,12 +26,15 @@ var (
 	ErrMissingFrameHead = errors.New("missing frame head")
 )
 
+type exchangeReleaser func(*Exchange)
+
 // Exchange maintains the state of a request-response or WebSocket connection.
 // It also handles the flow control mechanism, which is a simple transmission
 // window with intermittent ACKs from the receiver.
 type Exchange struct {
 	ID               ExchangeID // Exchange ID
-	Conn             *Conn
+	releaser         exchangeReleaser
+	writeCh          chan FrameData
 	readCh           chan FrameData
 	ackCh            chan struct{}
 	sendWindow       int         // number of frames still allowed to be in flight
@@ -49,11 +52,12 @@ func (e *Exchange) String() string {
 		e.ID, e.sendWindow, e.hasStarted, e.hasSentClose, e.hasReceivedClose, len(e.readCh), len(e.ackCh))
 }
 
-// NewExchange creates a new exchange state on the given Conn.
-func NewExchange(conn *Conn, exchangeID ExchangeID) *Exchange {
+// NewExchange creates a new exchange
+func NewExchange(writeChannel chan FrameData, releaseFunction exchangeReleaser, exchangeID ExchangeID) *Exchange {
 	return &Exchange{
 		ID:         exchangeID,
-		Conn:       conn,
+		releaser:   releaseFunction,
+		writeCh:    writeChannel,
 		sendWindow: SendWindowSize,
 		readCh:     make(chan FrameData, MaxSendWindowSize),
 		ackCh:      make(chan struct{}, MaxSendWindowSize),
@@ -67,7 +71,7 @@ func (e *Exchange) writeFrameX(fd FrameData) {
 		fd.Header().SetSizeValue(int32(len(fd)) - FrameHeaderSize)
 	}
 	select {
-	case e.Conn.writeCh <- fd:
+	case e.writeCh <- fd:
 		return
 	case _, ok := <-e.ackCh:
 		if ok {
@@ -101,7 +105,7 @@ func (e *Exchange) readFrame() error {
 	} else {
 		fda := FrameDataAlloc()
 		fda.WriteHeader(e.ID)
-		e.Conn.writeCh <- fda
+		e.writeCh <- fda
 	}
 
 	return nil
@@ -321,7 +325,7 @@ func (e *Exchange) Flush() error {
 		e.fdw.Header().SetSizeValue(int32(len(e.fdw)) - FrameHeaderSize)
 	}
 
-	e.Conn.writeCh <- e.fdw
+	e.writeCh <- e.fdw
 	e.fdw = nil
 	return nil
 }
@@ -332,7 +336,7 @@ func (e *Exchange) sendClose() {
 		fdc := FrameDataAlloc()
 		fdc.Header().SetExchangeID(e.ID)
 		fdc.Header().SetFinal()
-		e.Conn.writeCh <- fdc
+		e.writeCh <- fdc
 		if e.fdw != nil {
 			FrameDataFree(e.fdw)
 			e.fdw = nil
@@ -419,7 +423,7 @@ func (e *Exchange) Stop() (err error) {
 func (e *Exchange) Release() {
 	// log.Print("Exchange.Release() ", e)
 	e.Stop()
-	e.Conn.releaseExchange(e)
+	e.releaser(e)
 }
 
 // WriteRequest writes a http.Request to the exchange, including it's Body and

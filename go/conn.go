@@ -55,7 +55,7 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		writeErrCh:      make(chan error),
 	}
 	for i := range c.exchangeLookup {
-		e := NewExchange(c, ExchangeID(i))
+		e := NewExchange(c.writeCh, c.releaseExchange, ExchangeID(i))
 		c.exchangeLookup[i] = e
 		c.exchanges <- e
 	}
