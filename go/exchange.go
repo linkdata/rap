@@ -26,6 +26,13 @@ var (
 	ErrMissingFrameHead = errors.New("missing frame head")
 )
 
+// ExchangeConnection is the interface that an Exchange needs in order to
+// communicate with the outside world and clean up.
+type ExchangeConnection interface {
+	ExchangeWriteChannel() chan FrameData
+	ExchangeRelease(*Exchange)
+}
+
 type exchangeReleaser func(*Exchange)
 
 // Exchange maintains the state of a request-response or WebSocket connection.
@@ -53,11 +60,11 @@ func (e *Exchange) String() string {
 }
 
 // NewExchange creates a new exchange
-func NewExchange(writeChannel chan FrameData, releaseFunction exchangeReleaser, exchangeID ExchangeID) *Exchange {
+func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) *Exchange {
 	return &Exchange{
 		ID:         exchangeID,
-		releaser:   releaseFunction,
-		writeCh:    writeChannel,
+		releaser:   conn.ExchangeRelease,
+		writeCh:    conn.ExchangeWriteChannel(),
 		sendWindow: SendWindowSize,
 		readCh:     make(chan FrameData, MaxSendWindowSize),
 		ackCh:      make(chan struct{}, MaxSendWindowSize),

@@ -55,7 +55,7 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		writeErrCh:      make(chan error),
 	}
 	for i := range c.exchangeLookup {
-		e := NewExchange(c.writeCh, c.releaseExchange, ExchangeID(i))
+		e := NewExchange(c, ExchangeID(i))
 		c.exchangeLookup[i] = e
 		c.exchanges <- e
 	}
@@ -343,7 +343,15 @@ func (c *Conn) NewExchange() *Exchange {
 	}
 }
 
-func (c *Conn) releaseExchange(e *Exchange) {
+// ExchangeWriteChannel returns the FrameData channel that Exchanges should
+// use when producing output frames.
+func (c *Conn) ExchangeWriteChannel() chan FrameData {
+	return c.writeCh
+}
+
+// ExchangeRelease returns the Exchange to the Conn, allowing it to
+// be re-used for other requests.
+func (c *Conn) ExchangeRelease(e *Exchange) {
 	select {
 	case c.exchanges <- e:
 	default:
