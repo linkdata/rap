@@ -419,7 +419,7 @@ func (e *Exchange) Stop() (err error) {
 	return
 }
 
-// Release calls Stop() and then returns an Exchange to the conn it belongs.
+// Release calls Stop() and then calls the releaser function.
 func (e *Exchange) Release() {
 	// log.Print("Exchange.Release() ", e)
 	e.Stop()
