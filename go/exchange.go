@@ -165,7 +165,8 @@ func (e *Exchange) Available() int {
 	return e.fdw.Available()
 }
 
-// Buffered returns the number of bytes that have been written to the current frame.
+// Buffered returns the number of bytes that have been written to the
+// current frame, including the header size.
 func (e *Exchange) Buffered() int {
 	return e.fdw.Buffered()
 }
