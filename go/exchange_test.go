@@ -213,7 +213,9 @@ func Test_Exchange_Write(t *testing.T) {
 	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
 
 	// Force a flush, should fail since final is sent
-	assert.Equal(t, io.ErrClosedPipe, et.Exchange.Flush())
+	n, err := et.Exchange.Write(make([]byte, et.Exchange.Available()+1))
+	assert.Equal(t, io.ErrClosedPipe, err)
+	assert.NotZero(t, n)
 }
 
 func Test_Exchange_Flush(t *testing.T) {
