@@ -263,7 +263,9 @@ func (e *Exchange) WriteByte(c byte) error {
 		if err := e.Flush(); err != nil {
 			return err
 		}
+		e.writeStart()
 	}
+	e.fdw.Header().SetBody()
 	return e.fdw.WriteByte(c)
 }
 
