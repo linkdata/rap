@@ -155,5 +155,32 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	assert.Equal(t, ErrUnhandledRecordType, err)
 	et.Exchange.Release()
 	assert.True(t, et.released)
+}
 
+func Test_Exchange_Write(t *testing.T) {
+	et := newExchangeTester(t)
+
+	// Empty after writeStart()
+	et.Exchange.writeStart()
+	assert.False(t, et.Exchange.fdw.Header().HasBody())
+	assert.Equal(t, FrameMaxPayloadSize, et.Exchange.Available())
+
+	// HasBody is true after writing
+	et.Exchange.Write([]byte{0x01, 0x02})
+	assert.True(t, et.Exchange.fdw.Header().HasBody())
+	assert.Equal(t, FrameHeaderSize+2, et.Exchange.Buffered())
+
+	// Fill up to just under limit
+	et.Exchange.Write(make([]byte, et.Exchange.Available()-1))
+	assert.Equal(t, FrameMaxSize-1, et.Exchange.Buffered())
+	assert.True(t, et.Exchange.fdw.Header().HasBody())
+
+	// Set final and write one more byte than can be fit
+	et.Exchange.fdw.Header().SetFinal()
+	et.Exchange.Write([]byte{0x04, 0x05})
+	assert.True(t, et.Exchange.fdw.Header().HasBody())
+	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
+
+	// Force a flush, should fail since final is sent
+	assert.Equal(t, io.ErrClosedPipe, et.Exchange.Flush())
 }
