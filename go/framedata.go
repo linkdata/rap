@@ -56,7 +56,8 @@ func (fd FrameData) Available() int {
 	return cap(fd) - len(fd)
 }
 
-// Buffered returns the number of bytes that have been written to the frame.
+// Buffered returns the number of bytes that have been written to the
+// current frame, including the header size.
 func (fd FrameData) Buffered() int {
 	return len(fd)
 }
