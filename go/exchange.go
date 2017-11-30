@@ -144,9 +144,9 @@ func (e *Exchange) Read(p []byte) (n int, err error) {
 	// log.Print("Exchange.Read([", len(p), "]) calling e.fr.Read() len=", len(e.fr), " ", e)
 	n, err = e.fr.Read(p)
 	// log.Print("Exchange.Read([", len(p), "]) Read() => len(e.fr)=", len(e.fr), " n=", n, " err=", err)
-	if err == nil && e.hasReceivedClose {
-		err = io.EOF
-	}
+	// if err == nil && n == 0 && e.hasReceivedClose {
+	// err = io.EOF
+	// }
 	// log.Print("Exchange.Read([", len(p), "]) => n=", n, " err=", err)
 	return
 }
@@ -351,7 +351,7 @@ func (e *Exchange) sendClose() {
 	if e.hasStarted && !e.hasSentClose {
 		e.hasSentClose = true
 		fdc := FrameDataAlloc()
-		fdc.Header().SetExchangeID(e.ID)
+		fdc.WriteHeader(e.ID)
 		fdc.Header().SetFinal()
 		e.writeCh <- fdc
 		if e.fdw != nil {

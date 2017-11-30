@@ -10,6 +10,7 @@ import (
 
 func Test_FrameReader_String(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fr := NewFrameReader(fd)
 	assert.Equal(t, "[FrameReader 0]", fr.String())
 	fd.WriteByte(0x01)
@@ -22,6 +23,7 @@ func Test_FrameReader_String(t *testing.T) {
 
 func Test_FrameReader_Read(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteString("quuxFooBAR")
 	fr := NewFrameReader(fd)
 	ba := make([]byte, 11)
@@ -31,6 +33,7 @@ func Test_FrameReader_Read(t *testing.T) {
 
 func Test_FrameReader_ReadRequest_IllegalURL(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteStringNull()  // method
 	fd.WriteString(":a:") // illegal url
 	fr := NewFrameReader(fd)

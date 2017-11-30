@@ -16,13 +16,14 @@ import (
 func TestNewFrameData(t *testing.T) {
 	fd := NewFrameData()
 	assert.NotNil(t, fd)
+	assert.Equal(t, 0, fd.Buffered())
+	fd.WriteHeader(0)
 	assert.Equal(t, FrameHeaderSize, fd.Buffered())
 	assert.Equal(t, FrameMaxSize-FrameHeaderSize, fd.Available())
 }
 
 func TestNewFrameDataExchangeIDRange(t *testing.T) {
 	fd := NewFrameData()
-	assert.Equal(t, ExchangeID(0), fd.Header().ExchangeID())
 	fd.WriteHeader(ExchangeID(1))
 	assert.Equal(t, ExchangeID(1), fd.Header().ExchangeID())
 	fd.WriteHeader(MaxExchangeID)
@@ -32,6 +33,7 @@ func TestNewFrameDataExchangeIDRange(t *testing.T) {
 
 func TestFrameDataString(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteString("Hello world")
 	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (16)] 0b48656c6c6f20776f726c64]", fd.String())
 	fd.WriteString("the data is greater than 32 length")
@@ -57,8 +59,9 @@ func (t *shortWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
-func TestFrameDataPayloadAndWriteTo(t *testing.T) {
+func Test_FrameData_WriteTo(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	assert.NotNil(t, fd.Payload())
 	assert.Equal(t, 0, len(fd.Payload()))
 	ba := make([]byte, 0, FrameMaxPayloadSize)
@@ -82,12 +85,13 @@ func TestFrameDataPayloadAndWriteTo(t *testing.T) {
 	assert.Equal(t, ErrFrameTooBig, err)
 }
 
-func TestFrameDataWriteUint64(t *testing.T) {
+func Test_FrameData_WriteUint64(t *testing.T) {
 	// Test encodings
 	for i := uint(0); i < 64; i++ {
 		for j := uint64(0); j < 3; j++ {
 			n := ((uint64(1) << i) - 1) + j
 			fd := NewFrameData()
+			fd.WriteHeader(0)
 			fd.WriteUint64(n)
 			fr := NewFrameReader(fd)
 			assert.Equal(t, n, fr.ReadUint64())
@@ -95,6 +99,7 @@ func TestFrameDataWriteUint64(t *testing.T) {
 	}
 	// Test unterminated
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	for i := 0; i < 11; i++ {
 		fd.WriteByte(0xff)
 	}
@@ -106,13 +111,14 @@ func TestFrameDataWriteUint64(t *testing.T) {
 	assert.Panics(t, func() { fr.ReadUint64() })
 }
 
-func TestFrameDataWriteInt64(t *testing.T) {
+func Test_FrameData_WriteInt64(t *testing.T) {
 	// Test encodings
 	for i := uint(0); i < 64; i++ {
 		for j := int64(0); j < 3; j++ {
 			for k := int64(-1); k < 2; k += 2 {
 				n := (((int64(1) << i) - 1) + j) * k
 				fd := NewFrameData()
+				fd.WriteHeader(0)
 				fd.WriteInt64(n)
 				fr := NewFrameReader(fd)
 				assert.Equal(t, n, fr.ReadInt64())
@@ -121,11 +127,12 @@ func TestFrameDataWriteInt64(t *testing.T) {
 	}
 }
 
-func TestFrameDataWriteLen(t *testing.T) {
+func Test_FrameData_WriteLen(t *testing.T) {
 	for i := uint(0); i < 16; i++ {
 		for j := int(-1); j < 3; j++ {
 			n := (((1 << i) - 1) + j)
 			fd := NewFrameData()
+			fd.WriteHeader(0)
 			err := fd.WriteLen(n)
 			if n < 0 || n > 0x7fff {
 				assert.Error(t, err)
@@ -138,8 +145,9 @@ func TestFrameDataWriteLen(t *testing.T) {
 	}
 }
 
-func TestFrameDataWriteStringNull(t *testing.T) {
+func Test_FrameData_WriteStringNull(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteStringNull()
 	fr := NewFrameReader(fd)
 	s, isNull := fr.ReadString()
@@ -147,8 +155,9 @@ func TestFrameDataWriteStringNull(t *testing.T) {
 	assert.Equal(t, "", s)
 }
 
-func TestFrameDataWriteStringEmpty(t *testing.T) {
+func Test_FrameData_WriteStringEmpty(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteString("")
 	fr := NewFrameReader(fd)
 	s, isNull := fr.ReadString()
@@ -156,19 +165,10 @@ func TestFrameDataWriteStringEmpty(t *testing.T) {
 	assert.Equal(t, "", s)
 }
 
-func TestFrameDataWriteStringAscii(t *testing.T) {
-	const helloWorld = "Hello world"
-	fd := NewFrameData()
-	fd.WriteString(helloWorld)
-	fr := NewFrameReader(fd)
-	s, isNull := fr.ReadString()
-	assert.False(t, isNull)
-	assert.Equal(t, helloWorld, s)
-}
-
-func TestFrameDataWriteStringUnicode(t *testing.T) {
+func Test_FrameData_WriteString(t *testing.T) {
 	const helloWorld = "Hello world Åäö!"
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteString(helloWorld)
 	fr := NewFrameReader(fd)
 	s, isNull := fr.ReadString()
@@ -176,13 +176,14 @@ func TestFrameDataWriteStringUnicode(t *testing.T) {
 	assert.Equal(t, helloWorld, s)
 }
 
-func TestFrameDataWriteStringOverflow(t *testing.T) {
+func Test_FrameData_WriteString_Overflow(t *testing.T) {
 	var buffer bytes.Buffer
 	for j := 0; j < 0x8002; j++ {
 		buffer.WriteString("a")
 		if j > 0x7ffd {
 			expected := buffer.String()
 			fd := NewFrameData()
+			fd.WriteHeader(0)
 			err := fd.WriteString(expected)
 			if len(expected) < 0x8000 {
 				assert.NoError(t, err)
@@ -197,8 +198,9 @@ func TestFrameDataWriteStringOverflow(t *testing.T) {
 	}
 }
 
-func TestFrameDataWriteRecordTypeAndByteCount(t *testing.T) {
+func Test_FrameData_WriteRecordType(t *testing.T) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	assert.Equal(t, uint64(FrameHeaderSize+1), fd.ByteCount())
 }
@@ -232,7 +234,7 @@ func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData, err error) {
 	return
 }
 
-func TestFrameDataReadFrom(t *testing.T) {
+func Test_FrameData_ReadFrom(t *testing.T) {
 	fd1 := NewFrameData()
 	fd1.WriteHeader(0x1234)
 	fd1.Header().SetBody()
@@ -304,7 +306,7 @@ func checkRequestsAreEqual(t *testing.T, req, req2 *http.Request) {
 	assert.Equal(t, req.URL.Query(), req2.URL.Query())
 }
 
-func TestFrameDataWriteRequest(t *testing.T) {
+func Test_FrameData_WriteRequest(t *testing.T) {
 	// If Host header is provided but req.Host is not set
 	// the header is used to set it, same with ContentLength
 	req := httptest.NewRequest("GET", "/", nil)
@@ -344,7 +346,7 @@ func TestFrameDataWriteRequest(t *testing.T) {
 	assert.Equal(t, ErrFrameTooBig, err)
 }
 
-func TestFrameDataWriteResponse(t *testing.T) {
+func Test_FrameData_WriteResponse(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0x1234)
 	fd.WriteResponse(200, 0, nil)

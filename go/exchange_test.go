@@ -1,7 +1,9 @@
 package rap
 
 import (
+	"bytes"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,9 +62,20 @@ func (et *exchangeTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (et *exchangeTester) InjectRequest(req *http.Request) {
 	fd := NewFrameData()
+	fd.WriteHeader(0x123)
 	fd.Header().SetFinal()
-	if err := fd.WriteRequest(req); err != nil {
-		assert.NoError(et.t, err)
+	err := fd.WriteRequest(req)
+	assert.NoError(et.t, err)
+	var buf bytes.Buffer
+	n, err := io.Copy(&buf, req.Body)
+	if err == nil && n > 0 {
+		fd.Header().SetBody()
+		fd.Header().SetSizeValue(int32(n))
+		precopylen := len(fd)
+		n2, err2 := io.Copy(&fd, &buf)
+		assert.Equal(et.t, precopylen+int(n2), len(fd))
+		assert.NoError(et.t, err2)
+		assert.Equal(et.t, n, n2)
 	}
 	et.readCh <- fd
 }
@@ -91,6 +104,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	// Empty frame
 	et = newExchangeTester(t)
 	fd := NewFrameData()
+	fd.WriteHeader(0x123)
 	fd.Header().SetFinal()
 	et.readCh <- fd
 	err = et.Exchange.Start(et)
@@ -101,8 +115,10 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	// Empty frame sequence
 	et = newExchangeTester(t)
 	fd = NewFrameData()
+	fd.WriteHeader(0x123)
 	et.readCh <- fd
 	fd = NewFrameData()
+	fd.WriteHeader(0x123)
 	fd.Header().SetFinal()
 	et.readCh <- fd
 	err = et.Exchange.Start(et)
@@ -113,8 +129,9 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	// Missing frame head
 	et = newExchangeTester(t)
 	fd = NewFrameData()
-	fd.WriteRecordType(RecordTypeHTTPRequest)
+	fd.WriteHeader(0x123)
 	fd.Header().SetFinal()
+	fd.WriteRecordType(RecordTypeHTTPRequest)
 	et.readCh <- fd
 	err = et.Exchange.Start(et)
 	assert.Equal(t, ErrMissingFrameHead, err)
@@ -124,6 +141,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	// Invalid URL in request record
 	et = newExchangeTester(t)
 	fd = NewFrameData()
+	fd.WriteHeader(0x123)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	fd.WriteStringNull()  // method
@@ -138,9 +156,10 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	// Incomplete request frame
 	et = newExchangeTester(t)
 	fd = NewFrameData()
+	fd.WriteHeader(0x123)
 	fd.Header().SetHead()
-	fd.WriteRecordType(RecordTypeHTTPRequest)
 	fd.Header().SetFinal()
+	fd.WriteRecordType(RecordTypeHTTPRequest)
 	et.readCh <- fd
 	assert.Panics(t, func() {
 		et.Exchange.Start(et)
@@ -151,6 +170,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	// Illegal record type
 	et = newExchangeTester(t)
 	fd = NewFrameData()
+	fd.WriteHeader(0x123)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeUserFirst - 1)
 	fd.Header().SetFinal()
@@ -238,4 +258,15 @@ func Test_Exchange_Flush(t *testing.T) {
 	assert.Equal(t, FrameMaxSize+1, len(et.Exchange.fdw))
 	err = et.Exchange.Flush()
 	assert.Equal(t, ErrFrameTooBig, err)
+}
+
+func Test_Exchange_Read(t *testing.T) {
+	et := newExchangeTester(t)
+	var buf bytes.Buffer
+	buf.WriteByte(0x01)
+	et.InjectRequest(httptest.NewRequest("GET", "/", ioutil.NopCloser(&buf)))
+	p1 := make([]byte, 1)
+	n, err := et.Exchange.Read(p1)
+	assert.NoError(t, err)
+	assert.Equal(t, len(p1), n)
 }

@@ -23,12 +23,12 @@ type FrameData []byte
 
 // NewFrameData allocates a new FrameData.
 func NewFrameData() FrameData {
-	return FrameData(make([]byte, FrameHeaderSize, FrameMaxSize))
+	return FrameData(make([]byte, 0, FrameMaxSize))
 }
 
-// Clear removes everything except the header in a frame
+// Clear removes everything in a frame
 func (fd *FrameData) Clear() {
-	*fd = (*fd)[:FrameHeaderSize]
+	*fd = (*fd)[:0]
 }
 
 func (fd FrameData) String() string {
@@ -60,6 +60,12 @@ func (fd FrameData) Available() int {
 // current frame, including the header size.
 func (fd FrameData) Buffered() int {
 	return len(fd)
+}
+
+// Write implements io.Writer for FrameData, and is used to write body data.
+func (fd *FrameData) Write(p []byte) (n int, err error) {
+	*fd = append(*fd, p...)
+	return len(p), nil
 }
 
 // WriteHeader initializes the frame header.
@@ -149,17 +155,23 @@ func (fd FrameData) ByteCount() uint64 {
 	return uint64(len(fd))
 }
 
-// ReadFrom reads a FrameData from an io.Reader.
+// ReadFrom reads a complete or partial FrameData from an io.Reader.
 // Implements io.ReaderFrom interface for FrameData.
 func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 	var num int // needed to let ReadFrom/ReadFull integrate well.
 
-	num, err = io.ReadFull(r, (*fd)[:FrameHeaderSize])
-	n = int64(num)
+	if len(*fd) < FrameHeaderSize {
+		num, err = io.ReadFull(r, (*fd)[len(*fd):FrameHeaderSize])
+		*fd = (*fd)[:len(*fd)+num]
+		n = int64(num)
+		if len(*fd) < FrameHeaderSize {
+			return
+		}
+	}
 	if err == nil && fd.Header().HasPayload() {
 		// if below line panics it means we got a frame larger than FrameMaxSize
-		*fd = (*fd)[:FrameHeaderSize+int(fd.Header().SizeValue())]
-		num, err = io.ReadFull(r, (*fd)[FrameHeaderSize:])
+		num, err = io.ReadFull(r, (*fd)[len(*fd):FrameHeaderSize+int(fd.Header().SizeValue())])
+		*fd = (*fd)[:len(*fd)+num]
 		n += int64(num)
 	}
 

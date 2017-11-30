@@ -10,7 +10,9 @@ const testExchangeID ExchangeID = 0x1234
 
 func getHeader(t *testing.T) (h FrameHeader) {
 	fd := NewFrameData()
+	fd.WriteHeader(0)
 	assert.NotNil(t, fd)
+	assert.Equal(t, FrameHeaderSize, len(fd))
 	h = fd.Header()
 	assert.NotNil(t, h)
 	return
