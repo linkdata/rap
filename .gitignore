@@ -28,6 +28,8 @@ project.lock.json
 *.zip
 *.test
 
+coverage.txt
+
 .vscode/
 build/
 obj/
