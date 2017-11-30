@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/linkdata/rap.svg?branch=master)](https://travis-ci.org/linkdata/rap)
+
 # REST Aggregation Protocol
 
 The REST Aggregation Protocol, or *RAP* for short, is an asymmetric HTTP and WebSocket reverse-proxy multiplexing protocol designed to allow high volume of relatively small request-response exchanges while minimizing the resource usage on the upstream server.
