@@ -26,6 +26,7 @@ project.lock.json
 *.test
 *.prof
 *.zip
+*.test
 
 .vscode/
 build/
