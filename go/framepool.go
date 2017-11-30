@@ -4,11 +4,7 @@ package rap
 var frameDataPool chan FrameData
 
 func init() {
-	chanBufSize := (FrameDataPoolSizeInMB * 1024 * 1024) / FrameMaxSize
-	if chanBufSize > 0x10000 {
-		chanBufSize = 0x10000
-	}
-	frameDataPool = make(chan FrameData, chanBufSize)
+	frameDataPool = make(chan FrameData, 0x10000)
 }
 
 // FrameDataAlloc allocates an empty FrameData, without a FrameHeader.
