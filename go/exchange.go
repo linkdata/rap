@@ -136,17 +136,9 @@ func (e *Exchange) loadFrameReader() (err error) {
 
 func (e *Exchange) Read(p []byte) (n int, err error) {
 	// log.Print("Exchange.Read([", len(p), "]) ", e)
-	if err = e.loadFrameReader(); err != nil {
-		// log.Print("Exchange.Read([", len(p), "]) => n=0 err=", err.Error())
-		return
+	if err = e.loadFrameReader(); err == nil {
+		n, err = e.fr.Read(p)
 	}
-	// log.Print("Exchange.Read([", len(p), "]) calling e.fr.Read() len=", len(e.fr), " ", e)
-	n, err = e.fr.Read(p)
-	// log.Print("Exchange.Read([", len(p), "]) Read() => len(e.fr)=", len(e.fr), " n=", n, " err=", err)
-	// if err == nil && n == 0 && e.hasReceivedClose {
-	// err = io.EOF
-	// }
-	// log.Print("Exchange.Read([", len(p), "]) => n=", n, " err=", err)
 	return
 }
 
