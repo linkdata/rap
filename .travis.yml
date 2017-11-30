@@ -1,13 +1,9 @@
 language: go
-
+sudo: false
 go:
   - 1.9.x
-
 before_install:
   - go get -t -v go/...
-
+  - go get github.com/mattn/goveralls
 script:
-  - cd go && go test -race -coverprofile=coverage.txt -covermode=atomic
-
-after_success:
-  - bash <(curl -s https://codecov.io/bash)
+  - cd go && $GOPATH/bin/goveralls -service=travis-ci
