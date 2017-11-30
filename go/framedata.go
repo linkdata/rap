@@ -179,11 +179,11 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 		num, err = io.ReadFull(r, (*fd)[len(*fd):FrameHeaderSize])
 		*fd = (*fd)[:len(*fd)+num]
 		n = int64(num)
-		if len(*fd) < FrameHeaderSize {
+		if err != nil || len(*fd) < FrameHeaderSize {
 			return
 		}
 	}
-	if err == nil && fd.Header().HasPayload() {
+	if fd.Header().HasPayload() {
 		// if below line panics it means we got a frame larger than FrameMaxSize
 		num, err = io.ReadFull(r, (*fd)[len(*fd):FrameHeaderSize+int(fd.Header().SizeValue())])
 		*fd = (*fd)[:len(*fd)+num]
