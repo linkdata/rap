@@ -117,8 +117,7 @@ func (e *Exchange) readFrame() error {
 	if e.fdr.Header().IsFinal() {
 		e.hasReceivedClose = true
 	} else {
-		fda := FrameDataAlloc()
-		fda.WriteHeader(e.ID)
+		fda := FrameDataAllocID(e.ID)
 		e.writeCh <- fda
 	}
 
@@ -155,8 +154,7 @@ func (e *Exchange) Read(p []byte) (n int, err error) {
 func (e *Exchange) writeStart() {
 	if e.fdw == nil {
 		// log.Print("Exchange.writeStart() (new fd)", e)
-		e.fdw = FrameDataAlloc()
-		e.fdw.WriteHeader(e.ID)
+		e.fdw = FrameDataAllocID(e.ID)
 	}
 }
 
@@ -350,8 +348,7 @@ func (e *Exchange) Flush() error {
 func (e *Exchange) sendClose() {
 	if e.hasStarted && !e.hasSentClose {
 		e.hasSentClose = true
-		fdc := FrameDataAlloc()
-		fdc.WriteHeader(e.ID)
+		fdc := FrameDataAllocID(e.ID)
 		fdc.Header().SetFinal()
 		e.writeCh <- fdc
 		if e.fdw != nil {

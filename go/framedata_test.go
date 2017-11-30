@@ -60,8 +60,7 @@ func (t *shortWriter) Write(p []byte) (n int, err error) {
 }
 
 func Test_FrameData_WriteTo(t *testing.T) {
-	fd := NewFrameData()
-	fd.WriteHeader(0)
+	fd := NewFrameDataID(0)
 	assert.NotNil(t, fd.Payload())
 	assert.Equal(t, 0, len(fd.Payload()))
 	ba := make([]byte, 0, FrameMaxPayloadSize)
@@ -353,8 +352,7 @@ func Test_FrameData_WriteResponse(t *testing.T) {
 
 	h := http.Header{}
 
-	fd.Clear()
-	fd.WriteHeader(0x0123)
+	fd.ClearID(0x123)
 	h.Add("Status", "Meh")
 	h.Add("Foo", "bar")
 	h.Add("Foo", "quux")

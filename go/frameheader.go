@@ -219,6 +219,7 @@ func (fh FrameHeader) SetBody() {
 	fh[2] |= byte(FrameFlagBody)
 }
 
+/*
 // AppendFrameHeader adds a placeholder frame header to the given array.
 func AppendFrameHeader(dst []byte, exchangeID ExchangeID) []byte {
 	if exchangeID > MaxExchangeID {
@@ -230,4 +231,24 @@ func AppendFrameHeader(dst []byte, exchangeID ExchangeID) []byte {
 		byte(exchangeID>>8), // control bits, MSB exchange id
 		byte(exchangeID),    // LSB exchange id
 	)
+}
+*/
+
+// Clear zeroes out the frameheader bytes.
+func (fh FrameHeader) Clear() {
+	fh[0] = byte(0)
+	fh[1] = byte(0)
+	fh[2] = byte(0)
+	fh[3] = byte(0)
+}
+
+// ClearID zeroes out the frameheader bytes and sets the ExchangeID.
+func (fh FrameHeader) ClearID(exchangeID ExchangeID) {
+	if exchangeID > MaxExchangeID {
+		panic("AppendFrameHeader(): exchangeID > MaxExchangeID")
+	}
+	fh[0] = byte(0)
+	fh[1] = byte(0)
+	fh[2] = byte(exchangeID >> 8)
+	fh[3] = byte(exchangeID)
 }

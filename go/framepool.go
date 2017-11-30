@@ -11,7 +11,7 @@ func init() {
 	frameDataPool = make(chan FrameData, chanBufSize)
 }
 
-// FrameDataAlloc allocates a FrameData.
+// FrameDataAlloc allocates an empty FrameData, without a FrameHeader.
 func FrameDataAlloc() FrameData {
 	select {
 	case fd := <-frameDataPool:
@@ -19,6 +19,17 @@ func FrameDataAlloc() FrameData {
 		return fd
 	default:
 		return NewFrameData()
+	}
+}
+
+// FrameDataAllocID allocates a FrameData with a FrameHeader and the given ExchangeID set.
+func FrameDataAllocID(id ExchangeID) FrameData {
+	select {
+	case fd := <-frameDataPool:
+		fd.ClearID(id)
+		return fd
+	default:
+		return NewFrameDataID(id)
 	}
 }
 

@@ -21,14 +21,28 @@ var (
 // FrameData is a byte array used as a network data frame.
 type FrameData []byte
 
-// NewFrameData allocates a new FrameData.
+// NewFrameData allocates a new FrameData without header.
 func NewFrameData() FrameData {
 	return FrameData(make([]byte, 0, FrameMaxSize))
+}
+
+// NewFrameDataID allocates a new FrameData with a header and ExchangeID set.
+func NewFrameDataID(exchangeID ExchangeID) (fd FrameData) {
+	fd = FrameData(make([]byte, FrameHeaderSize, FrameMaxSize))
+	FrameHeader(fd).ClearID(exchangeID)
+	return
 }
 
 // Clear removes everything in a frame
 func (fd *FrameData) Clear() {
 	*fd = (*fd)[:0]
+}
+
+// ClearID removes everything in a frame except the header,
+// which is zeroed out and has the ExchangeID set.
+func (fd *FrameData) ClearID(id ExchangeID) {
+	*fd = (*fd)[:FrameHeaderSize]
+	FrameHeader(*fd).ClearID(id)
 }
 
 func (fd FrameData) String() string {
@@ -70,7 +84,8 @@ func (fd *FrameData) Write(p []byte) (n int, err error) {
 
 // WriteHeader initializes the frame header.
 func (fd *FrameData) WriteHeader(exchangeID ExchangeID) {
-	*fd = AppendFrameHeader((*fd)[:0], exchangeID)
+	*fd = (*fd)[:FrameHeaderSize]
+	FrameHeader(*fd).ClearID(exchangeID)
 	return
 }
 
