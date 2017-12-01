@@ -79,22 +79,6 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) *Exchange {
 	}
 }
 
-// WriteFrameData queues a FrameData for writing
-func (e *Exchange) writeFrameX(fd FrameData) {
-	// set the payload size
-	if fd.Header().HasPayload() {
-		fd.Header().SetSizeValue(int32(len(fd)) - FrameHeaderSize)
-	}
-	select {
-	case e.writeCh <- fd:
-		return
-	case _, ok := <-e.ackCh:
-		if ok {
-			e.sendWindow++
-		}
-	}
-}
-
 // readFrame reads data frames from the read channel.
 // None of the frames seen may be conn control frames.
 func (e *Exchange) readFrame() error {
