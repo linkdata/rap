@@ -3,7 +3,6 @@ package rap
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -262,11 +261,19 @@ func Test_Exchange_Flush(t *testing.T) {
 
 func Test_Exchange_Read(t *testing.T) {
 	et := newExchangeTester(t)
-	var buf bytes.Buffer
-	buf.WriteByte(0x01)
-	et.InjectRequest(httptest.NewRequest("GET", "/", ioutil.NopCloser(&buf)))
+	fd := NewFrameData()
+	fd.WriteHeader(0x123)
+	fd.WriteByte(0xc4)
+	fd.Header().SetFinal()
+	et.readCh <- fd
+	// Read the one-byte body
 	p1 := make([]byte, 1)
 	n, err := et.Exchange.Read(p1)
 	assert.NoError(t, err)
 	assert.Equal(t, len(p1), n)
+	assert.Equal(t, byte(0xc4), p1[0])
+	// Read again, expecting EOF
+	n, err = et.Exchange.Read(p1)
+	assert.Equal(t, io.EOF, err)
+	assert.Zero(t, n)
 }
