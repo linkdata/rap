@@ -135,16 +135,6 @@ func (e *Exchange) loadFrameReader() (err error) {
 	return
 }
 
-// Implements io.Reader for Exchange. Used when copying data from the RAP
-// connection to a HTTP body.
-func (e *Exchange) Read(p []byte) (n int, err error) {
-	// log.Print("Exchange.Read([", len(p), "]) ", e)
-	if err = e.loadFrameReader(); err == nil {
-		n, err = e.fr.Read(p)
-	}
-	return
-}
-
 // writeStart prepares a new frame for writing.
 func (e *Exchange) writeStart() {
 	if e.fdw == nil {
@@ -164,7 +154,18 @@ func (e *Exchange) Buffered() int {
 	return e.fdw.Buffered()
 }
 
+// Implements io.Reader for Exchange.
+// Used when copying data from a RAP connection to a HTTP body.
+func (e *Exchange) Read(p []byte) (n int, err error) {
+	// log.Print("Exchange.Read([", len(p), "]) ", e)
+	if err = e.loadFrameReader(); err == nil {
+		n, err = e.fr.Read(p)
+	}
+	return
+}
+
 // ReadFrom implements io.ReaderFrom for Exchange body data.
+// Used when copying data from a HTTP body to a RAP connection.
 func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 	// log.Print("Exchange.ReadFrom() ", e)
 	if r == nil {
