@@ -79,6 +79,14 @@ func (et *exchangeTester) InjectRequest(req *http.Request) {
 	et.readCh <- fd
 }
 
+type failWriter struct{}
+
+func (*failWriter) Write(p []byte) (n int, err error) {
+	n = 0
+	err = io.ErrNoProgress
+	return
+}
+
 func Test_Exchange_String(t *testing.T) {
 	e := NewExchange(&exchangeTester{}, 0x123)
 	assert.Equal(t, "[Exchange [ExchangeID 0123] sendW=8 started=false sentC=false recvC=false len(readCh)=0 len(ackCh)=0]", e.String())
@@ -309,4 +317,25 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 	n, err = et.Exchange.ReadFrom(&buf)
 	assert.Equal(t, int64(FrameMaxPayloadSize), n)
 	assert.Error(t, io.ErrClosedPipe, err)
+}
+
+func Test_Exchange_WriteTo(t *testing.T) {
+	et := newExchangeTester(t)
+	fd := NewFrameDataID(0x123)
+	fd.WriteByte(0xc4)
+	fd.Header().SetFinal()
+	et.readCh <- fd
+	var buf bytes.Buffer
+	n, err := et.Exchange.WriteTo(&buf)
+	assert.Equal(t, int64(1), n)
+	assert.NoError(t, err)
+
+	et = newExchangeTester(t)
+	fd = NewFrameDataID(0x123)
+	fd.WriteByte(0xc5)
+	fd.Header().SetFinal()
+	et.readCh <- fd
+	n, err = et.Exchange.WriteTo(&failWriter{})
+	assert.Equal(t, int64(0), n)
+	assert.Error(t, err)
 }
