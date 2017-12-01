@@ -36,21 +36,3 @@ func FrameDataFree(fd FrameData) {
 	default:
 	}
 }
-
-/*
-var frameDataPool = sync.Pool{
-	New: func() interface{} {
-		return newFrameData()
-	},
-}
-
-// FrameDataAlloc allocates a FrameData.
-func FrameDataAlloc() FrameData {
-	return (frameDataPool.Get()).(FrameData)
-}
-
-// FrameDataFree releases a FrameData.
-func FrameDataFree(fd FrameData) {
-	frameDataPool.Put(fd)
-}
-*/
