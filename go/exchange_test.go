@@ -261,8 +261,7 @@ func Test_Exchange_Flush(t *testing.T) {
 
 func Test_Exchange_Read(t *testing.T) {
 	et := newExchangeTester(t)
-	fd := NewFrameData()
-	fd.WriteHeader(0x123)
+	fd := NewFrameDataID(0x123)
 	fd.WriteByte(0xc4)
 	fd.Header().SetFinal()
 	et.readCh <- fd
@@ -276,4 +275,38 @@ func Test_Exchange_Read(t *testing.T) {
 	n, err = et.Exchange.Read(p1)
 	assert.Equal(t, io.EOF, err)
 	assert.Zero(t, n)
+}
+
+func Test_Exchange_ReadFrom(t *testing.T) {
+	et := newExchangeTester(t)
+
+	// Reading from nil
+	n, err := et.Exchange.ReadFrom(nil)
+	assert.Equal(t, io.EOF, err)
+	assert.Zero(t, n)
+
+	// Read one byte
+	var buf bytes.Buffer
+	buf.WriteByte(0xc4)
+	n, err = et.Exchange.ReadFrom(&buf)
+	assert.Equal(t, int64(1), n)
+	assert.NoError(t, err)
+
+	// Read more than max frame size bytes
+	m, err := buf.Write(make([]byte, FrameMaxSize+1))
+	assert.NoError(t, err)
+	assert.Equal(t, FrameMaxSize+1, m)
+	n, err = et.Exchange.ReadFrom(&buf)
+	assert.Equal(t, int64(FrameMaxSize+1), n)
+	assert.NoError(t, err)
+
+	// Again, but have send a final frame and Flush()
+	// to force the write to return an error
+	et.Exchange.fdw.Header().SetFinal()
+	assert.NoError(t, et.Exchange.Flush())
+	assert.Zero(t, len(et.Exchange.fdw))
+	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
+	n, err = et.Exchange.ReadFrom(&buf)
+	assert.Equal(t, int64(FrameMaxPayloadSize), n)
+	assert.Error(t, io.ErrClosedPipe, err)
 }
