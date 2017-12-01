@@ -30,6 +30,7 @@ func Test_FrameHeader_IsBlank(t *testing.T) {
 
 func Test_FrameHeader_ExchangeIDRange(t *testing.T) {
 	h := getHeader(t)
+	h.Clear()
 	assert.Equal(t, ExchangeID(0), h.ExchangeID())
 	h.SetExchangeID(ExchangeID(1))
 	assert.Equal(t, ExchangeID(1), h.ExchangeID())
