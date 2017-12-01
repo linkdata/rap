@@ -42,8 +42,9 @@ type ExchangeConnection interface {
 
 type exchangeReleaser func(*Exchange)
 
-// Exchange maintains the state of a request-response or WebSocket connection.
-// It also handles the flow control mechanism, which is a simple transmission
+// Exchange is essentially a pipe. It maintains the state of a request-response
+// or WebSocket connection, moves data between the RAP and HTTP connections and
+// handles the flow control mechanism, which is a simple transmission
 // window with intermittent ACKs from the receiver.
 type Exchange struct {
 	ID               ExchangeID // Exchange ID
@@ -134,6 +135,8 @@ func (e *Exchange) loadFrameReader() (err error) {
 	return
 }
 
+// Implements io.Reader for Exchange. Used when copying data from the RAP
+// connection to a HTTP body.
 func (e *Exchange) Read(p []byte) (n int, err error) {
 	// log.Print("Exchange.Read([", len(p), "]) ", e)
 	if err = e.loadFrameReader(); err == nil {
