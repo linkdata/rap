@@ -59,6 +59,17 @@ func (t *shortWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
+func Test_FrameData_Write(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0)
+	fd.Write([]byte{0x01})
+	fr := NewFrameReader(fd)
+	ba := make([]byte, 1)
+	n, err := fr.Read(ba)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, n)
+}
+
 func Test_FrameData_WriteTo(t *testing.T) {
 	fd := NewFrameDataID(0)
 	assert.NotNil(t, fd.Payload())
