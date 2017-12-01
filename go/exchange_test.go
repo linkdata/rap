@@ -356,6 +356,19 @@ func Test_Exchange_WriteResponse(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func Test_Exchange_CloseWrite(t *testing.T) {
+	et := newExchangeTester(t)
+	err := et.Exchange.CloseWrite()
+	assert.NoError(t, err)
+	err = et.Exchange.CloseWrite()
+	assert.Equal(t, io.ErrClosedPipe, err)
+	et = newExchangeTester(t)
+	et.Exchange.writeStart()
+	et.Exchange.fdw.Write(make([]byte, FrameMaxSize+1))
+	err = et.Exchange.CloseWrite()
+	assert.Equal(t, ErrFrameTooBig, err)
+}
+
 func Test_Exchange_ProxyResponse(t *testing.T) {
 	et := newExchangeTester(t)
 	rr := httptest.NewRecorder()
