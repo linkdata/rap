@@ -339,3 +339,9 @@ func Test_Exchange_WriteTo(t *testing.T) {
 	assert.Equal(t, int64(0), n)
 	assert.Error(t, err)
 }
+
+func Test_Exchange_WriteRequest(t *testing.T) {
+	et := newExchangeTester(t)
+	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
+	assert.NoError(t, err)
+}
