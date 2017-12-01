@@ -11,10 +11,11 @@ import (
 )
 
 type exchangeTester struct {
-	t        *testing.T
-	released bool
-	writeCh  chan FrameData
-	readCh   chan FrameData
+	t           *testing.T
+	released    bool
+	writeCh     chan FrameData
+	readCh      chan FrameData
+	lastWritten FrameData
 	*Exchange
 }
 
@@ -32,7 +33,7 @@ func newExchangeTester(t *testing.T) *exchangeTester {
 			if fd == nil {
 				break
 			}
-			fd.Clear()
+			et.lastWritten = fd
 		}
 	}()
 
@@ -353,4 +354,21 @@ func Test_Exchange_WriteResponse(t *testing.T) {
 	rr.WriteHeader(200)
 	err := et.Exchange.WriteResponse(rr.Result())
 	assert.NoError(t, err)
+}
+
+func Test_Exchange_ProxyResponse(t *testing.T) {
+	et := newExchangeTester(t)
+	rr := httptest.NewRecorder()
+	rr.WriteString("Meh")
+	rr.WriteHeader(200)
+	err := et.Exchange.WriteResponse(rr.Result())
+	assert.NoError(t, err)
+	lw := et.Exchange.fdw
+	assert.NotNil(t, lw)
+	err = et.Exchange.CloseWrite()
+	assert.NoError(t, err)
+	et = newExchangeTester(t)
+	et.readCh <- lw
+	rr2 := httptest.NewRecorder()
+	err = et.Exchange.ProxyResponse(rr2)
 }
