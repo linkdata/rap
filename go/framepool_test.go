@@ -22,12 +22,15 @@ func Test_FramePool_FrameDataAllocID(t *testing.T) {
 	FrameDataFree(fd2)
 }
 
-func Test_FramePool_FrameDataFree(t *testing.T) {
+func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
+	oldSize := len(frameDataPool)
+	frameDataPool = make(chan FrameData, 0x10)
 	fd1 := FrameDataAlloc()
 	assert.NotNil(t, fd1)
-	for i := 0; i <= 0x10000; i++ {
+	for i := 0; i <= 0x10; i++ {
 		FrameDataFree(NewFrameDataID(ExchangeID(i & 0xFFF)))
 	}
 	fd2 := FrameDataAlloc()
 	assert.NotNil(t, fd2)
+	frameDataPool = make(chan FrameData, oldSize)
 }
