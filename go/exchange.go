@@ -194,10 +194,11 @@ func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 			e.writeStart()
 		}
 	}
+	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
 	if err == io.EOF {
 		err = nil
 	}
-	return n, nil
+	return
 }
 
 // TODO: func (b *Writer) Reset(w io.Writer)
