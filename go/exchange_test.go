@@ -345,3 +345,12 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
 	assert.NoError(t, err)
 }
+
+func Test_Exchange_WriteResponse(t *testing.T) {
+	et := newExchangeTester(t)
+	rr := httptest.NewRecorder()
+	rr.WriteString("Meh")
+	rr.WriteHeader(200)
+	err := et.Exchange.WriteResponse(rr.Result())
+	assert.NoError(t, err)
+}
