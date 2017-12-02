@@ -437,7 +437,7 @@ func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 		}
 	}
 
-	return nil
+	return
 }
 
 // ProxyResponse reads a HTTP response and it's body from the Exchange data
