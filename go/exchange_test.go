@@ -320,6 +320,8 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 	assert.NoError(t, et.Exchange.Flush())
 	assert.Zero(t, len(et.Exchange.fdw))
 	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
+	assert.NotZero(t, m)
+	assert.NoError(t, err)
 	n, err = et.Exchange.ReadFrom(&buf)
 	assert.Equal(t, int64(FrameMaxPayloadSize), n)
 	assert.Error(t, io.ErrClosedPipe, err)
@@ -405,6 +407,7 @@ func Test_Exchange_ProxyResponse(t *testing.T) {
 	et.readCh <- lw
 	rr2 := httptest.NewRecorder()
 	err = et.Exchange.ProxyResponse(rr2)
+	assert.NoError(t, err)
 	// assert.Equal(t, rr.Result(), rr2.Result())
 	// TODO in progress
 }
