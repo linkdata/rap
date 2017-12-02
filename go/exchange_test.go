@@ -385,3 +385,17 @@ func Test_Exchange_ProxyResponse(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	err = et.Exchange.ProxyResponse(rr2)
 }
+
+func Test_Exchange_Close(t *testing.T) {
+	et := newExchangeTester(t)
+	fd := NewFrameDataID(0x123)
+	fd.Header().SetFinal()
+	et.readCh <- fd
+	err := et.Exchange.Close()
+	assert.NoError(t, err)
+
+	et = newExchangeTester(t)
+	close(et.readCh)
+	err = et.Exchange.Close()
+	assert.Equal(t, io.EOF, err)
+}
