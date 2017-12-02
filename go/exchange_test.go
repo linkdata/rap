@@ -393,18 +393,20 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 func Test_Exchange_ProxyResponse(t *testing.T) {
 	et := newExchangeTester(t)
 	rr := httptest.NewRecorder()
-	rr.WriteString("Meh")
-	rr.WriteHeader(200)
-	err := et.Exchange.WriteResponse(rr.Result())
+	rr.WriteHeader(201)
+	_, err := rr.WriteString("Meh")
 	assert.NoError(t, err)
+	assert.NoError(t, et.Exchange.WriteResponse(rr.Result()))
 	lw := et.Exchange.fdw
 	assert.NotNil(t, lw)
-	err = et.Exchange.CloseWrite()
-	assert.NoError(t, err)
+	assert.NoError(t, et.Exchange.CloseWrite())
+
 	et = newExchangeTester(t)
 	et.readCh <- lw
 	rr2 := httptest.NewRecorder()
 	err = et.Exchange.ProxyResponse(rr2)
+	// assert.Equal(t, rr.Result(), rr2.Result())
+	// TODO in progress
 }
 
 func Test_Exchange_Close(t *testing.T) {
