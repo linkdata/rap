@@ -408,7 +408,7 @@ func (e *Exchange) Stop() (err error) {
 	e.hasSentClose = false
 	e.hasReceivedClose = false
 	if e.sendWindow != SendWindowSize {
-		log.Print("Exchange.Stop() sendWindow=", e.sendWindow)
+		err = ErrTimeoutFlowControl
 		e.sendWindow = SendWindowSize
 	}
 	return
