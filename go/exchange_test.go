@@ -393,23 +393,56 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 }
 
 func Test_Exchange_ProxyResponse(t *testing.T) {
+	// Make a frame for testing with
 	et := newExchangeTester(t)
 	rr := httptest.NewRecorder()
 	rr.WriteHeader(201)
 	_, err := rr.WriteString("Meh")
 	assert.NoError(t, err)
 	assert.NoError(t, et.Exchange.WriteResponse(rr.Result()))
-	lw := et.Exchange.fdw
-	assert.NotNil(t, lw)
+	n, err := et.Exchange.ReadFrom(rr.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), n)
+	testingFrame := et.Exchange.fdw
+	assert.NotNil(t, testingFrame)
 	assert.NoError(t, et.Exchange.CloseWrite())
 
+	// Test read error
 	et = newExchangeTester(t)
-	et.readCh <- lw
+	close(et.readCh)
 	rr2 := httptest.NewRecorder()
 	err = et.Exchange.ProxyResponse(rr2)
+	assert.Equal(t, io.EOF, err)
+
+	// Test frame missing head
+	et = newExchangeTester(t)
+	fd := NewFrameDataID(0x123)
+	fd.WriteByte(0x01)
+	fd.Header().SetBody()
+	fd.Header().SetFinal()
+	et.readCh <- fd
+	rr2 = httptest.NewRecorder()
+	err = et.Exchange.ProxyResponse(rr2)
+	assert.Equal(t, ErrMissingFrameHead, err)
+
+	// Test wrong record type
+	et = newExchangeTester(t)
+	fd = NewFrameDataID(0x123)
+	fd.WriteRecordType(RecordTypeUserFirst)
+	fd.Header().SetHead()
+	fd.Header().SetFinal()
+	et.readCh <- fd
+	rr2 = httptest.NewRecorder()
+	err = et.Exchange.ProxyResponse(rr2)
+	assert.Equal(t, ErrUnhandledRecordType, err)
+
+	// Test transparency
+	et = newExchangeTester(t)
+	et.readCh <- testingFrame
+	rr2 = httptest.NewRecorder()
+	err = et.Exchange.ProxyResponse(rr2)
 	assert.NoError(t, err)
-	// assert.Equal(t, rr.Result(), rr2.Result())
-	// TODO in progress
+	assert.Equal(t, rr.Result(), rr2.Result())
 }
 
 func Test_Exchange_Close(t *testing.T) {
