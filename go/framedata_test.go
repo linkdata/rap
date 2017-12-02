@@ -257,6 +257,23 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	fd1.WriteString("Hello world")
 	fd1.WriteUint64(0x123456789)
 	pipeFrame(t, fd1)
+
+	// Test underflow
+	fd1 = NewFrameDataID(0x23)
+	fd1.Header().SetBody()
+	fd1.Header().SetSizeValue(0)
+	fd1.WriteString("Meh")
+	n, err := fd1.ReadFrom(bytes.NewBuffer([]byte{0x01}))
+	assert.Equal(t, ErrFrameTooSmall, err)
+	assert.Zero(t, n)
+
+	// Test overflow
+	fd1 = NewFrameDataID(0x23)
+	fd1.Header().SetBody()
+	fd1.Header().SetSizeValue(FrameMaxPayloadSize + 1)
+	n, err = fd1.ReadFrom(bytes.NewBuffer(make([]byte, FrameMaxPayloadSize+1)))
+	assert.Equal(t, ErrFrameTooBig, err)
+	assert.Zero(t, n)
 }
 
 func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.Request, err error) {

@@ -16,6 +16,10 @@ var (
 	ErrLengthNegative = errors.New("length negative")
 	// ErrLengthOverflow is returned for strings longer than 32K.
 	ErrLengthOverflow = errors.New("length overflow")
+	// ErrFrameTooBig means a frame with more than FrameMaxPayloadSize bytes occurred
+	ErrFrameTooBig = errors.New("rap: frame too big")
+	// ErrFrameTooSmall means a frame size value is smaller than allowed
+	ErrFrameTooSmall = errors.New("rap: frame too small")
 )
 
 // FrameData is a byte array used as a network data frame.
@@ -184,17 +188,20 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 		}
 	}
 	if fd.Header().HasPayload() {
-		// if below line panics it means we got a frame larger than FrameMaxSize
-		num, err = io.ReadFull(r, (*fd)[len(*fd):FrameHeaderSize+int(fd.Header().SizeValue())])
+		endIndex := FrameHeaderSize + int(fd.Header().SizeValue())
+		if endIndex < len(*fd) {
+			return n, ErrFrameTooSmall
+		}
+		if endIndex > FrameMaxPayloadSize {
+			return n, ErrFrameTooBig
+		}
+		num, err = io.ReadFull(r, (*fd)[len(*fd):endIndex])
 		*fd = (*fd)[:len(*fd)+num]
 		n += int64(num)
 	}
 
 	return
 }
-
-// ErrFrameTooBig means a frame with more than FrameMaxPayloadSize bytes occurred
-var ErrFrameTooBig = errors.New("rap: frame too big")
 
 // WriteTo implements io.WriterTo for FrameData.
 func (fd FrameData) WriteTo(w io.Writer) (int64, error) {
