@@ -30,4 +30,3 @@ var (
 	// SendWindowSize is the maximum number of frames allowed in flight.
 	SendWindowSize = MaxSendWindowSize // usually MaxSendWindowSize
 )
-
