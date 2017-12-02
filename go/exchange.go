@@ -427,23 +427,14 @@ func (e *Exchange) Release() {
 
 // WriteRequest writes a http.Request to the exchange, including it's Body and
 // a final frame.
-func (e *Exchange) WriteRequest(r *http.Request) error {
+func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 	// log.Print("Exchange.WriteRequest() ", e)
 	e.writeStart()
 
-	if err := e.fdw.WriteRequest(r); err != nil {
-		log.Print("Exchange.WriteRequest(): fdw.WriteRequest: ", err.Error(), " e.fdw=", e.fdw)
-		return err
-	}
-
-	if _, err := e.ReadFrom(r.Body); err != nil {
-		log.Print("Exchange.WriteRequest(): ReadFrom(r.Body): ", err.Error())
-		return err
-	}
-
-	if err := e.CloseWrite(); err != nil {
-		log.Print("Exchange.WriteRequest(): CloseWrite: ", err.Error())
-		return err
+	if err = e.fdw.WriteRequest(r); err == nil {
+		if _, err = e.ReadFrom(r.Body); err == nil {
+			err = e.CloseWrite()
+		}
 	}
 
 	return nil
