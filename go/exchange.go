@@ -38,6 +38,10 @@ type ExchangeConnection interface {
 	// ExchangeRelease returns the Exchange to the Conn, allowing it to
 	// be re-used for other requests.
 	ExchangeRelease(*Exchange)
+	// ExchangeWriteTimeout returns the Exchange write timeout
+	ExchangeWriteTimeout() time.Duration
+	// ExchangeReadTimeout returns the Exchange read timeout
+	ExchangeReadTimeout() time.Duration
 }
 
 type exchangeReleaser func(*Exchange)
@@ -357,7 +361,7 @@ func (e *Exchange) CloseWrite() error {
 	}
 	// wait for all sent frames to be acknowledged
 	for e.sendWindow < SendWindowSize {
-		timer := time.NewTimer(WriteTimeout)
+		timer := time.NewTimer(ReadTimeout)
 		defer timer.Stop()
 		// log.Print("Exchange.Flush(): starting wait ", e)
 		select {
@@ -408,8 +412,10 @@ func (e *Exchange) Stop() (err error) {
 	e.hasSentClose = false
 	e.hasReceivedClose = false
 	if e.sendWindow != SendWindowSize {
-		err = ErrTimeoutFlowControl
 		e.sendWindow = SendWindowSize
+		if err == nil {
+			err = ErrTimeoutFlowControl
+		}
 	}
 	return
 }

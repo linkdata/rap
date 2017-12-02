@@ -365,3 +365,13 @@ func (c *Conn) ExchangeRelease(e *Exchange) {
 	}
 	return
 }
+
+// ExchangeWriteTimeout returns the Exchange write timeout, in seconds
+func (c *Conn) ExchangeWriteTimeout() time.Duration {
+	return WriteTimeout
+}
+
+// ExchangeReadTimeout returns the Exchange read timeout
+func (c *Conn) ExchangeReadTimeout() time.Duration {
+	return ReadTimeout
+}
