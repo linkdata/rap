@@ -350,6 +350,11 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	et := newExchangeTester(t)
 	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
 	assert.NoError(t, err)
+
+	et = newExchangeTester(t)
+	assert.NoError(t, et.Exchange.CloseWrite())
+	err = et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", nil))
+	assert.Equal(t, io.ErrClosedPipe, err)
 }
 
 func Test_Exchange_WriteResponse(t *testing.T) {
