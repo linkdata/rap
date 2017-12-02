@@ -38,10 +38,8 @@ type ExchangeConnection interface {
 	// ExchangeRelease returns the Exchange to the Conn, allowing it to
 	// be re-used for other requests.
 	ExchangeRelease(*Exchange)
-	// ExchangeWriteTimeout returns the Exchange write timeout
-	ExchangeWriteTimeout() time.Duration
-	// ExchangeReadTimeout returns the Exchange read timeout
-	ExchangeReadTimeout() time.Duration
+	// ExchangeTimeout returns the Exchange timeout duration
+	ExchangeTimeout() time.Duration
 }
 
 type exchangeReleaser func(*Exchange)
@@ -52,7 +50,7 @@ type exchangeReleaser func(*Exchange)
 // window with intermittent ACKs from the receiver.
 type Exchange struct {
 	ID               ExchangeID // Exchange ID
-	releaser         exchangeReleaser
+	conn             ExchangeConnection
 	writeCh          chan FrameData
 	readCh           chan FrameData
 	ackCh            chan struct{}
@@ -75,7 +73,7 @@ func (e *Exchange) String() string {
 func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) *Exchange {
 	return &Exchange{
 		ID:         exchangeID,
-		releaser:   conn.ExchangeRelease,
+		conn:       conn,
 		writeCh:    conn.ExchangeWriteChannel(),
 		sendWindow: SendWindowSize,
 		readCh:     conn.ExchangeReadChannel(),
@@ -299,7 +297,7 @@ func (e *Exchange) Flush() error {
 			}
 
 			for e.sendWindow < 1 {
-				timer := time.NewTimer(WriteTimeout)
+				timer := time.NewTimer(e.conn.ExchangeTimeout())
 				defer timer.Stop()
 				// log.Print("Exchange.Flush(): starting wait ", e)
 				select {
@@ -361,7 +359,7 @@ func (e *Exchange) CloseWrite() error {
 	}
 	// wait for all sent frames to be acknowledged
 	for e.sendWindow < SendWindowSize {
-		timer := time.NewTimer(ReadTimeout)
+		timer := time.NewTimer(e.conn.ExchangeTimeout())
 		defer timer.Stop()
 		// log.Print("Exchange.Flush(): starting wait ", e)
 		select {
@@ -424,7 +422,7 @@ func (e *Exchange) Stop() (err error) {
 func (e *Exchange) Release() {
 	// log.Print("Exchange.Release() ", e)
 	e.Stop()
-	e.releaser(e)
+	e.conn.ExchangeRelease(e)
 }
 
 // WriteRequest writes a http.Request to the exchange, including it's Body and
