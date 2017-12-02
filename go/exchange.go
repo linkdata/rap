@@ -442,9 +442,9 @@ func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 
 // ProxyResponse reads a HTTP response and it's body from the Exchange data
 // and writes it to the given http.ResponseWriter.
-func (e *Exchange) ProxyResponse(w http.ResponseWriter) error {
+func (e *Exchange) ProxyResponse(w http.ResponseWriter) (err error) {
 	// log.Print("Exchange.ProxyResponse() ", e)
-	if err := e.loadFrameReader(); err != nil {
+	if err = e.loadFrameReader(); err != nil {
 		return err
 	}
 
@@ -458,11 +458,9 @@ func (e *Exchange) ProxyResponse(w http.ResponseWriter) error {
 
 	e.fr.ProxyResponse(w)
 
-	if _, err := e.WriteTo(w); err != nil {
-		return err
-	}
+	_, err = e.WriteTo(w)
 
-	return nil
+	return
 }
 
 // WriteResponse writes a http.Response to the exchange.
