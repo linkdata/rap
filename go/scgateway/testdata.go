@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/naoina/denco"
 	_ "github.com/linkdata/rap/go"
+	"github.com/naoina/denco"
 )
 
 type testStruct struct {
