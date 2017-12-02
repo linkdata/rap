@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -55,6 +56,10 @@ func (et *exchangeTester) ExchangeReadChannel() chan FrameData {
 func (et *exchangeTester) ExchangeRelease(e *Exchange) {
 	et.released = true
 	close(et.writeCh)
+}
+
+func (et *exchangeTester) ExchangeTimeout() time.Duration {
+	return time.Millisecond * 10
 }
 
 func (et *exchangeTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -367,6 +372,17 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 	et.Exchange.fdw.Write(make([]byte, FrameMaxSize+1))
 	err = et.Exchange.CloseWrite()
 	assert.Equal(t, ErrFrameTooBig, err)
+
+	et = newExchangeTester(t)
+	assert.NoError(t, et.Exchange.WriteByte(0x01))
+	assert.NoError(t, et.Exchange.Flush())
+	assert.NoError(t, et.Exchange.WriteByte(0x02))
+	assert.NoError(t, et.Exchange.Flush())
+	close(et.readCh)
+	err = et.Exchange.Stop()
+	assert.Equal(t, ErrTimeoutFlowControl, err)
+	et.Exchange.Release()
+	assert.True(t, et.released)
 }
 
 func Test_Exchange_ProxyResponse(t *testing.T) {
@@ -398,4 +414,20 @@ func Test_Exchange_Close(t *testing.T) {
 	close(et.readCh)
 	err = et.Exchange.Close()
 	assert.Equal(t, io.EOF, err)
+}
+
+func Test_Exchange_Stop(t *testing.T) {
+	et := newExchangeTester(t)
+	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
+	assert.NoError(t, et.Exchange.Start(et))
+	assert.NoError(t, et.Exchange.Stop())
+	et.Exchange.Release()
+	assert.True(t, et.released)
+
+	et = newExchangeTester(t)
+	et.Exchange.sendWindow--
+	err := et.Exchange.Stop()
+	assert.Equal(t, ErrTimeoutFlowControl, err)
+	et.Exchange.Release()
+	assert.True(t, et.released)
 }
