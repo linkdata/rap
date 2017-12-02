@@ -193,7 +193,7 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 	return
 }
 
-// ErrFrameTooBig means a frame with more than FrameMaxPayloadSize bytes occured
+// ErrFrameTooBig means a frame with more than FrameMaxPayloadSize bytes occurred
 var ErrFrameTooBig = errors.New("rap: frame too big")
 
 // WriteTo implements io.WriterTo for FrameData.
