@@ -475,13 +475,11 @@ func (e *Exchange) WriteResponseData(code int, contentLength int64, header http.
 	return e.fdw.WriteResponse(code, contentLength, header)
 }
 
-func (e *Exchange) serve(h http.Handler) {
+// Serve processes incoming RAP records until an error occurs.
+func (e *Exchange) Serve(h http.Handler) (err error) {
 	defer e.Release()
 	for {
-		if err := e.Start(h); err != nil {
-			if err != io.EOF {
-				log.Print("Exchange.serve() ", e.ID, ": ", err)
-			}
+		if err = e.Start(h); err != nil {
 			return
 		}
 		e.Stop()
