@@ -474,3 +474,10 @@ func Test_Exchange_Stop(t *testing.T) {
 	et.Exchange.Release()
 	assert.True(t, et.released)
 }
+
+func Test_Exchange_Serve(t *testing.T) {
+	et := newExchangeTester(t)
+	go et.Exchange.Serve(et)
+	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
+	close(et.readCh)
+}
