@@ -217,7 +217,7 @@ func (c *Conn) Serve(h http.Handler) (err error) {
 		for {
 			select {
 			case e := <-c.exchanges:
-				go e.serve(h)
+				go e.Serve(h)
 			default:
 				break drainExchanges
 			}
