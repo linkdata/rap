@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"runtime/debug"
 	"time"
 )
 
@@ -474,16 +473,6 @@ func (e *Exchange) WriteResponseData(code int, contentLength int64, header http.
 	// log.Print("Exchange.WriteResponseData() ", e)
 	e.writeStart()
 	return e.fdw.WriteResponse(code, contentLength, header)
-}
-
-func serveHTTP(h http.Handler, rw *ResponseWriter, req *http.Request) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Print("Exchange.serveHTTP(): ", r)
-			debug.PrintStack()
-		}
-	}()
-	h.ServeHTTP(rw, req)
 }
 
 func (e *Exchange) serve(h http.Handler) {
