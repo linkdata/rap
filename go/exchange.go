@@ -82,6 +82,7 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) *Exchange {
 
 // readFrame reads data frames from the read channel.
 // None of the frames seen may be conn control frames.
+// Also writes acknowledgement frames.
 func (e *Exchange) readFrame() error {
 	// log.Print("Exchange.readFrame(): len(fr)=", len(e.fr), " e=", e)
 	if e.fdr != nil {
@@ -103,6 +104,7 @@ func (e *Exchange) readFrame() error {
 	if e.fdr.Header().IsFinal() {
 		e.hasReceivedClose = true
 	} else {
+		// Write ack frame
 		fda := FrameDataAllocID(e.ID)
 		e.writeCh <- fda
 	}
@@ -285,7 +287,7 @@ func (e *Exchange) Flush() error {
 				select {
 				case _, ok := <-e.ackCh:
 					if !ok {
-						log.Print("Exchange.Flush(): ackCh closed ", e)
+						// log.Print("Exchange.Flush(): ackCh closed ", e)
 						e.sendClose()
 						return io.ErrClosedPipe
 					}
@@ -301,15 +303,15 @@ func (e *Exchange) Flush() error {
 				// log.Print("Exchange.Flush(): starting wait ", e)
 				select {
 				case _, ok := <-e.ackCh:
-					e.sendWindow++ // didn't actuall
+					e.sendWindow++
 					if !ok {
-						log.Print("Exchange.Flush(): ackCh closed ", e)
+						// log.Print("Exchange.Flush(): ackCh closed ", e)
 						e.sendClose()
 						return io.ErrClosedPipe
 					}
 				case <-timer.C:
 					e.sendWindow++
-					log.Print("Exchange.Flush(): ackCh timeout ", e)
+					// log.Print("Exchange.Flush(): ackCh timeout ", e)
 					return ErrTimeoutFlowControl
 				}
 				// log.Print("Exchange.Flush(): finished wait ", e)
@@ -370,7 +372,7 @@ func (e *Exchange) CloseWrite() error {
 				return io.ErrClosedPipe
 			}
 		case <-timer.C:
-			log.Print("Exchange.CloseWrite(): ackCh timeout ", e)
+			// log.Print("Exchange.CloseWrite(): ackCh timeout ", e)
 			e.sendWindow = SendWindowSize
 			return ErrTimeoutFlowControl
 		}
