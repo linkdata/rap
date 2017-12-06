@@ -478,7 +478,7 @@ func (e *Exchange) WriteResponseData(code int, contentLength int64, header http.
 }
 
 // Serve processes incoming RAP records until an error occurs.
-func (e *Exchange) Serve(h http.Handler) (err error) {
+func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 	defer e.Release()
 	for {
 		if err = e.Start(h); err != nil {
