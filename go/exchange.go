@@ -310,7 +310,7 @@ func (e *Exchange) Flush() error {
 						return io.ErrClosedPipe
 					}
 				case <-timer.C:
-					e.sendWindow++
+					// e.sendWindow++
 					// log.Print("Exchange.Flush(): ackCh timeout ", e)
 					return ErrTimeoutFlowControl
 				}
