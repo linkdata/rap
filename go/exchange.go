@@ -303,12 +303,12 @@ func (e *Exchange) Flush() error {
 				// log.Print("Exchange.Flush(): starting wait ", e)
 				select {
 				case _, ok := <-e.ackCh:
-					e.sendWindow++
 					if !ok {
 						// log.Print("Exchange.Flush(): ackCh closed ", e)
 						e.sendClose()
 						return io.ErrClosedPipe
 					}
+					e.sendWindow++
 				case <-timer.C:
 					// e.sendWindow++
 					// log.Print("Exchange.Flush(): ackCh timeout ", e)
@@ -365,12 +365,12 @@ func (e *Exchange) CloseWrite() error {
 		// log.Print("Exchange.Flush(): starting wait ", e)
 		select {
 		case _, ok := <-e.ackCh:
-			e.sendWindow++
 			if !ok {
 				log.Print("Exchange.CloseWrite(): ackCh closed ", e)
 				e.sendWindow = SendWindowSize
 				return io.ErrClosedPipe
 			}
+			e.sendWindow++
 		case <-timer.C:
 			// log.Print("Exchange.CloseWrite(): ackCh timeout ", e)
 			e.sendWindow = SendWindowSize
