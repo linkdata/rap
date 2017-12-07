@@ -23,6 +23,10 @@ func Test_FramePool_FrameDataAllocID(t *testing.T) {
 }
 
 func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
+	if raceEnabled {
+		t.Skip("skipping since -race is enabled")
+		return
+	}
 	oldSize := len(frameDataPool)
 	frameDataPool = make(chan FrameData, 0x10)
 	fd1 := FrameDataAlloc()
