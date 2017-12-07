@@ -9,40 +9,40 @@ import (
 	"strconv"
 )
 
-// FrameReader implements reading frame payload from a byte slice
-type FrameReader []byte
+// FrameParser implements reading frame payload from a byte slice
+type FrameParser []byte
 
-// NewFrameReader returns a FrameReader from a FrameData
-func NewFrameReader(fd FrameData) FrameReader {
+// NewFrameParser returns a FrameParser from a FrameData
+func NewFrameParser(fd FrameData) FrameParser {
 	return fd.Payload()
 }
 
-func (fr FrameReader) String() string {
+func (fp FrameParser) String() string {
 	switch {
-	case len(fr) < 1:
+	case len(fp) < 1:
 		return "[FrameReader 0]"
-	case len(fr) < 32:
-		return fmt.Sprintf("[FrameReader %v %v]", len(fr), hex.EncodeToString(fr))
+	case len(fp) < 32:
+		return fmt.Sprintf("[FrameReader %v %v]", len(fp), hex.EncodeToString(fp))
 	default:
-		return fmt.Sprintf("[FrameReader %v %v...]", len(fr), hex.EncodeToString(fr[:32]))
+		return fmt.Sprintf("[FrameReader %v %v...]", len(fp), hex.EncodeToString(fp[:32]))
 	}
 }
 
-func (fr *FrameReader) Read(p []byte) (n int, err error) {
-	n = copy(p, (*fr))
-	(*fr) = (*fr)[n:]
+func (fp *FrameParser) Read(p []byte) (n int, err error) {
+	n = copy(p, (*fp))
+	(*fp) = (*fp)[n:]
 	return
 }
 
 // ReadUint64 reads an uint64
-func (fr *FrameReader) ReadUint64() (x uint64) {
+func (fp *FrameParser) ReadUint64() (x uint64) {
 	var s uint
-	for i, b := range *fr {
+	for i, b := range *fp {
 		if b < 0x80 {
 			if i > 9 || i == 9 && b > 1 {
 				panic("ReadUint64(): uint64 overflow")
 			}
-			*fr = (*fr)[i+1:]
+			*fp = (*fp)[i+1:]
 			return x | uint64(b)<<s
 		}
 		x |= uint64(b&0x7f) << s
@@ -53,15 +53,15 @@ func (fr *FrameReader) ReadUint64() (x uint64) {
 }
 
 // ReadRecordType reads a byte as RecordType
-func (fr *FrameReader) ReadRecordType() (rt RecordType) {
-	rt = RecordType((*fr)[0])
-	(*fr) = (*fr)[1:]
+func (fp *FrameParser) ReadRecordType() (rt RecordType) {
+	rt = RecordType((*fp)[0])
+	(*fp) = (*fp)[1:]
 	return
 }
 
 // ReadInt64 reads an int64
-func (fr *FrameReader) ReadInt64() (x int64) {
-	ux := fr.ReadUint64()
+func (fp *FrameParser) ReadInt64() (x int64) {
+	ux := fp.ReadUint64()
 	ix := int64(ux >> 1)
 	if (ux & 1) != 0 {
 		ix = ^ix
@@ -70,22 +70,22 @@ func (fr *FrameReader) ReadInt64() (x int64) {
 }
 
 // ReadLen reads a RAP length value
-func (fr *FrameReader) ReadLen() (n int) {
-	n = int((*fr)[0])
+func (fp *FrameParser) ReadLen() (n int) {
+	n = int((*fp)[0])
 	if n < 0x80 {
-		(*fr) = (*fr)[1:]
+		(*fp) = (*fp)[1:]
 	} else {
-		n = (n&0x7f)<<8 | int((*fr)[1])
-		(*fr) = (*fr)[2:]
+		n = (n&0x7f)<<8 | int((*fp)[1])
+		(*fp) = (*fp)[2:]
 	}
 	return
 }
 
 // ReadString reads a RAP string
-func (fr *FrameReader) ReadString() (s string, isNull bool) {
-	n := fr.ReadLen()
+func (fp *FrameParser) ReadString() (s string, isNull bool) {
+	n := fp.ReadLen()
 	if n < 1 {
-		code := fr.ReadLen()
+		code := fp.ReadLen()
 		if code > 1 {
 			// TODO: string table lookup
 		}
@@ -94,8 +94,8 @@ func (fr *FrameReader) ReadString() (s string, isNull bool) {
 			isNull = true
 		}
 	} else {
-		s = string((*fr)[:n])
-		(*fr) = (*fr)[n:]
+		s = string((*fp)[:n])
+		(*fp) = (*fp)[n:]
 	}
 	return
 }
@@ -103,18 +103,18 @@ func (fr *FrameReader) ReadString() (s string, isNull bool) {
 var zeroHeaderValue = []string{"0"}
 
 // ProxyBody sends the remaining data from the FrameReader to a io.Writer
-func (fr *FrameReader) ProxyBody(w io.Writer) (err error) {
+func (fp *FrameParser) ProxyBody(w io.Writer) (err error) {
 	// log.Printf("FrameReader.ProxyBody() %v", hex.EncodeToString(*fr))
-	n, err := w.Write((*fr))
-	(*fr) = (*fr)[n:]
+	n, err := w.Write((*fp))
+	(*fp) = (*fp)[n:]
 	// log.Printf("FrameReader.ProxyBody() remainder %v", hex.EncodeToString(*fr))
 	return
 }
 
 // ReadRequest reads a request structure from a FrameReader and returns a http.Request.
-func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
-	methodString, _ := fr.ReadString()
-	urlString, _ := fr.ReadString()
+func (fp *FrameParser) ReadRequest() (req *http.Request, err error) {
+	methodString, _ := fp.ReadString()
+	urlString, _ := fp.ReadString()
 
 	u, err := url.Parse(urlString)
 	if err != nil {
@@ -132,19 +132,19 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 		Close:      false,
 	}
 
-	if queryKey, isNull := fr.ReadString(); !isNull {
+	if queryKey, isNull := fp.ReadString(); !isNull {
 		queryValues := url.Values{}
 		for {
 			// log.Print("FrameReader.ReadRequest() queryKey ", queryKey)
 			for {
-				queryValue, isNull := fr.ReadString()
+				queryValue, isNull := fp.ReadString()
 				if isNull {
 					break
 				}
 				// log.Print("FrameReader.ReadRequest() queryKey '", queryKey, "' queryValue '", queryValue, "'")
 				queryValues.Add(queryKey, queryValue)
 			}
-			queryKey, isNull = fr.ReadString()
+			queryKey, isNull = fp.ReadString()
 			if isNull {
 				break
 			}
@@ -153,23 +153,23 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 	}
 
 	for {
-		headerKey, isNull := fr.ReadString()
+		headerKey, isNull := fp.ReadString()
 		if isNull {
 			break
 		}
 		// log.Print("FrameReader.ReadRequest() headerKey ", headerKey)
 		for {
-			headerValue, isNull := fr.ReadString()
+			headerValue, isNull := fp.ReadString()
 			if isNull {
 				break
 			}
 			req.Header.Add(headerKey, headerValue)
 		}
 	}
-	if host, isNull := fr.ReadString(); !isNull {
+	if host, isNull := fp.ReadString(); !isNull {
 		req.Host = host
 	}
-	req.ContentLength = fr.ReadInt64()
+	req.ContentLength = fp.ReadInt64()
 	if req.ContentLength == 0 {
 		req.Header["Content-Length"] = zeroHeaderValue
 	} else if req.ContentLength > 0 {
@@ -179,13 +179,13 @@ func (fr *FrameReader) ReadRequest() (req *http.Request, err error) {
 }
 
 // ProxyResponse reads a RAP response record and writes it to a http.ResponseWriter
-func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
+func (fp *FrameParser) ProxyResponse(w http.ResponseWriter) {
 	header := w.Header()
-	statusCode := fr.ReadLen()
+	statusCode := fp.ReadLen()
 	hasCL := false
 
 	for {
-		headerKey, isNull := fr.ReadString()
+		headerKey, isNull := fp.ReadString()
 		if isNull {
 			break
 		}
@@ -193,7 +193,7 @@ func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
 			hasCL = true
 		}
 		for {
-			headerValue, isNull := fr.ReadString()
+			headerValue, isNull := fp.ReadString()
 			if isNull {
 				break
 			}
@@ -201,7 +201,7 @@ func (fr *FrameReader) ProxyResponse(w http.ResponseWriter) {
 		}
 	}
 
-	if contentLength := fr.ReadInt64(); contentLength >= 0 && !hasCL {
+	if contentLength := fp.ReadInt64(); contentLength >= 0 && !hasCL {
 		if contentLength == 0 {
 			header["Content-Length"] = zeroHeaderValue
 		} else {
