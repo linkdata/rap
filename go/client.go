@@ -48,7 +48,7 @@ func (c *Client) dial() *Conn {
 	c.lastAttempt = time.Time{}
 	c.firstAttempt = time.Time{}
 	conn := NewConn(rwc)
-	go conn.Serve(nil)
+	go conn.ServeHTTP(nil)
 	c.conns = append(c.conns, conn)
 	return conn
 }

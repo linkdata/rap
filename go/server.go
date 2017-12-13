@@ -98,7 +98,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		go func(rwc io.ReadWriteCloser) {
 			conn := NewConn(rwc)
 			conn.StatsCollector = srv
-			if err := conn.Serve(srv.Handler); err != nil {
+			if err := conn.ServeHTTP(srv.Handler); err != nil {
 				srv.serveErrorsMu.Lock()
 				defer srv.serveErrorsMu.Unlock()
 				srv.serveErrors[err.Error()]++

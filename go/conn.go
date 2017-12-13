@@ -214,8 +214,8 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 	return
 }
 
-// Serve processes incoming and outgoing frames for the Conn until closed.
-func (c *Conn) Serve(h http.Handler) (err error) {
+// ServeHTTP processes incoming and outgoing frames for the Conn until closed.
+func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	if h != nil {
 	drainExchanges:
 		for {
