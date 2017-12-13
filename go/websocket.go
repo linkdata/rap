@@ -18,7 +18,7 @@ func (e *Exchange) proxyWebsocketReads(done chan struct{}, buf *bufio.ReadWriter
 			log.Fatal(err.Error())
 			return
 		}
-		if err := e.fr.ProxyBody(buf); err != nil {
+		if err := e.fp.ProxyBody(buf); err != nil {
 			log.Print("Exchange.proxyWebsocketReads() ProxyBody() ", err.Error())
 			return
 		}

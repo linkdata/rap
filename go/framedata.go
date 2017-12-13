@@ -22,6 +22,16 @@ var (
 	ErrFrameTooSmall = errors.New("rap: frame too small")
 )
 
+// FrameDataReader is the interface that wraps the ReadFrameData() method.
+type FrameDataReader interface {
+	ReadFrameData(ExchangeID) (FrameData, error)
+}
+
+// FrameDataWriter is the interface that wraps the WriteFrameData() method.
+type FrameDataWriter interface {
+	WriteFrameData(ExchangeID, FrameData) error
+}
+
 // FrameData is a byte array used as a network data frame.
 type FrameData []byte
 

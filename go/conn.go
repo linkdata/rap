@@ -34,6 +34,7 @@ type Conn struct {
 	io.ReadWriteCloser // The I/O endpoint, usually a TCP connection
 	StatsCollector     // Where to report statistics (optional)
 	writeCh            chan FrameData
+	readChs            []chan FrameData
 	exchanges          chan *Exchange
 	exchangeLookup     []*Exchange
 	readErrCh          chan error
@@ -49,12 +50,14 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 	c := &Conn{
 		ReadWriteCloser: rwc,
 		writeCh:         make(chan FrameData),
+		readChs:         make([]chan FrameData, int(MaxExchangeID)+1),
 		exchanges:       make(chan *Exchange, int(MaxExchangeID)+1),
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
 		readErrCh:       make(chan error),
 		writeErrCh:      make(chan error),
 	}
 	for i := range c.exchangeLookup {
+		c.readChs[i] = make(chan FrameData, MaxSendWindowSize)
 		e := NewExchange(c, ExchangeID(i))
 		c.exchangeLookup[i] = e
 		c.exchanges <- e
@@ -134,7 +137,8 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		// log.Print("Conn.ReadFrom(): ", fd, " sendW=", atomic.LoadInt32(&e.sendWindow), " recvW=", atomic.LoadInt32(&e.recvWindow))
 
 		if fd.Header().HasPayload() {
-			e.readCh <- fd
+			c.readChs[fd.Header().ExchangeID()] <- fd
+			// e.readCh <- fd
 		} else {
 			FrameDataFree(fd)
 			e.ackCh <- struct{}{}
@@ -283,11 +287,11 @@ func (c *Conn) CloseRead() (err error) {
 		}
 	}
 	// close exchanges' readCh as we will no longer write to them
-	for _, e := range c.exchangeLookup {
+	for i, e := range c.exchangeLookup {
 		if e != nil {
-			close(e.readCh)
 			close(e.ackCh)
 		}
+		close(c.readChs[i])
 	}
 	return
 }
@@ -343,16 +347,16 @@ func (c *Conn) NewExchange() *Exchange {
 	}
 }
 
-// ExchangeWriteChannel returns the FrameData channel that an Exchange should
-// use when producing output frames. Called once when Exchange is initialized.
-func (c *Conn) ExchangeWriteChannel() chan FrameData {
-	return c.writeCh
+// ExchangeWrite is called by an Exchange when it wants to write
+// a FrameData.
+func (c *Conn) ExchangeWrite(exchangeID ExchangeID, fd FrameData) error {
+	c.writeCh <- fd
+	return nil
 }
 
-// ExchangeReadChannel returns the FrameData channel that an Exchange should
-// use when reading input frames. Called once when Exchange is initialized.
-func (c *Conn) ExchangeReadChannel() chan FrameData {
-	return make(chan FrameData, MaxSendWindowSize)
+// ExchangeRead returns a FrameData for an Exchange read.
+func (c *Conn) ExchangeRead(exchangeID ExchangeID) (FrameData, error) {
+	return <-c.readChs[exchangeID], nil
 }
 
 // ExchangeRelease returns the Exchange to the Conn, allowing it to

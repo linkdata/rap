@@ -63,7 +63,7 @@ func Test_FrameData_Write(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.Write([]byte{0x01})
-	fr := NewFrameReader(fd)
+	fr := NewFrameParser(fd)
 	ba := make([]byte, 1)
 	n, err := fr.Read(ba)
 	assert.NoError(t, err)
@@ -103,7 +103,7 @@ func Test_FrameData_WriteUint64(t *testing.T) {
 			fd := NewFrameData()
 			fd.WriteHeader(0)
 			fd.WriteUint64(n)
-			fr := NewFrameReader(fd)
+			fr := NewFrameParser(fd)
 			assert.Equal(t, n, fr.ReadUint64())
 		}
 	}
@@ -113,11 +113,11 @@ func Test_FrameData_WriteUint64(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		fd.WriteByte(0xff)
 	}
-	fr := NewFrameReader(fd)
+	fr := NewFrameParser(fd)
 	assert.Panics(t, func() { fr.ReadUint64() })
 	// Test overflow
 	fd.WriteByte(0x00)
-	fr = NewFrameReader(fd)
+	fr = NewFrameParser(fd)
 	assert.Panics(t, func() { fr.ReadUint64() })
 }
 
@@ -130,7 +130,7 @@ func Test_FrameData_WriteInt64(t *testing.T) {
 				fd := NewFrameData()
 				fd.WriteHeader(0)
 				fd.WriteInt64(n)
-				fr := NewFrameReader(fd)
+				fr := NewFrameParser(fd)
 				assert.Equal(t, n, fr.ReadInt64())
 			}
 		}
@@ -148,7 +148,7 @@ func Test_FrameData_WriteLen(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				fr := NewFrameReader(fd)
+				fr := NewFrameParser(fd)
 				assert.Equal(t, n, fr.ReadLen())
 			}
 		}
@@ -159,7 +159,7 @@ func Test_FrameData_WriteStringNull(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteStringNull()
-	fr := NewFrameReader(fd)
+	fr := NewFrameParser(fd)
 	s, isNull := fr.ReadString()
 	assert.True(t, isNull)
 	assert.Equal(t, "", s)
@@ -169,7 +169,7 @@ func Test_FrameData_WriteStringEmpty(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteString("")
-	fr := NewFrameReader(fd)
+	fr := NewFrameParser(fd)
 	s, isNull := fr.ReadString()
 	assert.False(t, isNull)
 	assert.Equal(t, "", s)
@@ -180,7 +180,7 @@ func Test_FrameData_WriteString(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteString(helloWorld)
-	fr := NewFrameReader(fd)
+	fr := NewFrameParser(fd)
 	s, isNull := fr.ReadString()
 	assert.False(t, isNull)
 	assert.Equal(t, helloWorld, s)
@@ -197,7 +197,7 @@ func Test_FrameData_WriteString_Overflow(t *testing.T) {
 			err := fd.WriteString(expected)
 			if len(expected) < 0x8000 {
 				assert.NoError(t, err)
-				fr := NewFrameReader(fd)
+				fr := NewFrameParser(fd)
 				s, isNull := fr.ReadString()
 				assert.False(t, isNull)
 				assert.Equal(t, expected, s)
@@ -295,7 +295,7 @@ func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.R
 	if err != nil {
 		return
 	}
-	fr := NewFrameReader(fd2)
+	fr := NewFrameParser(fd2)
 	assert.Equal(t, RecordTypeHTTPRequest, fr.ReadRecordType())
 	req2, err = fr.ReadRequest()
 	if err == nil {
