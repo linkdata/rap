@@ -246,7 +246,7 @@ func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData, err error) {
 
 func Test_FrameData_ReadFrom(t *testing.T) {
 	fd1 := NewFrameData()
-	fd1.WriteHeader(0x1234)
+	fd1.WriteHeader(0x123)
 	fd1.Header().SetBody()
 	fd1.WriteByte(0)
 	fd1.WriteInt64(-0x123456789)
@@ -279,7 +279,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.Request, err error) {
 	var fd2 FrameData
 	fd1 := NewFrameData()
-	fd1.WriteHeader(0x1234)
+	fd1.WriteHeader(0x123)
 	fd1.WriteRequest(req)
 	if req.Body != nil {
 		var bodyCopy bytes.Buffer
@@ -375,7 +375,7 @@ func Test_FrameData_WriteRequest(t *testing.T) {
 
 func Test_FrameData_WriteResponse(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteHeader(0x1234)
+	fd.WriteHeader(0x123)
 	fd.WriteResponse(200, 0, nil)
 
 	h := http.Header{}
