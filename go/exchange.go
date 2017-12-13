@@ -92,11 +92,11 @@ func (e *Exchange) readFrame() (err error) {
 	}
 
 	e.fdr, err = e.conn.ExchangeRead(e.ID)
-	if e.fdr == nil {
-		return io.EOF
-	}
 	if err != nil {
 		return err
+	}
+	if e.fdr == nil {
+		return io.EOF
 	}
 
 	e.fp = NewFrameParser(e.fdr)
@@ -255,14 +255,14 @@ func (e *Exchange) WriteByte(c byte) error {
 // Note that the current write frame is expected to be a regular data frame,
 // such that e.fdw.Header() returns false for IsConnControl() and true for
 // HasPayload().
-func (e *Exchange) Flush() error {
+func (e *Exchange) Flush() (err error) {
 	// log.Print("Exchange.Flush() ", e)
 	if e.hasSentClose {
 		return io.ErrClosedPipe
 	}
 
 	if e.fdw == nil {
-		return nil
+		return
 	}
 
 	if len(e.fdw) > FrameMaxSize {
@@ -290,12 +290,11 @@ func (e *Exchange) Flush() error {
 		e.fdw.Header().SetSizeValue(int32(len(e.fdw)) - FrameHeaderSize)
 	}
 
-	if err := e.conn.ExchangeWrite(e.ID, e.fdw); err != nil {
-		return err
+	if err = e.conn.ExchangeWrite(e.ID, e.fdw); err == nil {
+		e.fdw = nil
 	}
 
-	e.fdw = nil
-	return nil
+	return
 }
 
 func (e *Exchange) sendClose() {

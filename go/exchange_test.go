@@ -13,17 +13,18 @@ import (
 )
 
 type exchangeTester struct {
-	t           *testing.T
-	wg          sync.WaitGroup
-	released    bool
-	ackClosed   bool
-	doneClosed  bool
-	writeClosed bool
-	readClosed  bool
-	writeCh     chan FrameData
-	readCh      chan FrameData
-	lastWritten FrameData
-	Exchange    *Exchange
+	t              *testing.T
+	wg             sync.WaitGroup
+	released       bool
+	ackClosed      bool
+	doneClosed     bool
+	writeClosed    bool
+	readClosed     bool
+	forceReadError error
+	writeCh        chan FrameData
+	readCh         chan FrameData
+	lastWritten    FrameData
+	Exchange       *Exchange
 }
 
 func newExchangeTester(t *testing.T) *exchangeTester {
@@ -57,7 +58,7 @@ func (et *exchangeTester) ExchangeWrite(exchangeID ExchangeID, fd FrameData) err
 }
 
 func (et *exchangeTester) ExchangeRead(exchangeID ExchangeID) (FrameData, error) {
-	return <-et.readCh, nil
+	return <-et.readCh, et.forceReadError
 }
 
 func (et *exchangeTester) CloseWrite() {
@@ -471,6 +472,15 @@ func Test_Exchange_ProxyResponse(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	err = et.Exchange.ProxyResponse(rr2)
 	assert.Equal(t, io.EOF, err)
+
+	// Test read error
+	et = newExchangeTester(t)
+	et.forceReadError = io.ErrUnexpectedEOF
+	defer et.Close()
+	et.CloseRead()
+	rr2 = httptest.NewRecorder()
+	err = et.Exchange.ProxyResponse(rr2)
+	assert.Equal(t, io.ErrUnexpectedEOF, err)
 
 	// Test frame missing head
 	et = newExchangeTester(t)
