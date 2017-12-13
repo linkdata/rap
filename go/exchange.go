@@ -353,10 +353,8 @@ func (e *Exchange) CloseWrite() error {
 	e.writeStart()
 	e.fdw.Header().SetFinal()
 	if err := e.Flush(); err != nil {
-		if e.fdw != nil {
-			FrameDataFree(e.fdw)
-			e.fdw = nil
-		}
+		FrameDataFree(e.fdw)
+		e.fdw = nil
 		return err
 	}
 	// wait for all sent frames to be acknowledged

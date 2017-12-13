@@ -31,8 +31,10 @@ func FrameDataAllocID(id ExchangeID) FrameData {
 
 // FrameDataFree releases a FrameData.
 func FrameDataFree(fd FrameData) {
-	select {
-	case frameDataPool <- fd:
-	default:
+	if fd != nil {
+		select {
+		case frameDataPool <- fd:
+		default:
+		}
 	}
 }
