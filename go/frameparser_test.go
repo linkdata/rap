@@ -44,7 +44,7 @@ func Test_FrameReader_ReadRequest_IllegalURL(t *testing.T) {
 
 func Test_FrameReader_ProxyResponse(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.WriteResponse(200, 0, nil)
 	fp := NewFrameParser(fd)
 	rr := &httptest.ResponseRecorder{}

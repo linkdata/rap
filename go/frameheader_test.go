@@ -6,8 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const testExchangeID ExchangeID = 0x123
-
 func getHeader(t *testing.T) (h FrameHeader) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)

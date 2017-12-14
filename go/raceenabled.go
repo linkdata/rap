@@ -8,7 +8,9 @@ package rap
 
 func init() {
 	raceEnabled = true
-	// race detector can only handle max of 8192 goroutines,
-	// and we'll need to run two Conn's at the same time.
-	MaxExchangeID = ExchangeID(3072)
+	// race detector can only handle max of 8192 goroutines.
+	// having too many running at a time won't improve testing,
+	// but it will dump a lot of irrelevant goroutine data on
+	// panics and timeouts.
+	MaxExchangeID = ExchangeID(20)
 }

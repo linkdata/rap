@@ -33,7 +33,7 @@ func newExchangeTester(t *testing.T) *exchangeTester {
 		writeCh: make(chan FrameData),
 		readCh:  make(chan FrameData, MaxSendWindowSize),
 	}
-	et.Exchange = NewExchange(et, 0x123)
+	et.Exchange = NewExchange(et, MaxExchangeID)
 	et.wg.Add(1)
 
 	go func() {
@@ -102,7 +102,7 @@ func (et *exchangeTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (et *exchangeTester) InjectRequest(req *http.Request) {
 	fd := NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetFinal()
 	err := fd.WriteRequest(req)
 	assert.NoError(et.t, err)
@@ -129,8 +129,8 @@ func (*failWriter) Write(p []byte) (n int, err error) {
 }
 
 func Test_Exchange_String(t *testing.T) {
-	e := NewExchange(&exchangeTester{}, 0x123)
-	assert.Equal(t, "[Exchange [ExchangeID 0123] sendW=8 started=false sentC=false recvC=false len(ackCh)=0]", e.String())
+	e := NewExchange(&exchangeTester{}, 0x1)
+	assert.Equal(t, "[Exchange [ExchangeID 0001] sendW=8 started=false sentC=false recvC=false len(ackCh)=0]", e.String())
 }
 
 func Test_Exchange_StartAndRelease(t *testing.T) {
@@ -155,7 +155,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	fd := NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetFinal()
 	et.readCh <- fd
 	err = et.Exchange.Start(et)
@@ -167,10 +167,10 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	fd = NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	et.readCh <- fd
 	fd = NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetFinal()
 	et.readCh <- fd
 	err = et.Exchange.Start(et)
@@ -182,7 +182,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	fd = NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetFinal()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	et.readCh <- fd
@@ -195,7 +195,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	fd = NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	fd.WriteStringNull()  // method
@@ -211,7 +211,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	fd = NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetHead()
 	fd.Header().SetFinal()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
@@ -226,7 +226,7 @@ func Test_Exchange_StartAndRelease(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	fd = NewFrameData()
-	fd.WriteHeader(0x123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeUserFirst - 1)
 	fd.Header().SetFinal()
@@ -322,7 +322,7 @@ func Test_Exchange_Flush(t *testing.T) {
 func Test_Exchange_Read(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
-	fd := NewFrameDataID(0x123)
+	fd := NewFrameDataID(MaxExchangeID)
 	fd.WriteByte(0xc4)
 	fd.Header().SetFinal()
 	et.readCh <- fd
@@ -378,7 +378,7 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 func Test_Exchange_WriteTo(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
-	fd := NewFrameDataID(0x123)
+	fd := NewFrameDataID(MaxExchangeID)
 	fd.WriteByte(0xc4)
 	fd.Header().SetFinal()
 	et.readCh <- fd
@@ -389,7 +389,7 @@ func Test_Exchange_WriteTo(t *testing.T) {
 
 	et = newExchangeTester(t)
 	defer et.Close()
-	fd = NewFrameDataID(0x123)
+	fd = NewFrameDataID(MaxExchangeID)
 	fd.WriteByte(0xc5)
 	fd.Header().SetFinal()
 	et.readCh <- fd
@@ -485,7 +485,7 @@ func Test_Exchange_ProxyResponse(t *testing.T) {
 	// Test frame missing head
 	et = newExchangeTester(t)
 	defer et.Close()
-	fd := NewFrameDataID(0x123)
+	fd := NewFrameDataID(MaxExchangeID)
 	fd.WriteByte(0x01)
 	fd.Header().SetBody()
 	fd.Header().SetFinal()
@@ -497,7 +497,7 @@ func Test_Exchange_ProxyResponse(t *testing.T) {
 	// Test wrong record type
 	et = newExchangeTester(t)
 	defer et.Close()
-	fd = NewFrameDataID(0x123)
+	fd = NewFrameDataID(MaxExchangeID)
 	fd.WriteRecordType(RecordTypeUserFirst)
 	fd.Header().SetHead()
 	fd.Header().SetFinal()
@@ -519,7 +519,7 @@ func Test_Exchange_ProxyResponse(t *testing.T) {
 func Test_Exchange_Close(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
-	fd := NewFrameDataID(0x123)
+	fd := NewFrameDataID(MaxExchangeID)
 	fd.Header().SetFinal()
 	et.readCh <- fd
 	err := et.Exchange.Close()
