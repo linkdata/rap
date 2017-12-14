@@ -118,13 +118,13 @@ func (fh FrameHeader) String() string {
 
 // SizeValue returns the Size value of the frame.
 // This is valid for both ConnControl frames and data frames.
-func (fh FrameHeader) SizeValue() int32 {
-	return int32(fh[0])<<8 | int32(fh[1])
+func (fh FrameHeader) SizeValue() int {
+	return int(fh[0])<<8 | int(fh[1])
 }
 
 // SetSizeValue sets the Size value of the header.
 // This is valid for both ConnControl frames and data frames.
-func (fh FrameHeader) SetSizeValue(n int32) {
+func (fh FrameHeader) SetSizeValue(n int) {
 	fh[0] = byte(n >> 8)
 	fh[1] = byte(n)
 }

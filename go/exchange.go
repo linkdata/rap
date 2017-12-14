@@ -285,7 +285,7 @@ func (e *Exchange) Flush() (err error) {
 	}
 
 	if e.fdw.Header().HasPayload() {
-		e.fdw.Header().SetSizeValue(int32(len(e.fdw)) - FrameHeaderSize)
+		e.fdw.Header().SetSizeValue(len(e.fdw) - FrameHeaderSize)
 	}
 
 	if err = e.conn.ExchangeWrite(e.ID, e.fdw); err == nil {

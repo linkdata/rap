@@ -79,6 +79,20 @@ func (fd FrameData) Payload() []byte {
 	return fd[FrameHeaderSize:]
 }
 
+// SetSizeValue sets the header size value to the current payload size,
+// and if it's greater than zero, also sets the body flag.
+func (fd FrameData) SetSizeValue() {
+	payloadSize := len(fd) - FrameHeaderSize
+	if payloadSize > 0 {
+		FrameHeader(fd).SetSizeValue(payloadSize)
+		FrameHeader(fd).SetBody()
+	} else {
+		if payloadSize < 0 {
+			panic(ErrFrameTooSmall)
+		}
+	}
+}
+
 // Available returns number of free bytes in the FrameData.
 func (fd FrameData) Available() int {
 	return cap(fd) - len(fd)
@@ -100,6 +114,13 @@ func (fd *FrameData) Write(p []byte) (n int, err error) {
 func (fd *FrameData) WriteHeader(exchangeID ExchangeID) {
 	*fd = (*fd)[:FrameHeaderSize]
 	FrameHeader(*fd).ClearID(exchangeID)
+	return
+}
+
+// WriteConnControl initializes the frame with the given control code.
+func (fd *FrameData) WriteConnControl(sc ConnControl) {
+	*fd = (*fd)[:FrameHeaderSize]
+	FrameHeader(*fd).SetConnControl(sc)
 	return
 }
 
@@ -219,7 +240,7 @@ func (fd FrameData) WriteTo(w io.Writer) (int64, error) {
 		panic("FrameData.WriteTo(): frame has incomplete header")
 	}
 	if fd.Header().HasPayload() {
-		payloadLength := int32(len(fd)) - FrameHeaderSize
+		payloadLength := len(fd) - FrameHeaderSize
 		if payloadLength > FrameMaxPayloadSize {
 			return 0, ErrFrameTooBig
 		}
