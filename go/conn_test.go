@@ -15,11 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type rwcPipe struct {
-	*io.PipeReader
-	*io.PipeWriter
-}
-
 const connTimeout = time.Millisecond * time.Duration(10)
 
 func init() {
@@ -29,11 +24,26 @@ func init() {
 	}
 }
 
+type rwcPipe struct {
+	*io.PipeReader
+	*io.PipeWriter
+	bytesWritten int64
+	bytesRead    int64
+}
+
 func (rwcp *rwcPipe) Close() error {
 	if err := rwcp.PipeWriter.Close(); err != nil {
 		panic(err)
 	}
 	return rwcp.PipeReader.Close()
+}
+
+func (rwcp *rwcPipe) AddBytesWritten(n int64) {
+	atomic.AddInt64(&rwcp.bytesWritten, n)
+}
+
+func (rwcp *rwcPipe) AddBytesRead(n int64) {
+	atomic.AddInt64(&rwcp.bytesRead, n)
 }
 
 func newRwcPipes() (a, b *rwcPipe) {
@@ -51,27 +61,17 @@ func newRwcPipes() (a, b *rwcPipe) {
 }
 
 type connTester struct {
-	t            *testing.T
-	a, b         *rwcPipe
-	conn         *Conn
-	server       *Conn
-	isClosed     bool
-	serverDone   chan struct{}
-	connDone     chan struct{}
-	bytesWritten int64
-	bytesRead    int64
+	t          *testing.T
+	a, b       *rwcPipe
+	conn       *Conn
+	server     *Conn
+	isClosed   bool
+	serverDone chan struct{}
+	connDone   chan struct{}
 }
 
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
-}
-
-func (ct *connTester) AddBytesWritten(n int64) {
-	atomic.AddInt64(&ct.bytesWritten, n)
-}
-
-func (ct *connTester) AddBytesRead(n int64) {
-	atomic.AddInt64(&ct.bytesRead, n)
 }
 
 func (ct *connTester) Close() {
@@ -95,7 +95,8 @@ func newConnTester(t *testing.T) (ct *connTester) {
 		serverDone: make(chan struct{}),
 		connDone:   make(chan struct{}),
 	}
-	ct.conn.StatsCollector = ct
+	ct.conn.StatsCollector = a
+	ct.server.StatsCollector = b
 	go func(ct *connTester) {
 		err := ct.server.ServeHTTP(ct)
 		close(ct.serverDone)
