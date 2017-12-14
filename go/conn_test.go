@@ -41,12 +41,13 @@ func newRwcPipes() (a, b *rwcPipe) {
 }
 
 type connTester struct {
-	t        *testing.T
-	a, b     *rwcPipe
-	conn     *Conn
-	server   *Conn
-	isClosed bool
-	done     chan struct{}
+	t          *testing.T
+	a, b       *rwcPipe
+	conn       *Conn
+	server     *Conn
+	isClosed   bool
+	serverDone chan struct{}
+	connDone   chan struct{}
 }
 
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -56,26 +57,36 @@ func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (ct *connTester) Close() {
 	if !ct.isClosed {
 		ct.isClosed = true
-		assert.NoError(ct.t, ct.a.Close())
-		<-ct.done
+		assert.NoError(ct.t, ct.a.PipeWriter.Close())
+		assert.NoError(ct.t, ct.b.PipeWriter.Close())
+		<-ct.serverDone
+		<-ct.connDone
 	}
 }
 
 func newConnTester(t *testing.T) (ct *connTester) {
 	a, b := newRwcPipes()
 	ct = &connTester{
-		t:      t,
-		a:      a,
-		b:      b,
-		conn:   NewConn(a),
-		server: NewConn(b),
-		done:   make(chan struct{}),
+		t:          t,
+		a:          a,
+		b:          b,
+		conn:       NewConn(a),
+		server:     NewConn(b),
+		serverDone: make(chan struct{}),
+		connDone:   make(chan struct{}),
 	}
 	go func(ct *connTester) {
-		assert.NoError(ct.t, ct.server.ServeHTTP(ct))
-		close(ct.done)
+		err := ct.server.ServeHTTP(ct)
+		ct.t.Log("ct.server.ServeHTTP(ct)", err)
+		// assert.Equal(ct.t, io.ErrClosedPipe, err)
+		close(ct.serverDone)
 	}(ct)
-	go ct.conn.ServeHTTP(nil)
+	go func(ct *connTester) {
+		err := ct.conn.ServeHTTP(nil)
+		ct.t.Log("ct.conn.ServeHTTP(ct)", err)
+		// assert.Equal(ct.t, io.ErrClosedPipe, err)
+		close(ct.connDone)
+	}(ct)
 	return
 }
 
@@ -85,6 +96,7 @@ func (ct *connTester) InjectRequest(r *http.Request) {
 	var responseErr error
 	var wg sync.WaitGroup
 	e := ct.conn.NewExchangeWait(connTimeout)
+	defer e.Release()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -101,11 +113,12 @@ func Test_Conn_String(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	assert.Equal(t, "[Conn]", ct.conn.String())
+	assert.Equal(t, int(MaxExchangeID)+1, len(ct.conn.exchangeLookup))
+	assert.Equal(t, int(MaxExchangeID)+1, cap(ct.conn.exchanges))
 }
 
 func Test_Conn_normal_request_response(t *testing.T) {
-	// defer leaktest.Check(t)()
-	MaxExchangeID = ExchangeID(1)
+	defer leaktest.Check(t)()
 	ct := newConnTester(t)
 	defer ct.Close()
 	ct.InjectRequest(httptest.NewRequest("GET", "/", nil))
