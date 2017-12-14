@@ -155,52 +155,51 @@ type flusher interface {
 // an error occurs.
 func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 	var unreported int64
+	var written int64
 	f, hasFlusher := w.(flusher)
 	hasCollector := c.StatsCollector != nil
 
-	for {
+	for err == nil {
 		var fd FrameData // fd starts out nil on each iteration
 
 		select {
 		case fd = <-c.writeCh:
 		default:
-			// no immediately available FrameData.
-			// Flush the output and do a blocking read.
+			// no immediately available FrameData, flush the output
 			if hasFlusher {
 				err = f.Flush()
-				if err != nil {
+				if err == nil {
+					if hasCollector && unreported > 0 {
+						c.StatsCollector.AddBytesWritten(unreported)
+						unreported = 0
+					}
+				}
+			}
+		}
+
+		if err == nil {
+			// do a blocking read if we didn't get a fd
+			if fd == nil {
+				if fd = <-c.writeCh; fd == nil {
+					// c.writeCh is closed
 					break
 				}
-				if hasCollector && unreported > 0 {
+			}
+
+			// do the actual write
+			// log.Print("Conn.WriteTo(): ", fd)
+			written, err = fd.WriteTo(w)
+			n += written
+			FrameDataFree(fd)
+
+			// handle statistics reporting
+			if hasCollector {
+				unreported += written
+				if unreported > FrameMaxSize {
 					c.StatsCollector.AddBytesWritten(unreported)
 					unreported = 0
 				}
 			}
-			fd = <-c.writeCh
-		}
-
-		if fd == nil {
-			break
-		}
-
-		// do the actual write
-		// log.Print("Conn.WriteTo(): ", fd)
-		var written int64
-		written, err = fd.WriteTo(w)
-		FrameDataFree(fd)
-		n += written
-
-		// handle statistics reporting
-		if hasCollector {
-			unreported += written
-			if unreported > FrameMaxSize {
-				c.StatsCollector.AddBytesWritten(unreported)
-				unreported = 0
-			}
-		}
-
-		if err != nil {
-			break
 		}
 	}
 
