@@ -278,10 +278,8 @@ func (e *Exchange) Flush() (err error) {
 		e.hasSentClose = true
 	} else {
 		// make sure window allows us to send
-		if e.sendWindow < 1 {
-			if err := e.waitForSendWindowSize(1); err != nil {
-				return err
-			}
+		if err := e.waitForSendWindowSize(1); err != nil {
+			return err
 		}
 		e.sendWindow--
 	}
@@ -311,27 +309,18 @@ func (e *Exchange) sendClose() {
 }
 
 func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
-loopAcks:
-	for {
+	if e.sendWindow >= minimumRequiredWindowSize {
+		return nil
+	}
+
+	timer := time.NewTimer(e.conn.ExchangeTimeout())
+	defer timer.Stop()
+
+	for e.sendWindow < minimumRequiredWindowSize {
 		select {
 		case _, ok := <-e.ackCh:
 			if !ok {
 				e.sendClose()
-				return io.ErrClosedPipe
-			}
-			e.sendWindow++
-		default:
-			break loopAcks
-		}
-	}
-
-	for e.sendWindow < minimumRequiredWindowSize {
-		timer := time.NewTimer(e.conn.ExchangeTimeout())
-		defer timer.Stop()
-		// log.Print("Exchange.Flush(): starting wait ", e)
-		select {
-		case _, ok := <-e.ackCh:
-			if !ok {
 				return io.ErrClosedPipe
 			}
 			e.sendWindow++
@@ -340,6 +329,7 @@ loopAcks:
 			return ErrTimeoutFlowControl
 		}
 	}
+
 	return nil
 }
 
