@@ -110,7 +110,7 @@ func (et *exchangeTester) InjectRequest(req *http.Request) {
 	n, err := io.Copy(&buf, req.Body)
 	if err == nil && n > 0 {
 		fd.Header().SetBody()
-		fd.Header().SetSizeValue(int32(n))
+		fd.Header().SetSizeValue(int(n))
 		precopylen := len(fd)
 		n2, err2 := io.Copy(&fd, &buf)
 		assert.Equal(et.t, precopylen+int(n2), len(fd))

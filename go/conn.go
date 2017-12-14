@@ -39,6 +39,9 @@ type Conn struct {
 	exchangeLookup     []*Exchange
 	readErrCh          chan error
 	writeErrCh         chan error
+	lastPingSent       time.Time
+	lastPongRcvd       time.Time
+	latency            time.Duration
 }
 
 func (c *Conn) String() string {
@@ -87,6 +90,11 @@ func connControlStoppedHandler(c *Conn, fd FrameData) (err error) {
 }
 
 func connControlPongHandler(c *Conn, fd FrameData) (err error) {
+	c.lastPongRcvd = time.Now()
+	if fd.Header().HasPayload() {
+		fp := NewFrameParser(fd)
+		c.latency = c.lastPongRcvd.Sub(time.Unix(0, fp.ReadInt64()))
+	}
 	FrameDataFree(fd)
 	return
 }
@@ -95,6 +103,16 @@ func connControlReservedHandler(c *Conn, fd FrameData) (err error) {
 	err = fmt.Errorf("unknown conn control frame %v", fd.Header())
 	FrameDataFree(fd)
 	return
+}
+
+// Ping sends a ping frame and returns without waiting for response.
+func (c *Conn) Ping() {
+	fd := FrameDataAlloc()
+	fd.WriteConnControl(ConnControlPing)
+	c.lastPingSent = time.Now()
+	// fd.WriteInt64(c.lastPingSent.UnixNano())
+	// fd.SetSizeValue()
+	c.writeCh <- fd
 }
 
 // ReadFrom implements io.ReaderFrom.

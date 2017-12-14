@@ -77,6 +77,12 @@ func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (ct *connTester) Close() {
 	if !ct.isClosed {
 		ct.isClosed = true
+		for i := 0; i < 100; i++ {
+			time.Sleep(10 * time.Millisecond)
+			if len(ct.conn.writeCh) == 0 && len(ct.server.writeCh) == 0 {
+				break
+			}
+		}
 		assert.NoError(ct.t, ct.a.PipeWriter.Close())
 		assert.NoError(ct.t, ct.b.PipeWriter.Close())
 		<-ct.serverDone
@@ -179,4 +185,22 @@ func Test_Conn_big_request_response(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	ct.InjectRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
+}
+
+func Test_Conn_ping_pong(t *testing.T) {
+	ct := newConnTester(t)
+	defer ct.Close()
+	assert.Zero(t, ct.conn.lastPingSent)
+	assert.Zero(t, ct.conn.lastPongRcvd)
+	assert.Zero(t, ct.server.lastPingSent)
+	assert.Zero(t, ct.server.lastPongRcvd)
+	ct.conn.Ping()
+	for ct.conn.lastPongRcvd.IsZero() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.NotZero(t, ct.conn.lastPingSent)
+	assert.NotZero(t, ct.conn.lastPongRcvd)
+	assert.Zero(t, ct.server.lastPingSent)
+	assert.Zero(t, ct.server.lastPongRcvd)
+	// assert.NotZero(t, ct.conn.latency)
 }
