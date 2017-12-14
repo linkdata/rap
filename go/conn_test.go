@@ -141,6 +141,32 @@ func Test_Conn_String(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID)+1, cap(ct.conn.exchanges))
 }
 
+func Test_Conn_NewExchange(t *testing.T) {
+	ct := newConnTester(t)
+	defer ct.Close()
+	var gotten int
+	for {
+		if e := ct.conn.NewExchange(); e != nil {
+			gotten++
+			defer e.Release()
+		} else {
+			break
+		}
+	}
+	assert.Equal(t, int(MaxExchangeID)+1, gotten)
+	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond))
+}
+
+func Test_Conn_ReleaseExchange(t *testing.T) {
+	ct := newConnTester(t)
+	defer ct.Close()
+	e := ct.conn.NewExchange()
+	assert.NotNil(t, e)
+	e.Release()
+	e = NewExchange(ct.conn, 1)
+	assert.Panics(t, func() { e.Release() })
+}
+
 func Test_Conn_empty_request_response(t *testing.T) {
 	defer leaktest.Check(t)()
 	ct := newConnTester(t)
