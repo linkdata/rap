@@ -242,7 +242,9 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	var writeErr error
 	select {
 	case readErr = <-c.readErrCh:
+		err = readErr
 	case writeErr = <-c.writeErrCh:
+		err = writeErr
 	}
 
 	if closeErr := c.Close(); err == nil {
