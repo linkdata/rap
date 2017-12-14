@@ -1,10 +1,13 @@
 package rap
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +21,13 @@ type rwcPipe struct {
 }
 
 const connTimeout = time.Millisecond * time.Duration(10)
+
+func init() {
+	// limit goroutines to avoid debugger overload
+	if int(MaxExchangeID) > 512 {
+		MaxExchangeID = ExchangeID(512)
+	}
+}
 
 func (rwcp *rwcPipe) Close() error {
 	if err := rwcp.PipeWriter.Close(); err != nil {
@@ -41,17 +51,27 @@ func newRwcPipes() (a, b *rwcPipe) {
 }
 
 type connTester struct {
-	t          *testing.T
-	a, b       *rwcPipe
-	conn       *Conn
-	server     *Conn
-	isClosed   bool
-	serverDone chan struct{}
-	connDone   chan struct{}
+	t            *testing.T
+	a, b         *rwcPipe
+	conn         *Conn
+	server       *Conn
+	isClosed     bool
+	serverDone   chan struct{}
+	connDone     chan struct{}
+	bytesWritten int64
+	bytesRead    int64
 }
 
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
+}
+
+func (ct *connTester) AddBytesWritten(n int64) {
+	atomic.AddInt64(&ct.bytesWritten, n)
+}
+
+func (ct *connTester) AddBytesRead(n int64) {
+	atomic.AddInt64(&ct.bytesRead, n)
 }
 
 func (ct *connTester) Close() {
@@ -75,17 +95,20 @@ func newConnTester(t *testing.T) (ct *connTester) {
 		serverDone: make(chan struct{}),
 		connDone:   make(chan struct{}),
 	}
+	ct.conn.StatsCollector = ct
 	go func(ct *connTester) {
 		err := ct.server.ServeHTTP(ct)
-		ct.t.Log("ct.server.ServeHTTP(ct)", err)
-		// assert.Equal(ct.t, io.ErrClosedPipe, err)
 		close(ct.serverDone)
+		if !ct.isClosed {
+			panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
+		}
 	}(ct)
 	go func(ct *connTester) {
 		err := ct.conn.ServeHTTP(nil)
-		ct.t.Log("ct.conn.ServeHTTP(ct)", err)
-		// assert.Equal(ct.t, io.ErrClosedPipe, err)
 		close(ct.connDone)
+		if !ct.isClosed {
+			panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
+		}
 	}(ct)
 	return
 }
@@ -117,9 +140,16 @@ func Test_Conn_String(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID)+1, cap(ct.conn.exchanges))
 }
 
-func Test_Conn_normal_request_response(t *testing.T) {
+func Test_Conn_empty_request_response(t *testing.T) {
 	defer leaktest.Check(t)()
 	ct := newConnTester(t)
 	defer ct.Close()
 	ct.InjectRequest(httptest.NewRequest("GET", "/", nil))
+}
+
+func Test_Conn_big_request_response(t *testing.T) {
+	defer leaktest.Check(t)()
+	ct := newConnTester(t)
+	defer ct.Close()
+	ct.InjectRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
 }
