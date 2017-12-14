@@ -202,7 +202,7 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 		if endIndex < len(*fd) {
 			return n, ErrFrameTooSmall
 		}
-		if endIndex > FrameMaxPayloadSize {
+		if endIndex > FrameMaxSize {
 			return n, ErrFrameTooBig
 		}
 		num, err = io.ReadFull(r, (*fd)[len(*fd):endIndex])
