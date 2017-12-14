@@ -259,7 +259,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	pipeFrame(t, fd1)
 
 	// Test underflow
-	fd1 = NewFrameDataID(0x23)
+	fd1 = NewFrameDataID(MaxExchangeID)
 	fd1.Header().SetBody()
 	fd1.Header().SetSizeValue(0)
 	fd1.WriteString("Meh")
@@ -268,7 +268,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	assert.Zero(t, n)
 
 	// Test overflow
-	fd1 = NewFrameDataID(0x23)
+	fd1 = NewFrameDataID(MaxExchangeID)
 	fd1.Header().SetBody()
 	fd1.Header().SetSizeValue(FrameMaxPayloadSize + 1)
 	n, err = fd1.ReadFrom(bytes.NewBuffer(make([]byte, FrameMaxPayloadSize+1)))
@@ -388,7 +388,7 @@ func Test_FrameData_WriteResponse(t *testing.T) {
 	assert.NoError(t, err)
 
 	fd.Clear()
-	fd.WriteHeader(0x0012)
+	fd.WriteHeader(MaxExchangeID)
 	h = http.Header{}
 	const valueTemplate = "foobarquux-%d"
 	for i := 0; i < FrameMaxSize/len(valueTemplate); i++ {

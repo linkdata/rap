@@ -28,10 +28,14 @@ func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
 		return
 	}
 	oldSize := len(frameDataPool)
-	frameDataPool = make(chan FrameData, 0x10)
+	var idLimit = int(MaxExchangeID)
+	if idLimit > 0x10 {
+		idLimit = 0x10
+	}
+	frameDataPool = make(chan FrameData, idLimit)
 	fd1 := FrameDataAlloc()
 	assert.NotNil(t, fd1)
-	for i := 0; i <= 0x10; i++ {
+	for i := 0; i <= idLimit; i++ {
 		FrameDataFree(NewFrameDataID(ExchangeID(i & 0xFFF)))
 	}
 	fd2 := FrameDataAlloc()

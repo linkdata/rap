@@ -52,7 +52,7 @@ func Test_FrameReader_ProxyResponse(t *testing.T) {
 	fp.ProxyResponse(rr)
 
 	fd.Clear()
-	fd.WriteHeader(0x0123)
+	fd.WriteHeader(MaxExchangeID)
 	h := http.Header{}
 	h.Add("Status", "Meh")
 	h.Add("Foo", "bar")
@@ -67,7 +67,7 @@ func Test_FrameReader_ProxyResponse(t *testing.T) {
 	assert.Equal(t, "234", rr.Header().Get("Content-Length"))
 
 	fd.Clear()
-	fd.WriteHeader(0x0123)
+	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPResponse)
 	fd.WriteLen(200)
