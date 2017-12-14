@@ -138,7 +138,6 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		if fd.Header().HasPayload() {
 			c.readChs[fd.Header().ExchangeID()] <- fd
-			// e.readCh <- fd
 		} else {
 			FrameDataFree(fd)
 			e.ackCh <- struct{}{}
@@ -365,7 +364,7 @@ func (c *Conn) ExchangeRelease(e *Exchange) {
 	select {
 	case c.exchanges <- e:
 	default:
-		log.Print("can't release exchange, len(s.exchanges) ", len(c.exchanges), " cap(s.exchanges) ", cap(c.exchanges), " max ", MaxExchangeID)
+		panic(fmt.Sprint("can't release exchange, len(s.exchanges) ", len(c.exchanges), " cap(s.exchanges) ", cap(c.exchanges), " max ", MaxExchangeID))
 	}
 	return
 }
