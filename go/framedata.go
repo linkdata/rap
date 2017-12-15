@@ -79,18 +79,13 @@ func (fd FrameData) Payload() []byte {
 	return fd[FrameHeaderSize:]
 }
 
-// SetSizeValue sets the header size value to the current payload size,
-// and if it's greater than zero, also sets the body flag.
+// SetSizeValue sets the header size value to the current payload size.
 func (fd FrameData) SetSizeValue() {
 	payloadSize := len(fd) - FrameHeaderSize
-	if payloadSize > 0 {
-		FrameHeader(fd).SetSizeValue(payloadSize)
-		FrameHeader(fd).SetBody()
-	} else {
-		if payloadSize < 0 {
-			panic(ErrFrameTooSmall)
-		}
+	if payloadSize < 0 {
+		panic(ErrFrameTooSmall)
 	}
+	FrameHeader(fd).SetSizeValue(payloadSize)
 }
 
 // Available returns number of free bytes in the FrameData.

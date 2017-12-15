@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -396,4 +397,16 @@ func Test_FrameData_WriteResponse(t *testing.T) {
 	}
 	err = fd.WriteResponse(300, 0, h)
 	assert.Error(t, err)
+}
+
+func Test_FrameData_SetSizeValue(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteConnControl(ConnControlPing)
+	n := time.Now().UnixNano()
+	fd.WriteInt64(n)
+	fd.SetSizeValue()
+	assert.True(t, fd.Header().IsConnControl())
+	assert.Equal(t, ConnControlPing, fd.Header().ConnControl())
+	assert.True(t, fd.Header().HasPayload())
+	assert.NotZero(t, fd.Header().SizeValue())
 }
