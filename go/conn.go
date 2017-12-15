@@ -16,6 +16,14 @@ type StatsCollector interface {
 	AddBytesRead(int64)
 }
 
+// ProtocolError is the error type used for reporting protocol errors,
+// all of which are fatal to a connection.
+type ProtocolError struct {
+	msg string // description of error
+}
+
+func (e *ProtocolError) Error() string { return e.msg }
+
 type connControlHandler func(*Conn, FrameData) error
 
 var connControlHandlers = map[ConnControl]connControlHandler{
@@ -96,8 +104,8 @@ func connControlStoppedHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlReservedHandler(c *Conn, fd FrameData) (err error) {
-	panic(fmt.Sprint("unknown conn control frame ", fd.Header()))
+func connControlReservedHandler(c *Conn, fd FrameData) error {
+	return &ProtocolError{msg: fmt.Sprintf("unknown conn control frame %v", fd.Header())}
 }
 
 // Ping sends a ping frame and returns without waiting for response.
@@ -153,8 +161,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		if fd.Header().IsConnControl() {
 			if err = connControlHandlers[fd.Header().ConnControl()](c, fd); err != nil {
-				log.Fatal("Conn.ReadFrom(): connControlHandler ", fd.Header().ConnControl(), ": ", err.Error())
-				break
+				return
 			}
 			continue
 		}
