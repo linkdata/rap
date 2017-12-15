@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,9 +40,9 @@ type Conn struct {
 	exchangeLookup     []*Exchange
 	readErrCh          chan error
 	writeErrCh         chan error
-	lastPingSent       time.Time
-	lastPongRcvd       time.Time
-	latency            time.Duration
+	lastPingSent       int64 // Unix nanoseconds
+	lastPongRcvd       int64 // Unix nanoseconds
+	latency            int64 // Unix nanoseconds
 }
 
 func (c *Conn) String() string {
@@ -75,10 +76,11 @@ func connControlPingHandler(c *Conn, fd FrameData) (err error) {
 }
 
 func connControlPongHandler(c *Conn, fd FrameData) (err error) {
-	c.lastPongRcvd = time.Now()
+	var now = time.Now().UnixNano()
+	atomic.StoreInt64(&c.lastPongRcvd, now)
 	if fd.Header().HasPayload() {
 		fp := NewFrameParser(fd)
-		c.latency = c.lastPongRcvd.Sub(time.Unix(0, fp.ReadInt64()))
+		atomic.StoreInt64(&c.latency, now-fp.ReadInt64())
 	}
 	FrameDataFree(fd)
 	return
@@ -104,10 +106,23 @@ func connControlReservedHandler(c *Conn, fd FrameData) (err error) {
 func (c *Conn) Ping() {
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(ConnControlPing)
-	c.lastPingSent = time.Now()
-	fd.WriteInt64(c.lastPingSent.UnixNano())
+	atomic.StoreInt64(&c.lastPingSent, time.Now().UnixNano())
+	fd.WriteInt64(c.lastPingSent)
 	fd.SetSizeValue()
 	c.writeCh <- fd
+}
+
+// Latency returns the result of the last successful ping/pong measurement,
+// or the zero value if there is no current valid measurement.
+func (c *Conn) Latency() time.Duration {
+	ping := atomic.LoadInt64(&c.lastPingSent)
+	if ping > 0 {
+		pong := atomic.LoadInt64(&c.lastPongRcvd)
+		if ping <= pong {
+			return time.Nanosecond * time.Duration(pong-ping)
+		}
+	}
+	return 0
 }
 
 // ReadFrom implements io.ReaderFrom.

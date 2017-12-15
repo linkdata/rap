@@ -194,13 +194,17 @@ func Test_Conn_ping_pong(t *testing.T) {
 	assert.Zero(t, ct.conn.lastPongRcvd)
 	assert.Zero(t, ct.server.lastPingSent)
 	assert.Zero(t, ct.server.lastPongRcvd)
+	assert.Zero(t, ct.conn.Latency())
 	ct.conn.Ping()
-	for ct.conn.lastPongRcvd.IsZero() {
+	for i := 0; i < 10 && atomic.LoadInt64(&ct.conn.lastPongRcvd) == 0; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
 	assert.NotZero(t, ct.conn.lastPingSent)
 	assert.NotZero(t, ct.conn.lastPongRcvd)
 	assert.Zero(t, ct.server.lastPingSent)
 	assert.Zero(t, ct.server.lastPongRcvd)
-	// assert.NotZero(t, ct.conn.latency)
+	assert.True(t, ct.conn.lastPingSent <= ct.conn.lastPongRcvd)
+	if ct.conn.lastPingSent < ct.conn.lastPongRcvd {
+		assert.NotZero(t, ct.conn.Latency())
+	}
 }
