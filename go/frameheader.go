@@ -60,39 +60,39 @@ const (
 type ConnControl byte
 
 const (
-	// ConnControlPing requests a Pong in response with the same Size
-	// value as this Ping message. Note that the other side may choose to
+	// Unused but reserved for future use, no payload.
+	connControlReserved000 ConnControl = ConnControl(0)
+	// Unused but reserved for future use, Size contains payload size.
+	connControlReserved001 ConnControl = ConnControl(FrameFlagBody)
+	// ConnControlPing requests a Pong in response with the same payload
+	// as this Ping message. Note that the other side may choose to
 	// not respond to all Pings.
-	ConnControlPing ConnControl = ConnControl(0)
-	// ConnControlSetup is only valid as the first frame sent, sets up the
-	// string translation table.
-	ConnControlSetup ConnControl = ConnControl(FrameFlagBody)
+	ConnControlPing ConnControl = ConnControl(FrameFlagHead)
+	// ConnControlPong is in response to a Ping. The Size value must be the
+	// same as the Size value for last received Ping.
+	ConnControlPong ConnControl = ConnControl(FrameFlagHead | FrameFlagBody)
+	// Unused but reserved for future use, no payload.
+	connControlReserved100 ConnControl = ConnControl(FrameFlagFinal)
+	// Unused but reserved for future use, Size contains payload size.
+	connControlReserved101 ConnControl = ConnControl(FrameFlagFinal | FrameFlagBody)
 	// ConnControlStopping means Conn is closing. No new exchanges may be
 	// initiated on the conn and active exchanges must be closed.
-	ConnControlStopping ConnControl = ConnControl(FrameFlagHead)
+	ConnControlStopping ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
 	// ConnControlStopped can optionally be sent before closing a Conn in
 	// order to provide an error message in UTF-8. The message should be logged
 	// but is not meant for end users to see.
-	ConnControlStopped ConnControl = ConnControl(FrameFlagHead | FrameFlagBody)
-	// ConnControlPong is in response to a Ping. The Size value must be the
-	// same as the Size value for last received Ping.
-	ConnControlPong ConnControl = ConnControl(FrameFlagFinal | 0)
-	// The following are unused but reserved for future use. They are all payload
-	// carrying, so a nonzero Size value is a payload byte count.
-	connControlReserved1 ConnControl = ConnControl(FrameFlagFinal | FrameFlagBody)
-	connControlReserved2 ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
-	connControlReserved3 ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead | FrameFlagBody)
+	ConnControlStopped ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead | FrameFlagBody)
 )
 
 var connControlTexts = map[ConnControl]string{
-	ConnControlPing:      "Ping",
-	ConnControlSetup:     "Setup",
-	ConnControlStopping:  "Stopping",
-	ConnControlStopped:   "Stopped",
-	ConnControlPong:      "Pong",
-	connControlReserved1: "Reserved1",
-	connControlReserved2: "Reserved2",
-	connControlReserved3: "Reserved3",
+	connControlReserved000: "Rsvd000",
+	connControlReserved001: "Rsvd001",
+	ConnControlPing:        "Ping",
+	ConnControlPong:        "Pong",
+	connControlReserved100: "Rsvd100",
+	connControlReserved101: "Rsvd101",
+	ConnControlStopping:    "Stopping",
+	ConnControlStopped:     "Stopped",
 }
 
 var connFlagTexts = map[FrameFlag]string{

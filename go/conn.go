@@ -18,14 +18,14 @@ type StatsCollector interface {
 type connControlHandler func(*Conn, FrameData) error
 
 var connControlHandlers = map[ConnControl]connControlHandler{
-	ConnControlPing:      connControlPingHandler,
-	ConnControlSetup:     connControlSetupHandler,
-	ConnControlStopping:  connControlStoppingHandler,
-	ConnControlStopped:   connControlStoppedHandler,
-	ConnControlPong:      connControlPongHandler,
-	connControlReserved1: connControlReservedHandler,
-	connControlReserved2: connControlReservedHandler,
-	connControlReserved3: connControlReservedHandler,
+	connControlReserved000: connControlReservedHandler,
+	connControlReserved001: connControlReservedHandler,
+	ConnControlPing:        connControlPingHandler,
+	ConnControlPong:        connControlPongHandler,
+	connControlReserved100: connControlReservedHandler,
+	connControlReserved101: connControlReservedHandler,
+	ConnControlStopping:    connControlStoppingHandler,
+	ConnControlStopped:     connControlStoppedHandler,
 }
 
 // Conn multiplexes concurrent requests-response Exchanges.
@@ -74,7 +74,12 @@ func connControlPingHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlSetupHandler(c *Conn, fd FrameData) (err error) {
+func connControlPongHandler(c *Conn, fd FrameData) (err error) {
+	c.lastPongRcvd = time.Now()
+	if fd.Header().HasPayload() {
+		fp := NewFrameParser(fd)
+		c.latency = c.lastPongRcvd.Sub(time.Unix(0, fp.ReadInt64()))
+	}
 	FrameDataFree(fd)
 	return
 }
@@ -85,16 +90,6 @@ func connControlStoppingHandler(c *Conn, fd FrameData) (err error) {
 }
 
 func connControlStoppedHandler(c *Conn, fd FrameData) (err error) {
-	FrameDataFree(fd)
-	return
-}
-
-func connControlPongHandler(c *Conn, fd FrameData) (err error) {
-	c.lastPongRcvd = time.Now()
-	if fd.Header().HasPayload() {
-		fp := NewFrameParser(fd)
-		c.latency = c.lastPongRcvd.Sub(time.Unix(0, fp.ReadInt64()))
-	}
 	FrameDataFree(fd)
 	return
 }
@@ -110,8 +105,8 @@ func (c *Conn) Ping() {
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(ConnControlPing)
 	c.lastPingSent = time.Now()
-	// fd.WriteInt64(c.lastPingSent.UnixNano())
-	// fd.SetSizeValue()
+	fd.WriteInt64(c.lastPingSent.UnixNano())
+	fd.SetSizeValue()
 	c.writeCh <- fd
 }
 

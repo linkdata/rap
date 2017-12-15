@@ -27,19 +27,19 @@ A RAP *exchange* maintains the state of a request-response sequence or WebSocket
 A RAP *frame* is the basic structure within a stream. It consists of a *frame header* followed by the *frame body* data bytes.
 
 A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a stream control frame and the control field is a 3-bit MSB value specifying the frame type:
-* 000 - Ping, Size is a number to return in a Pong
-* 001 - Setup, set up string mapping table, Size is bytes of data
-* 010 - Stopping, no new exchanges, Size is bytes of optional UTF-8 message
-* 011 - Stopped, conn closing now, Size is bytes of optional UTF-8 message
-* 100 - Pong, Size is the value received in the Ping
-* 101 - reserved
-* 110 - reserved
-* 111 - reserved
+* 000 - reserved, may not have payload
+* 001 - reserved, but expect Size to reflect payload size
+* 010 - Ping, Size is bytes of payload data to return in a Pong
+* 011 - Pong, Size is bytes of payload data as received in the Ping
+* 100 - reserved, may not have payload
+* 101 - reserved, expect Size to reflect payload size
+* 110 - Stopping, no new exchanges, Size is bytes of optional UTF-8 message
+* 111 - Stopped, conn closing now, Size is bytes of optional UTF-8 message
 
 If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Final, Head and Body. If neither Head nor Body flags are set, the frame is a flow control frame and the Size is ignored.
-* Final - if set, this is the final frame for the exchange
-* Head - if set, the data bytes starts with a RAP *record*
-* Body - if set, data bytes form body data (after any RAP record, if present)
+* 001 - Body - if set, data bytes form body data (after any RAP record, if present)
+* 010 - Head - if set, the data bytes starts with a RAP *record*
+* 100 - Final - if set, this is the final frame for the exchange
 
 ## RAP records
 

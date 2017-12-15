@@ -49,5 +49,5 @@ func Test_FrameHeader_String(t *testing.T) {
 	assert.Equal(t, 12, h.PayloadSize())
 	h.SetConnControl(ConnControlPing)
 	assert.Equal(t, "[FrameHeader [ExchangeID 1fff] Ping 12 (4)]", h.String())
-	assert.Equal(t, 0, h.PayloadSize())
+	assert.Equal(t, 12, h.PayloadSize())
 }
