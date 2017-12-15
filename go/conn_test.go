@@ -232,6 +232,8 @@ func Test_Conn_ping_pong(t *testing.T) {
 	assert.True(t, ct.conn.lastPingSent <= ct.conn.lastPongRcvd)
 	if ct.conn.lastPingSent < ct.conn.lastPongRcvd {
 		assert.NotZero(t, ct.conn.Latency())
+	} else {
+		assert.Zero(t, ct.conn.Latency())
 	}
 }
 
