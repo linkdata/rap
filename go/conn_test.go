@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,8 +67,8 @@ type connTester struct {
 	conn              *Conn
 	server            *Conn
 	isClosed          bool
-	expectServerPanic bool
-	expectConnPanic   bool
+	expectServerError reflect.Type
+	expectConnError   reflect.Type
 	serverDone        chan struct{}
 	connDone          chan struct{}
 }
@@ -78,32 +79,32 @@ func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (ct *connTester) Start() {
 	go func(ct *connTester) {
-		var err error
-		if ct.expectServerPanic {
-			assert.Panics(ct.t, func() {
-				err = ct.server.ServeHTTP(ct)
-			})
+		err := ct.server.ServeHTTP(ct)
+		if ct.expectServerError != nil {
+			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
 		} else {
-			err = ct.server.ServeHTTP(ct)
+			if !ct.isClosed {
+				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
+			}
+			if err != nil && err != io.EOF {
+				assert.NoError(ct.t, err)
+			}
 		}
 		close(ct.serverDone)
-		if !ct.isClosed {
-			panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
-		}
 	}(ct)
 	go func(ct *connTester) {
-		var err error
-		if ct.expectConnPanic {
-			assert.Panics(ct.t, func() {
-				err = ct.conn.ServeHTTP(nil)
-			})
+		err := ct.conn.ServeHTTP(nil)
+		if ct.expectConnError != nil {
+			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
 		} else {
-			err = ct.conn.ServeHTTP(nil)
+			if !ct.isClosed {
+				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
+			}
+			if err != nil && err != io.EOF {
+				assert.NoError(ct.t, err)
+			}
 		}
 		close(ct.connDone)
-		if !ct.isClosed {
-			panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
-		}
 	}(ct)
 }
 
@@ -234,14 +235,12 @@ func Test_Conn_ping_pong(t *testing.T) {
 	}
 }
 
-/*
 func Test_Conn_reserved_conncontrol(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
-	ct.expectConnPanic = true
+	ct.expectServerError = reflect.TypeOf((*ProtocolError)(nil))
 	ct.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(connControlReserved000)
 	ct.conn.writeCh <- fd
 }
-*/
