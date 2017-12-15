@@ -61,17 +61,50 @@ func newRwcPipes() (a, b *rwcPipe) {
 }
 
 type connTester struct {
-	t          *testing.T
-	a, b       *rwcPipe
-	conn       *Conn
-	server     *Conn
-	isClosed   bool
-	serverDone chan struct{}
-	connDone   chan struct{}
+	t                 *testing.T
+	a, b              *rwcPipe
+	conn              *Conn
+	server            *Conn
+	isClosed          bool
+	expectServerPanic bool
+	expectConnPanic   bool
+	serverDone        chan struct{}
+	connDone          chan struct{}
 }
 
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
+}
+
+func (ct *connTester) Start() {
+	go func(ct *connTester) {
+		var err error
+		if ct.expectServerPanic {
+			assert.Panics(ct.t, func() {
+				err = ct.server.ServeHTTP(ct)
+			})
+		} else {
+			err = ct.server.ServeHTTP(ct)
+		}
+		close(ct.serverDone)
+		if !ct.isClosed {
+			panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
+		}
+	}(ct)
+	go func(ct *connTester) {
+		var err error
+		if ct.expectConnPanic {
+			assert.Panics(ct.t, func() {
+				err = ct.conn.ServeHTTP(nil)
+			})
+		} else {
+			err = ct.conn.ServeHTTP(nil)
+		}
+		close(ct.connDone)
+		if !ct.isClosed {
+			panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
+		}
+	}(ct)
 }
 
 func (ct *connTester) Close() {
@@ -90,7 +123,7 @@ func (ct *connTester) Close() {
 	}
 }
 
-func newConnTester(t *testing.T) (ct *connTester) {
+func newConnTesterNotStarted(t *testing.T) (ct *connTester) {
 	a, b := newRwcPipes()
 	ct = &connTester{
 		t:          t,
@@ -103,20 +136,12 @@ func newConnTester(t *testing.T) (ct *connTester) {
 	}
 	ct.conn.StatsCollector = a
 	ct.server.StatsCollector = b
-	go func(ct *connTester) {
-		err := ct.server.ServeHTTP(ct)
-		close(ct.serverDone)
-		if !ct.isClosed {
-			panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
-		}
-	}(ct)
-	go func(ct *connTester) {
-		err := ct.conn.ServeHTTP(nil)
-		close(ct.connDone)
-		if !ct.isClosed {
-			panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
-		}
-	}(ct)
+	return
+}
+
+func newConnTester(t *testing.T) (ct *connTester) {
+	ct = newConnTesterNotStarted(t)
+	ct.Start()
 	return
 }
 
@@ -208,3 +233,15 @@ func Test_Conn_ping_pong(t *testing.T) {
 		assert.NotZero(t, ct.conn.Latency())
 	}
 }
+
+/*
+func Test_Conn_reserved_conncontrol(t *testing.T) {
+	ct := newConnTesterNotStarted(t)
+	defer ct.Close()
+	ct.expectConnPanic = true
+	ct.Start()
+	fd := FrameDataAlloc()
+	fd.WriteConnControl(connControlReserved000)
+	ct.conn.writeCh <- fd
+}
+*/

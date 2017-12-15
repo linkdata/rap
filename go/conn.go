@@ -97,9 +97,7 @@ func connControlStoppedHandler(c *Conn, fd FrameData) (err error) {
 }
 
 func connControlReservedHandler(c *Conn, fd FrameData) (err error) {
-	err = fmt.Errorf("unknown conn control frame %v", fd.Header())
-	FrameDataFree(fd)
-	return
+	panic(fmt.Sprint("unknown conn control frame ", fd.Header()))
 }
 
 // Ping sends a ping frame and returns without waiting for response.
@@ -114,15 +112,15 @@ func (c *Conn) Ping() {
 
 // Latency returns the result of the last successful ping/pong measurement,
 // or the zero value if there is no current valid measurement.
-func (c *Conn) Latency() time.Duration {
+func (c *Conn) Latency() (d time.Duration) {
 	ping := atomic.LoadInt64(&c.lastPingSent)
 	if ping > 0 {
 		pong := atomic.LoadInt64(&c.lastPongRcvd)
 		if ping <= pong {
-			return time.Nanosecond * time.Duration(pong-ping)
+			d = time.Nanosecond * time.Duration(pong-ping)
 		}
 	}
-	return 0
+	return
 }
 
 // ReadFrom implements io.ReaderFrom.
