@@ -33,8 +33,8 @@ A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit contr
 * 011 - Pong, Size is bytes of payload data as received in the Ping
 * 100 - reserved, may not have payload
 * 101 - reserved, expect Size to reflect payload size
-* 110 - Stopping, no new exchanges, Size is bytes of optional UTF-8 message
-* 111 - Stopped, conn closing now, Size is bytes of optional UTF-8 message
+* 110 - Stopping, receiver may not start new requests, Size is bytes of optional html message to display
+* 111 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
 
 If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Final, Head and Body. If neither Head nor Body flags are set, the frame is a flow control frame and the Size is ignored.
 * 001 - Body - if set, data bytes form body data (after any RAP record, if present)
