@@ -34,7 +34,7 @@ var connControlHandlers = map[ConnControl]connControlHandler{
 	connControlReserved100: connControlReservedHandler,
 	connControlReserved101: connControlReservedHandler,
 	ConnControlStopping:    connControlStoppingHandler,
-	ConnControlStopped:     connControlStoppedHandler,
+	ConnControlPanic:       connControlPanicHandler,
 }
 
 // Conn multiplexes concurrent requests-response Exchanges.
@@ -99,7 +99,7 @@ func connControlStoppingHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlStoppedHandler(c *Conn, fd FrameData) (err error) {
+func connControlPanicHandler(c *Conn, fd FrameData) (err error) {
 	FrameDataFree(fd)
 	return
 }

@@ -75,13 +75,13 @@ const (
 	connControlReserved100 ConnControl = ConnControl(FrameFlagFinal)
 	// Unused but reserved for future use, Size contains payload size.
 	connControlReserved101 ConnControl = ConnControl(FrameFlagFinal | FrameFlagBody)
-	// ConnControlStopping means Conn is closing. No new exchanges may be
-	// initiated on the conn and active exchanges must be closed.
+	// ConnControlStopping means Conn is closing. receiver may not start new requests,
+	// Size is bytes of optional html message to display.
 	ConnControlStopping ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
-	// ConnControlStopped can optionally be sent before closing a Conn in
-	// order to provide an error message in UTF-8. The message should be logged
-	// but is not meant for end users to see.
-	ConnControlStopped ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead | FrameFlagBody)
+	// ConnControlPanic means sender is shutting down due to error,
+	// Size is bytes of optional technical information. Abort all active requests
+	// and log the technical information, if available.
+	ConnControlPanic ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead | FrameFlagBody)
 )
 
 var connControlTexts = map[ConnControl]string{
@@ -92,7 +92,7 @@ var connControlTexts = map[ConnControl]string{
 	connControlReserved100: "Rsvd100",
 	connControlReserved101: "Rsvd101",
 	ConnControlStopping:    "Stopping",
-	ConnControlStopped:     "Stopped",
+	ConnControlPanic:       "Panic",
 }
 
 var connFlagTexts = map[FrameFlag]string{
