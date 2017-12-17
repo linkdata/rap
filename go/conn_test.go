@@ -26,17 +26,17 @@ func init() {
 }
 
 type rwcPipe struct {
-	*io.PipeReader
-	*io.PipeWriter
+	io.ReadCloser
+	io.WriteCloser
 	bytesWritten int64
 	bytesRead    int64
 }
 
 func (rwcp *rwcPipe) Close() error {
-	if err := rwcp.PipeWriter.Close(); err != nil {
-		panic(err)
+	if err := rwcp.WriteCloser.Close(); err != nil {
+		return err
 	}
-	return rwcp.PipeReader.Close()
+	return rwcp.ReadCloser.Close()
 }
 
 func (rwcp *rwcPipe) AddBytesWritten(n int64) {
@@ -51,26 +51,28 @@ func newRwcPipes() (a, b *rwcPipe) {
 	ra, wa := io.Pipe()
 	rb, wb := io.Pipe()
 	a = &rwcPipe{
-		PipeReader: rb,
-		PipeWriter: wa,
+		ReadCloser:  rb,
+		WriteCloser: wa,
 	}
 	b = &rwcPipe{
-		PipeReader: ra,
-		PipeWriter: wb,
+		ReadCloser:  ra,
+		WriteCloser: wb,
 	}
 	return
 }
 
 type connTester struct {
-	t                 *testing.T
-	a, b              *rwcPipe
-	conn              *Conn
-	server            *Conn
-	isClosed          bool
-	expectServerError reflect.Type
-	expectConnError   reflect.Type
-	serverDone        chan struct{}
-	connDone          chan struct{}
+	t                      *testing.T
+	a, b                   *rwcPipe
+	conn                   *Conn
+	server                 *Conn
+	isClosed               bool
+	expectServerError      reflect.Type
+	expectConnError        reflect.Type
+	expectConnCloseError   reflect.Type
+	expectServerCloseError reflect.Type
+	serverDone             chan struct{}
+	connDone               chan struct{}
 }
 
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -119,8 +121,20 @@ func (ct *connTester) Close() {
 				break
 			}
 		}
-		assert.NoError(ct.t, ct.a.PipeWriter.Close())
-		assert.NoError(ct.t, ct.b.PipeWriter.Close())
+		err := ct.a.WriteCloser.Close()
+		if ct.expectConnCloseError != nil {
+			assert.Equal(ct.t, ct.expectConnCloseError, reflect.TypeOf(err))
+			assert.Error(ct.t, err)
+		} else {
+			assert.NoError(ct.t, err)
+		}
+		err = ct.b.WriteCloser.Close()
+		if ct.expectServerCloseError != nil {
+			assert.Equal(ct.t, ct.expectServerCloseError, reflect.TypeOf(err))
+			assert.Error(ct.t, err)
+		} else {
+			assert.NoError(ct.t, err)
+		}
 		<-ct.serverDone
 		<-ct.connDone
 	}
@@ -259,4 +273,43 @@ func Test_Conn_conncontrol_panic(t *testing.T) {
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
 	ct.conn.writeCh <- fd
+}
+
+func Test_Conn_ServeHTTP_write_error(t *testing.T) {
+	ct := newConnTesterNotStarted(t)
+	defer ct.Close()
+	ct.a.WriteCloser = &failWriter{
+		failAtCount: 1,
+		failOnWrite: true,
+		WriteCloser: ct.a.WriteCloser,
+	}
+	ct.expectConnError = reflect.TypeOf(errFailWriter)
+	ct.expectServerError = reflect.TypeOf(io.ErrUnexpectedEOF)
+	ct.Start()
+	ct.conn.Ping()
+}
+
+func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
+	ct := newConnTesterNotStarted(t)
+	defer ct.Close()
+	ct.a.WriteCloser = &failWriter{
+		failOnClose: true,
+		WriteCloser: ct.a.WriteCloser,
+	}
+	ct.expectConnCloseError = reflect.TypeOf(errFailWriter)
+	ct.Start()
+	ct.conn.Ping()
+}
+
+func Test_Conn_ServeHTTP_write_close_late_error(t *testing.T) {
+	ct := newConnTesterNotStarted(t)
+	defer ct.Close()
+	ct.a.WriteCloser = &failWriter{
+		failOnClose: true,
+		WriteCloser: ct.a.WriteCloser,
+	}
+	ct.expectConnError = reflect.TypeOf(errFailWriter)
+	ct.expectConnCloseError = reflect.TypeOf(errFailWriter)
+	ct.Start()
+	ct.conn.writeErrCh <- nil
 }
