@@ -77,7 +77,7 @@ const (
 	connControlReserved101 ConnControl = ConnControl(FrameFlagFinal | FrameFlagBody)
 	// ConnControlStopping means Conn is closing. receiver may not start new requests,
 	// Size is bytes of optional html message to display.
-	ConnControlStopping ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
+	connControlReserved110 ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
 	// ConnControlPanic means sender is shutting down due to error,
 	// Size is bytes of optional technical information. Abort all active requests
 	// and log the technical information, if available.
@@ -91,7 +91,7 @@ var connControlTexts = map[ConnControl]string{
 	ConnControlPong:        "Pong",
 	connControlReserved100: "Rsvd100",
 	connControlReserved101: "Rsvd101",
-	ConnControlStopping:    "Stopping",
+	connControlReserved110: "Rsvd110",
 	ConnControlPanic:       "Panic",
 }
 

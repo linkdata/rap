@@ -33,7 +33,7 @@ A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit contr
 * 011 - Pong, Size is bytes of payload data as received in the Ping
 * 100 - reserved, may not have payload
 * 101 - reserved, expect Size to reflect payload size
-* 110 - Stopping, receiver may not start new requests, Size is bytes of optional html message to display
+* 110 - reserved, expect Size to reflect payload size
 * 111 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
 
 If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Final, Head and Body. If neither Head nor Body flags are set, the frame is a flow control frame and the Size is ignored.
@@ -82,6 +82,11 @@ Sent from the upstream server in response to a HTTP request record.
 * `length` HTTP status code. Must be in the range 100-599, inclusive.
 * `kvv` HTTP response headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. The gateway must supply any required headers that are omitted, so that upstream need not send `Date` or `Server`.
 * `int64` HTTP `Content-Length` header value. If the `Content-Length` HTTP header is not present, and this value is not negative, the gateway will insert a `Content-Length` header with the value given.
+
+### Service stopping record (0x05)
+
+Sent from the upstream server to signal that no new requests may be initiated.
+* `string` HTML to send in response to new requests that can't be served from cache.
 
 ### User first record (0x80)
 

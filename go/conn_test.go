@@ -82,6 +82,7 @@ func (ct *connTester) Start() {
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
 			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
+			assert.NotNil(ct.t, err.Error())
 		} else {
 			if !ct.isClosed {
 				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
@@ -96,6 +97,7 @@ func (ct *connTester) Start() {
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
+			assert.NotNil(ct.t, err.Error())
 		} else {
 			if !ct.isClosed {
 				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
@@ -213,7 +215,7 @@ func Test_Conn_big_request_response(t *testing.T) {
 	ct.InjectRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
 }
 
-func Test_Conn_ping_pong(t *testing.T) {
+func Test_Conn_conncontrol_ping_pong(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	assert.Zero(t, ct.conn.lastPingSent)
@@ -237,12 +239,24 @@ func Test_Conn_ping_pong(t *testing.T) {
 	}
 }
 
-func Test_Conn_reserved_conncontrol(t *testing.T) {
+func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
 	ct.expectServerError = reflect.TypeOf((*ProtocolError)(nil))
 	ct.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(connControlReserved000)
+	ct.conn.writeCh <- fd
+}
+
+func Test_Conn_conncontrol_panic(t *testing.T) {
+	ct := newConnTesterNotStarted(t)
+	defer ct.Close()
+	ct.expectServerError = reflect.TypeOf((*PanicError)(nil))
+	ct.Start()
+	fd := FrameDataAlloc()
+	fd.WriteConnControl(ConnControlPanic)
+	fd.WriteString("Some text")
+	fd.SetSizeValue()
 	ct.conn.writeCh <- fd
 }

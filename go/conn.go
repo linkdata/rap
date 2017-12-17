@@ -24,6 +24,14 @@ type ProtocolError struct {
 
 func (e *ProtocolError) Error() string { return e.msg }
 
+// PanicError is the error type used for reporting peer panic errors,
+// all of which are fatal to a connection.
+type PanicError struct {
+	msg string // description of error
+}
+
+func (e *PanicError) Error() string { return e.msg }
+
 type connControlHandler func(*Conn, FrameData) error
 
 var connControlHandlers = map[ConnControl]connControlHandler{
@@ -33,7 +41,7 @@ var connControlHandlers = map[ConnControl]connControlHandler{
 	ConnControlPong:        connControlPongHandler,
 	connControlReserved100: connControlReservedHandler,
 	connControlReserved101: connControlReservedHandler,
-	ConnControlStopping:    connControlStoppingHandler,
+	connControlReserved110: connControlReservedHandler,
 	ConnControlPanic:       connControlPanicHandler,
 }
 
@@ -99,9 +107,14 @@ func connControlStoppingHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlPanicHandler(c *Conn, fd FrameData) (err error) {
+func connControlPanicHandler(c *Conn, fd FrameData) error {
+	var msg string
+	if fd.Header().HasPayload() {
+		fp := NewFrameParser(fd)
+		msg, _ = fp.ReadString()
+	}
 	FrameDataFree(fd)
-	return
+	return &PanicError{msg: msg}
 }
 
 func connControlReservedHandler(c *Conn, fd FrameData) error {
