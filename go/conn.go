@@ -316,14 +316,14 @@ func (c *Conn) CloseRead() (err error) {
 		defer timer.Stop()
 		// closing the I/O stream will cause the reader to stop with an error
 		if err = c.ReadWriteCloser.Close(); err != nil {
-			log.Print("Conn.CloseRead(): c.ReadWriteCloser.Close(): ", err.Error())
+			// log.Print("Conn.CloseRead(): c.ReadWriteCloser.Close(): ", err.Error())
 			return
 		}
 		select {
 		case err = <-c.readErrCh:
 		case <-timer.C:
 			log.Print("Conn.CloseRead(): timeout waiting for reader")
-			err = io.ErrNoProgress
+			err = io.ErrUnexpectedEOF
 			return
 		}
 	}
