@@ -19,6 +19,8 @@ class record {
     tag_set_route = tag('\x02'),
     tag_http_request = tag('\x03'),
     tag_http_response = tag('\x04'),
+    tag_service_pause = tag('\x05'),
+    tag_service_resume = tag('\x06'),
     tag_user_first = tag('\x80'),
     tag_invalid = tag(0)
   } tags;

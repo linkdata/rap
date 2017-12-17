@@ -21,23 +21,21 @@ import "fmt"
 // FrameHeader provides the interface for manipulating a byte array as such.
 // The 32 bits of the frame header is divided into a 16-bit Size value, a 3-bit
 // control field and a 13-bit exchange Index.
-// If Index is 0x1fff (highest possible), the frame is a stream control frame
-// and the control field is a 3-bit MSB value specifying the frame type.
-// * 000 - Ping, Size is a number to return in a Pong
-// * 001 - Setup, set up string mapping table, Size is bytes of data
-// * 010 - Stopping, no new exchanges, Size is bytes of optional UTF-8 message
-// * 011 - Stopped, conn closing now, Size is bytes of optional UTF-8 message
-// * 100 - Pong, Size is the value received in the Ping
-// * 101 - reserved
-// * 110 - reserved
-// * 111 - reserved
-// If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and
-// the control field is mapped to three flags: Final, Head and Body.
-// If neither Head nor Body flags are set, the frame is a flow control
-// frame and the Size is the number of received bytes being acknowledged.
-// * Final - if set, this is the final frame for the exchange
-// * Head - if set, the data bytes starts with a head record
-// * Body - if set, data bytes form body data (after Head record if present)
+//
+// If Index is 0x1fff (highest possible), the frame is a connection control frame and the control field is a 3-bit MSB value specifying the frame type:
+// * 000 - reserved, may not have payload
+// * 001 - reserved, but expect Size to reflect payload size
+// * 010 - Ping, Size is bytes of payload data to return in a Pong
+// * 011 - Pong, Size is bytes of payload data as received in the Ping
+// * 100 - reserved, may not have payload
+// * 101 - reserved, expect Size to reflect payload size
+// * 110 - reserved, expect Size to reflect payload size
+// * 111 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
+//
+// If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Final, Head and Body. If neither Head nor Body flags are set, the frame is a flow control frame and the Size is ignored.
+// * 001 - Body - if set, data bytes form body data (after any RAP record, if present)
+// * 010 - Head - if set, the data bytes starts with a RAP *record*
+// * 100 - Final - if set, this is the final frame for the exchange
 type FrameHeader []byte
 
 // FrameFlag enumerates the flags used in the frame control bits.
@@ -75,8 +73,7 @@ const (
 	connControlReserved100 ConnControl = ConnControl(FrameFlagFinal)
 	// Unused but reserved for future use, Size contains payload size.
 	connControlReserved101 ConnControl = ConnControl(FrameFlagFinal | FrameFlagBody)
-	// ConnControlStopping means Conn is closing. receiver may not start new requests,
-	// Size is bytes of optional html message to display.
+	// Unused but reserved for future use, Size contains payload size.
 	connControlReserved110 ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
 	// ConnControlPanic means sender is shutting down due to error,
 	// Size is bytes of optional technical information. Abort all active requests
