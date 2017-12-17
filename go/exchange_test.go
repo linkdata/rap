@@ -167,11 +167,11 @@ func (fw *failWriter) Close() (err error) {
 	return
 }
 
-func (fw *failWriter) failError() error {
-	if fw.failWithError == nil {
-		fw.failWithError = errFailWriter
+func (fw *failWriter) failError() (err error) {
+	if err = fw.failWithError; err == nil {
+		err = errFailWriter
 	}
-	return fw.failWithError
+	return
 }
 
 func Test_Exchange_String(t *testing.T) {

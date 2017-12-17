@@ -66,7 +66,7 @@ type connTester struct {
 	a, b                   *rwcPipe
 	conn                   *Conn
 	server                 *Conn
-	isClosed               bool
+	closeCount             int32
 	expectServerError      reflect.Type
 	expectConnError        reflect.Type
 	expectConnCloseError   reflect.Type
@@ -86,7 +86,7 @@ func (ct *connTester) Start() {
 			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
 			assert.NotNil(ct.t, err.Error())
 		} else {
-			if !ct.isClosed {
+			if atomic.LoadInt32(&ct.closeCount) == 0 {
 				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
 			}
 			if err != nil && err != io.EOF {
@@ -101,7 +101,7 @@ func (ct *connTester) Start() {
 			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
 			assert.NotNil(ct.t, err.Error())
 		} else {
-			if !ct.isClosed {
+			if atomic.LoadInt32(&ct.closeCount) == 0 {
 				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
 			}
 			if err != nil && err != io.EOF {
@@ -113,8 +113,7 @@ func (ct *connTester) Start() {
 }
 
 func (ct *connTester) Close() {
-	if !ct.isClosed {
-		ct.isClosed = true
+	if atomic.CompareAndSwapInt32(&ct.closeCount, 0, 1) {
 		for i := 0; i < 100; i++ {
 			time.Sleep(10 * time.Millisecond)
 			if len(ct.conn.writeCh) == 0 && len(ct.server.writeCh) == 0 {
