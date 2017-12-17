@@ -24,9 +24,9 @@ A RAP *connection* multiplexes concurrent requests-response *exchanges*, identif
 
 A RAP *exchange* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-exchange flow control mechanism, which is a simple transmission window with ACKs from the receiver. Exchanges inject *frames* into the connection for transmission.
 
-A RAP *frame* is the basic structure within a stream. It consists of a *frame header* followed by the *frame body* data bytes.
+A RAP *frame* is the basic structure within a connection. It consists of a *frame header* followed by the *frame body* data bytes.
 
-A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a stream control frame and the control field is a 3-bit MSB value specifying the frame type:
+A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a connection control frame and the control field is a 3-bit MSB value specifying the frame type:
 * 000 - reserved, may not have payload
 * 001 - reserved, but expect Size to reflect payload size
 * 010 - Ping, Size is bytes of payload data to return in a Pong
@@ -83,14 +83,14 @@ Sent from the upstream server in response to a HTTP request record.
 * `kvv` HTTP response headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. The gateway must supply any required headers that are omitted, so that upstream need not send `Date` or `Server`.
 * `int64` HTTP `Content-Length` header value. If the `Content-Length` HTTP header is not present, and this value is not negative, the gateway will insert a `Content-Length` header with the value given.
 
-### Service stopping record (0x05)
+### Service pause record (0x05)
 
 Sent from the upstream server to signal that no new requests may be initiated. New requests that cannot be served from cache will have the status code and reason provided. If a record body is provided, it should be provided as the response body. Note that this record applies to all connections from the client until a *service resume* record is received.
-This record has the same definition as the *HTTP response record*, and is parsed the same.
+This record has the same definition as the *HTTP response* record, and is parsed the same.
 
 ### Service resume record (0x06)
 
-Sent to resume service again after a *service stopping* record.
+Sent to resume service again after a *service pause* record.
 
 ### User defined record (0x80)
 
@@ -129,7 +129,7 @@ A string encoding starts with a `length`. If the length is nonzero, then that ma
 A zero length signals special case handling and is followed by another `length` value, interpreted as follows:
 * `0x00` Null string. Used to mark the end of a list of strings or signal other special cases.
 * `0x01` Empty string, i.e. `""`.
-* Other values refer to entries in the connection string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the stream must be closed.
+* Other values refer to entries in the connection string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the connection must be closed.
 
 ### `kvv`
 
