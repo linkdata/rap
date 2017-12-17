@@ -162,7 +162,7 @@ Before an *exchange* is done and it's id may be reused, both sides must send and
 
 ## License
 
-OSS license TBD.
+MIT, for details see the contents of `LICENSE`.
 
 The RAP specification is Copyright :copyright: 2015-2017 Johan Lindh
 
