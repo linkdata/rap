@@ -85,12 +85,16 @@ Sent from the upstream server in response to a HTTP request record.
 
 ### Service stopping record (0x05)
 
-Sent from the upstream server to signal that no new requests may be initiated.
-* `string` HTML to send in response to new requests that can't be served from cache.
+Sent from the upstream server to signal that no new requests may be initiated. New requests that cannot be served from cache will have the status code and reason provided. If a record body is provided, it should be provided as the response body. Note that this record applies to all connections from the client until a *service resume* record is received.
+This record has the same definition as the *HTTP response record*, and is parsed the same.
 
-### User first record (0x80)
+### Service resume record (0x06)
 
-Marks the first user record value available for the application using the RAP protocol. Unhandled user records are discarded silently. The last user record value is `0xFF`.
+Sent to resume service again after a *service stopping* record.
+
+### User defined record (0x80)
+
+Marks the first user record value available for the application using the RAP protocol. Unhandled user records are discarded silently. The last user defined record value is `0xFF`.
 
 ## RAP data types
 
