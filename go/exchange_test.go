@@ -120,12 +120,58 @@ func (et *exchangeTester) InjectRequest(req *http.Request) {
 	et.readCh <- fd
 }
 
-type failWriter struct{}
+type failWriterError struct {
+	msg string // description of error
+}
 
-func (*failWriter) Write(p []byte) (n int, err error) {
-	n = 0
-	err = io.ErrNoProgress
+func (e *failWriterError) Error() string { return e.msg }
+
+var errFailWriter = &failWriterError{msg: "failWriterError"}
+
+type failWriter struct {
+	byteCount     int
+	failAtCount   int
+	failOnClose   bool
+	failOnWrite   bool
+	failWithError error
+	io.WriteCloser
+}
+
+func (fw *failWriter) Write(p []byte) (n int, err error) {
+	if fw.failOnWrite {
+		max := fw.failAtCount - fw.byteCount
+		if max < 0 {
+			max = 0
+		}
+		if len(p) > max {
+			p = p[:max]
+		}
+	}
+	if fw.WriteCloser == nil {
+		err = fw.failError()
+	} else {
+		n, err = fw.WriteCloser.Write(p)
+		fw.byteCount += n
+		if err == nil && fw.failOnWrite && fw.byteCount >= fw.failAtCount {
+			err = fw.failError()
+		}
+	}
 	return
+}
+
+func (fw *failWriter) Close() (err error) {
+	err = fw.WriteCloser.Close()
+	if err == nil && fw.failOnClose {
+		err = fw.failError()
+	}
+	return
+}
+
+func (fw *failWriter) failError() error {
+	if fw.failWithError == nil {
+		fw.failWithError = errFailWriter
+	}
+	return fw.failWithError
 }
 
 func Test_Exchange_String(t *testing.T) {
