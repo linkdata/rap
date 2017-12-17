@@ -102,11 +102,6 @@ func connControlPongHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlStoppingHandler(c *Conn, fd FrameData) (err error) {
-	FrameDataFree(fd)
-	return
-}
-
 func connControlPanicHandler(c *Conn, fd FrameData) error {
 	var msg string
 	if fd.Header().HasPayload() {
