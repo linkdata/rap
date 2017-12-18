@@ -12,9 +12,10 @@ import (
 
 // Client connects to a RAP server, maintaining one or more Conns.
 type Client struct {
-	Addr         string     // where to connect
-	conn         *Conn      // the current active connection (atomic access only)
-	mu           sync.Mutex // protects those below
+	Addr         string        // where to connect
+	DialTimeout  time.Duration // dialing timeout
+	conn         *Conn         // the current active connection (atomic access only)
+	mu           sync.Mutex    // protects those below
 	lastError    error
 	lastAttempt  time.Time
 	firstAttempt time.Time
@@ -34,7 +35,7 @@ func NewClient(addr string) *Client {
 // dial creates a new RAP Conn to the server.
 // Must run with the mutex locked.
 func (c *Client) dial() *Conn {
-	rwc, err := net.Dial("tcp", c.Addr)
+	rwc, err := net.DialTimeout("tcp", c.Addr, c.DialTimeout)
 	if err != nil {
 		c.lastError = err
 		c.lastAttempt = time.Now()
@@ -85,15 +86,16 @@ func (c *Client) NewExchange() *Exchange {
 	return nil
 }
 
-func (c *Client) offlineError() error {
-	if c.lastError == nil {
-		return nil
+func (c *Client) offlineError() (err error) {
+	if c.lastError != nil {
+		if c.firstAttempt == c.lastAttempt {
+			err = c.lastError
+		} else {
+			err = fmt.Errorf("upstream server has been unresponsive for %v, last error was: \"%v\"",
+				time.Now().Sub(c.firstAttempt), c.lastError)
+		}
 	}
-	if c.firstAttempt == c.lastAttempt {
-		return c.lastError
-	}
-	return fmt.Errorf("upstream server has been unresponsive for %v, last error was: \"%v\"",
-		time.Now().Sub(c.firstAttempt), c.lastError)
+	return
 }
 
 // NewExchangeMayDial will find a Conn with free Exchanges or
