@@ -39,19 +39,28 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	return tc, nil
 }
 
-// ListenAndServe listens on the TCP network address srv.Addr and then calls
-// Serve to handle requests on incoming connections.
-// If srv.Addr is blank, ":10111" is used.
-func (srv *Server) ListenAndServe() error {
+// Listener creates a net.Listener for the Server and returns it.
+func (srv *Server) Listener() (net.Listener, error) {
 	addr := srv.Addr
 	if addr == "" {
 		addr = ":10111"
 	}
 	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
+	if err == nil {
+		ln = tcpKeepAliveListener{ln.(*net.TCPListener)}
 	}
-	return srv.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+	return ln, err
+}
+
+// ListenAndServe listens on the TCP network address srv.Addr and then calls
+// Serve to handle requests on incoming connections.
+// If srv.Addr is blank, ":10111" is used.
+func (srv *Server) ListenAndServe() error {
+	ln, err := srv.Listener()
+	if err == nil {
+		err = srv.Serve(ln)
+	}
+	return err
 }
 
 // Serve accepts incoming connections on the Listener l, creating a
