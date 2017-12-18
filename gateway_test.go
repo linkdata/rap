@@ -57,8 +57,9 @@ func Test_Gateway_ListenAndServe(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
 	gw.ServeHTTP(rr, r)
-	assert.True(t, gt.WaitForServed())
+	wfs := gt.WaitForServed()
 	srv.listener.Close()
+	assert.True(t, wfs)
 }
 
 func Test_Gateway_simple(t *testing.T) {
