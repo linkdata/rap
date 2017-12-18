@@ -24,22 +24,6 @@ func NewGateway(addr string) *Gateway {
 	}
 }
 
-func proxyFrameData(w http.ResponseWriter, fd FrameData) {
-	/*
-		fr := NewFrameReader(fd)
-		if fd.Header().HasHead() {
-			fr.ProxyResponse(w)
-		}
-		if fd.Header().HasBody() {
-			if err := fr.ProxyBody(w); err != nil {
-				log.Print("Exchange.proxyResponse() ProxyBody() ", err.Error())
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-	*/
-}
-
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// log.Print("Gateway.ServeHTTP() ", r)
 	e := g.Client.NewExchange()
