@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -45,9 +46,21 @@ func Test_Gateway(t *testing.T) {
 	gw.ServeHTTP(rr, r)
 
 	// send request for websocket upgrade
+	// fails since http hijacker not supported by httptest.ResponseRecorder
 	rr = httptest.NewRecorder()
 	r = httptest.NewRequest("GET", "/", nil)
 	r.Header.Add("Upgrade", "websocket")
 	r.Header.Add("Connection", "upgrade")
 	gw.ServeHTTP(rr, r)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func Test_Gateway_no_answer(t *testing.T) {
+	gw := NewGateway(noSrvAddr)
+	gw.Client.DialTimeout = time.Millisecond * 10
+	// send simple request
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	gw.ServeHTTP(rr, r)
+	assert.Equal(t, http.StatusGatewayTimeout, rr.Code)
 }
