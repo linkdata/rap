@@ -34,25 +34,19 @@ func Test_Gateway_simple(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
 	gw.ServeHTTP(rr, r)
+	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// send request with body
 	rr = httptest.NewRecorder()
 	r = httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0x20, 0x20}))
 	gw.ServeHTTP(rr, r)
+	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// send request with large body
 	rr = httptest.NewRecorder()
 	r = httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0x10000)))
 	gw.ServeHTTP(rr, r)
-
-	// send request for websocket upgrade
-	// fails since http hijacker not supported by httptest.ResponseRecorder
-	rr = httptest.NewRecorder()
-	r = httptest.NewRequest("GET", "/", nil)
-	r.Header.Add("Upgrade", "websocket")
-	r.Header.Add("Connection", "upgrade")
-	gw.ServeHTTP(rr, r)
-	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
 func Test_Gateway_websocket(t *testing.T) {
