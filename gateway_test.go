@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const srvAddr string = "127.0.0.2:10111"
+const srvAddr string = "127.0.0.1:10111"
 
 type gwTester struct {
 	isClosed bool
@@ -26,7 +26,10 @@ func Test_Gateway_simple(t *testing.T) {
 		Addr:    srvAddr,
 		Handler: gt,
 	}
-	go srv.ListenAndServe()
+	ln, err := srv.Listener()
+	assert.NoError(t, err)
+	go srv.Serve(ln)
+	defer ln.Close()
 	gw := NewGateway(srvAddr)
 	assert.NotNil(t, gw)
 
@@ -47,22 +50,11 @@ func Test_Gateway_simple(t *testing.T) {
 	r = httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0x10000)))
 	gw.ServeHTTP(rr, r)
 	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func Test_Gateway_websocket(t *testing.T) {
-	gt := &gwTester{}
-	srv := &Server{
-		Addr:    srvAddr,
-		Handler: gt,
-	}
-	go srv.ListenAndServe()
-	gw := NewGateway(srvAddr)
-	assert.NotNil(t, gw)
 
 	// send request for websocket upgrade
 	// fails since http hijacker not supported by httptest.ResponseRecorder
-	rr := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
+	rr = httptest.NewRecorder()
+	r = httptest.NewRequest("GET", "/", nil)
 	r.Header.Add("Upgrade", "websocket")
 	r.Header.Add("Connection", "upgrade")
 	gw.ServeHTTP(rr, r)
