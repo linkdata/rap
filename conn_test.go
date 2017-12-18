@@ -266,6 +266,7 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 func Test_Conn_conncontrol_panic(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
+	ct.expectConnError = reflect.TypeOf(io.EOF)
 	ct.expectServerError = reflect.TypeOf((*PanicError)(nil))
 	ct.Start()
 	fd := FrameDataAlloc()
