@@ -20,7 +20,7 @@ func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
 }
 
-func Test_Gateway(t *testing.T) {
+func Test_Gateway_simple(t *testing.T) {
 	gt := &gwTester{}
 	srv := &Server{
 		Addr:    srvAddr,
@@ -49,6 +49,26 @@ func Test_Gateway(t *testing.T) {
 	// fails since http hijacker not supported by httptest.ResponseRecorder
 	rr = httptest.NewRecorder()
 	r = httptest.NewRequest("GET", "/", nil)
+	r.Header.Add("Upgrade", "websocket")
+	r.Header.Add("Connection", "upgrade")
+	gw.ServeHTTP(rr, r)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func Test_Gateway_websocket(t *testing.T) {
+	gt := &gwTester{}
+	srv := &Server{
+		Addr:    srvAddr,
+		Handler: gt,
+	}
+	go srv.ListenAndServe()
+	gw := NewGateway(srvAddr)
+	assert.NotNil(t, gw)
+
+	// send request for websocket upgrade
+	// fails since http hijacker not supported by httptest.ResponseRecorder
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Add("Upgrade", "websocket")
 	r.Header.Add("Connection", "upgrade")
 	gw.ServeHTTP(rr, r)
