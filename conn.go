@@ -50,6 +50,8 @@ var connControlHandlers = map[ConnControl]connControlHandler{
 type Conn struct {
 	io.ReadWriteCloser // The I/O endpoint, usually a TCP connection
 	StatsCollector     // Where to report statistics (optional)
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
 	writeCh            chan FrameData
 	readChs            []chan FrameData
 	exchanges          chan *Exchange
@@ -69,6 +71,8 @@ func (c *Conn) String() string {
 func NewConn(rwc io.ReadWriteCloser) *Conn {
 	c := &Conn{
 		ReadWriteCloser: rwc,
+		ReadTimeout:     DefaultReadTimeout,
+		WriteTimeout:    DefaultWriteTimeout,
 		writeCh:         make(chan FrameData),
 		readChs:         make([]chan FrameData, int(MaxExchangeID)+1),
 		exchanges:       make(chan *Exchange, int(MaxExchangeID)+1),
@@ -312,7 +316,7 @@ func (c *Conn) CloseRead() (err error) {
 	case err = <-c.readErrCh:
 		// reader already done
 	default:
-		timer := time.NewTimer(ReadTimeout)
+		timer := time.NewTimer(c.ReadTimeout)
 		defer timer.Stop()
 		// closing the I/O stream will cause the reader to stop with an error
 		if err = c.ReadWriteCloser.Close(); err != nil {
@@ -340,7 +344,7 @@ func (c *Conn) CloseRead() (err error) {
 // CloseWrite stops the writing part of a Conn
 func (c *Conn) CloseWrite() (err error) {
 	reapCount := 0
-	timer := time.NewTimer(ReadTimeout)
+	timer := time.NewTimer(c.ReadTimeout)
 	defer timer.Stop()
 	for reapCount < cap(c.exchanges) {
 		select {
@@ -413,5 +417,5 @@ func (c *Conn) ExchangeRelease(e *Exchange) {
 
 // ExchangeTimeout returns the Exchange timeout duration
 func (c *Conn) ExchangeTimeout() time.Duration {
-	return WriteTimeout
+	return c.WriteTimeout
 }

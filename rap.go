@@ -18,10 +18,10 @@ const (
 	FrameMaxSize = 0x10000 // usually 0x10000
 	// FrameMaxPayloadSize is the maximum number of bytes in a frame payload.
 	FrameMaxPayloadSize = FrameMaxSize - FrameHeaderSize
-	// ReadTimeout is how long to wait for a response
-	ReadTimeout = time.Second * 5
-	// WriteTimeout is how long to wait to send
-	WriteTimeout = time.Second * 5
+	// DefaultReadTimeout is how long to wait for a response
+	DefaultReadTimeout = time.Second * 5
+	// DefaultWriteTimeout is how long to wait to send
+	DefaultWriteTimeout = time.Second * 5
 )
 
 var (
