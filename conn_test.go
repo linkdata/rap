@@ -67,6 +67,7 @@ type connTester struct {
 	conn                   *Conn
 	server                 *Conn
 	isClosed               bool
+	injectFramesAtClose    bool
 	expectServerError      reflect.Type
 	expectConnError        reflect.Type
 	expectConnCloseError   reflect.Type
@@ -84,7 +85,7 @@ func (ct *connTester) Start() {
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
 			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
-			assert.NotNil(ct.t, err.Error())
+			assert.NotNil(ct.t, err)
 		} else {
 			if !ct.isClosed {
 				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
@@ -99,7 +100,7 @@ func (ct *connTester) Start() {
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
-			assert.NotNil(ct.t, err.Error())
+			assert.NotNil(ct.t, err)
 		} else {
 			if !ct.isClosed {
 				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
@@ -120,6 +121,10 @@ func (ct *connTester) Close() {
 			if len(ct.conn.writeCh) == 0 && len(ct.server.writeCh) == 0 {
 				break
 			}
+		}
+		if ct.injectFramesAtClose {
+			ct.conn.writeCh <- nil
+			ct.conn.writeCh <- nil
 		}
 		err := ct.a.WriteCloser.Close()
 		if ct.expectConnCloseError != nil {
@@ -314,4 +319,15 @@ func Test_Conn_ServeHTTP_write_close_late_error(t *testing.T) {
 	ct.expectConnCloseError = reflect.TypeOf(errFailWriter)
 	ct.Start()
 	ct.conn.writeErrCh <- nil
+}
+
+func Test_Conn_stolen_exchange(t *testing.T) {
+	ct := newConnTester(t)
+	ct.expectConnError = reflect.TypeOf(ErrTimeoutReapingExchanges)
+	ct.conn.ReadTimeout = time.Millisecond * 10
+	ct.injectFramesAtClose = true
+	e := ct.conn.NewExchange()
+	assert.NotNil(t, e)
+	ct.Close()
+	e.Release()
 }

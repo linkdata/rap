@@ -2,9 +2,9 @@ package rap
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -15,6 +15,13 @@ type StatsCollector interface {
 	AddBytesWritten(int64)
 	AddBytesRead(int64)
 }
+
+// ErrTimeoutReapingExchanges indicates an Exchange leak - one of the connections exchanges
+// did not terminate in time.
+var ErrTimeoutReapingExchanges = errors.New("timeout reaping exchanges")
+
+// ErrTimeoutWaitingForReader means the reader timed out when closing the connection.
+var ErrTimeoutWaitingForReader = errors.New("timeout waiting for reader at close")
 
 // ProtocolError is the error type used for reporting protocol errors,
 // all of which are fatal to a connection.
@@ -291,7 +298,7 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 		err = writeErr
 	}
 
-	if closeErr := c.Close(); err == nil {
+	if closeErr := c.Close(); closeErr != nil && (err == nil || err == io.EOF) {
 		err = closeErr
 	}
 
@@ -326,8 +333,7 @@ func (c *Conn) CloseRead() (err error) {
 		select {
 		case err = <-c.readErrCh:
 		case <-timer.C:
-			log.Print("Conn.CloseRead(): timeout waiting for reader")
-			err = io.ErrUnexpectedEOF
+			err = ErrTimeoutWaitingForReader
 			return
 		}
 	}
@@ -353,8 +359,10 @@ func (c *Conn) CloseWrite() (err error) {
 		case <-c.exchanges:
 			reapCount++
 		case <-timer.C:
-			log.Print("Conn.Close(): timeout reaping exchanges (", cap(c.exchanges)-reapCount, " leaked)")
-			return io.ErrShortWrite
+			// log.Print("Conn.Close(): timeout reaping exchanges (", cap(c.exchanges)-reapCount, " leaked)")
+			timer = time.NewTimer(c.ReadTimeout)
+			err = ErrTimeoutReapingExchanges
+			reapCount++
 		}
 	}
 	close(c.writeCh)
