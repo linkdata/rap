@@ -13,18 +13,20 @@ import (
 const srvAddr string = "127.0.0.1:10111"
 
 type gwTester struct {
+	t          *testing.T
 	isServed   bool
 	haveServed chan struct{}
 }
 
-func newGWTester() *gwTester {
+func newGWTester(t *testing.T) *gwTester {
 	return &gwTester{
+		t:          t,
 		haveServed: make(chan struct{}),
 	}
 }
 
 func (gt *gwTester) WaitForServed() bool {
-	timer := time.NewTimer(time.Millisecond * 100)
+	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {
 	case <-gt.haveServed:
@@ -36,19 +38,21 @@ func (gt *gwTester) WaitForServed() bool {
 
 func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
-	if !gt.isServed && gt.haveServed != nil {
+	if !gt.isServed {
 		gt.isServed = true
 		close(gt.haveServed)
 	}
 }
 
 func Test_Gateway_ListenAndServe(t *testing.T) {
-	gt := newGWTester()
+	gt := newGWTester(t)
 	srv := &Server{
 		Addr:    srvAddr,
 		Handler: gt,
 	}
-	go srv.ListenAndServe()
+	go func() {
+		assert.Error(t, srv.ListenAndServe())
+	}()
 	gw := NewGateway(srvAddr)
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
@@ -58,14 +62,16 @@ func Test_Gateway_ListenAndServe(t *testing.T) {
 }
 
 func Test_Gateway_simple(t *testing.T) {
-	gt := newGWTester()
+	gt := newGWTester(t)
 	srv := &Server{
 		Handler: gt,
 	}
 	ln, err := srv.Listen(srvAddr)
 	assert.NoError(t, err)
 	srv.listener = ln
-	go srv.ListenAndServe()
+	go func() {
+		assert.Error(t, srv.ListenAndServe())
+	}()
 	defer ln.Close()
 	gw := NewGateway(srvAddr)
 	assert.NotNil(t, gw)

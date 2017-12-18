@@ -21,7 +21,7 @@ func Test_Server_support_functions(t *testing.T) {
 }
 
 func Test_Server_serve_errors(t *testing.T) {
-	gt := &gwTester{}
+	gt := newGWTester(t)
 	srv := &Server{
 		Addr:    srvAddr,
 		Handler: gt,
