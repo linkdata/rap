@@ -13,15 +13,26 @@ import (
 const srvAddr string = "127.0.0.1:10111"
 
 type gwTester struct {
-	isClosed bool
+	isServed   bool
+	haveServed chan struct{}
+}
+
+func newGWTester() *gwTester {
+	return &gwTester{
+		haveServed: make(chan struct{}),
+	}
 }
 
 func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
+	if !gt.isServed && gt.haveServed != nil {
+		gt.isServed = true
+		close(gt.haveServed)
+	}
 }
 
 func Test_Gateway_ListenAndServe(t *testing.T) {
-	gt := &gwTester{}
+	gt := newGWTester()
 	srv := &Server{
 		Addr:    srvAddr,
 		Handler: gt,
@@ -31,11 +42,12 @@ func Test_Gateway_ListenAndServe(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
 	gw.ServeHTTP(rr, r)
+	<-gt.haveServed
 	srv.listener.Close()
 }
 
 func Test_Gateway_simple(t *testing.T) {
-	gt := &gwTester{}
+	gt := newGWTester()
 	srv := &Server{
 		Handler: gt,
 	}
