@@ -23,6 +23,17 @@ func newGWTester() *gwTester {
 	}
 }
 
+func (gt *gwTester) WaitForServed() bool {
+	timer := time.NewTimer(time.Millisecond * 100)
+	defer timer.Stop()
+	select {
+	case <-gt.haveServed:
+		return true
+	case <-timer.C:
+	}
+	return false
+}
+
 func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
 	if !gt.isServed && gt.haveServed != nil {
@@ -42,7 +53,7 @@ func Test_Gateway_ListenAndServe(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
 	gw.ServeHTTP(rr, r)
-	<-gt.haveServed
+	assert.True(t, gt.WaitForServed())
 	srv.listener.Close()
 }
 
