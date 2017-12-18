@@ -28,7 +28,8 @@ func Test_Gateway_simple(t *testing.T) {
 	}
 	ln, err := srv.Listener()
 	assert.NoError(t, err)
-	go srv.Serve(ln)
+	srv.listener = ln
+	go srv.ListenAndServe()
 	defer ln.Close()
 	gw := NewGateway(srvAddr)
 	assert.NotNil(t, gw)

@@ -14,6 +14,7 @@ type Server struct {
 	Addr           string       // TCP address to listen on, ":10111" if empty
 	Handler        http.Handler // HTTP handler to invoke
 	MaxConnections int          // maximum number of RAP Conn's to allow
+	listener       net.Listener
 	bytesWritten   int64
 	bytesRead      int64
 	serveErrorsMu  sync.Mutex
@@ -55,12 +56,14 @@ func (srv *Server) Listener() (net.Listener, error) {
 // ListenAndServe listens on the TCP network address srv.Addr and then calls
 // Serve to handle requests on incoming connections.
 // If srv.Addr is blank, ":10111" is used.
-func (srv *Server) ListenAndServe() error {
-	ln, err := srv.Listener()
-	if err == nil {
-		err = srv.Serve(ln)
+func (srv *Server) ListenAndServe() (err error) {
+	if srv.listener == nil {
+		srv.listener, err = srv.Listener()
 	}
-	return err
+	if err == nil {
+		err = srv.Serve(srv.listener)
+	}
+	return
 }
 
 // Serve accepts incoming connections on the Listener l, creating a
