@@ -2,7 +2,6 @@ package rap
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -42,7 +41,7 @@ func (c *Client) dial() *Conn {
 		if c.firstAttempt.IsZero() {
 			c.firstAttempt = c.lastAttempt
 		}
-		log.Print("Client.dial(): ", err.Error())
+		// log.Print("Client.dial(): ", err.Error())
 		return nil
 	}
 	c.lastError = nil
