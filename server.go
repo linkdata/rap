@@ -40,14 +40,17 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	return tc, nil
 }
 
-// Listener creates a net.Listener for the Server and returns it.
-func (srv *Server) Listener() (net.Listener, error) {
-	addr := srv.Addr
-	if addr == "" {
-		addr = ":10111"
+// Listen announces on the local network address.
+func (srv *Server) Listen(address string) (net.Listener, error) {
+	if address == "" {
+		address = srv.Addr
+		if address == "" {
+			address = ":10111"
+		}
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := net.Listen("tcp", address)
 	if err == nil {
+		srv.Addr = ln.Addr().String()
 		ln = tcpKeepAliveListener{ln.(*net.TCPListener)}
 	}
 	return ln, err
@@ -58,7 +61,7 @@ func (srv *Server) Listener() (net.Listener, error) {
 // If srv.Addr is blank, ":10111" is used.
 func (srv *Server) ListenAndServe() (err error) {
 	if srv.listener == nil {
-		srv.listener, err = srv.Listener()
+		srv.listener, err = srv.Listen("")
 	}
 	if err == nil {
 		err = srv.Serve(srv.listener)

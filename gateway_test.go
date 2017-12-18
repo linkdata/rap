@@ -20,13 +20,26 @@ func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
 }
 
-func Test_Gateway_simple(t *testing.T) {
+func Test_Gateway_ListenAndServe(t *testing.T) {
 	gt := &gwTester{}
 	srv := &Server{
 		Addr:    srvAddr,
 		Handler: gt,
 	}
-	ln, err := srv.Listener()
+	go srv.ListenAndServe()
+	gw := NewGateway(srvAddr)
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	gw.ServeHTTP(rr, r)
+	srv.listener.Close()
+}
+
+func Test_Gateway_simple(t *testing.T) {
+	gt := &gwTester{}
+	srv := &Server{
+		Handler: gt,
+	}
+	ln, err := srv.Listen(srvAddr)
 	assert.NoError(t, err)
 	srv.listener = ln
 	go srv.ListenAndServe()
