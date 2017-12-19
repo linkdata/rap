@@ -1,6 +1,7 @@
 package rap
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -14,12 +15,16 @@ type Server struct {
 	Addr           string       // TCP address to listen on, ":10111" if empty
 	Handler        http.Handler // HTTP handler to invoke
 	MaxConnections int          // maximum number of RAP Conn's to allow
+	inShutdown     int32        // accessed atomically (non-zero means we're in Shutdown)
 	listener       net.Listener
 	bytesWritten   int64
 	bytesRead      int64
+	mu             sync.Mutex
 	serveErrorsMu  sync.Mutex
 	serveErrors    map[string]int
 	connLimiter    chan struct{}
+	doneChan       chan struct{}
+	activeConn     map[*Conn]struct{}
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -113,6 +118,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		go func(rwc io.ReadWriteCloser) {
 			conn := NewConn(rwc)
 			conn.StatsCollector = srv
+			srv.trackConn(conn)
 			if err := conn.ServeHTTP(srv.Handler); err != nil {
 				srv.serveErrorsMu.Lock()
 				defer srv.serveErrorsMu.Unlock()
@@ -132,6 +138,104 @@ func (srv *Server) ServeErrors() map[string]int {
 		m[k] = v
 	}
 	return m
+}
+
+func (srv *Server) trackConn(c *Conn) {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if srv.activeConn == nil {
+		srv.activeConn = make(map[*Conn]struct{})
+	}
+	srv.activeConn[c] = struct{}{}
+}
+
+// closeIdleConns closes all idle connections and reports whether the
+// server is quiescent.
+func (srv *Server) closeIdleConns() bool {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	quiescent := true
+	for c := range srv.activeConn {
+		c.Close()
+
+		/*
+			if len(c.exchanges) < cap(c.exchanges) {
+				quiescent = false
+				continue
+			}
+			c.Close()
+		*/
+		delete(srv.activeConn, c)
+	}
+	return quiescent
+}
+
+func (srv *Server) shuttingDown() bool {
+	return atomic.LoadInt32(&srv.inShutdown) != 0
+}
+
+var shutdownPollInterval = 500 * time.Millisecond
+
+func (srv *Server) getDoneChanLocked() chan struct{} {
+	if srv.doneChan == nil {
+		srv.doneChan = make(chan struct{})
+	}
+	return srv.doneChan
+}
+
+func (srv *Server) closeDoneChanLocked() {
+	ch := srv.getDoneChanLocked()
+	select {
+	case <-ch:
+		// Already closed. Don't close again.
+	default:
+		// Safe to close here. We're the only closer, guarded
+		// by s.mu.
+		close(ch)
+	}
+}
+
+// Shutdown gracefully shuts down the server without interrupting any
+// active connections.
+func (srv *Server) Shutdown(ctx context.Context) error {
+	atomic.AddInt32(&srv.inShutdown, 1)
+	defer atomic.AddInt32(&srv.inShutdown, -1)
+
+	srv.mu.Lock()
+	lnerr := srv.listener.Close()
+	srv.closeDoneChanLocked()
+	srv.mu.Unlock()
+
+	ticker := time.NewTicker(shutdownPollInterval)
+	defer ticker.Stop()
+	for {
+		if srv.closeIdleConns() {
+			return lnerr
+		}
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		} else {
+			<-ticker.C
+		}
+	}
+}
+
+// Close immediately closes all active connections. For a
+// graceful shutdown, use Shutdown.
+func (srv *Server) Close() error {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	srv.closeDoneChanLocked()
+	err := srv.listener.Close()
+	for c := range srv.activeConn {
+		c.Close()
+		delete(srv.activeConn, c)
+	}
+	return err
 }
 
 // ActiveConns returns the number of active RAP connections.

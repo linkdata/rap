@@ -2,10 +2,12 @@ package rap
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -65,6 +67,8 @@ type Conn struct {
 	exchangeLookup     []*Exchange
 	readErrCh          chan error
 	writeErrCh         chan error
+	mu                 sync.Mutex
+	inShutdown         int32 // accessed atomically (non-zero means we're in Shutdown)
 	lastPingSent       int64 // Unix nanoseconds
 	lastPongRcvd       int64 // Unix nanoseconds
 	latency            int64 // Unix nanoseconds
@@ -376,6 +380,30 @@ func (c *Conn) Close() (err error) {
 		err = err2
 	}
 	return
+}
+
+// Shutdown gracefully shuts down the server without interrupting any
+// active connections.
+func (srv *Conn) Shutdown(ctx context.Context) error {
+	atomic.AddInt32(&srv.inShutdown, 1)
+	defer atomic.AddInt32(&srv.inShutdown, -1)
+
+	ticker := time.NewTicker(shutdownPollInterval)
+	defer ticker.Stop()
+	for {
+		if srv.closeIdleConns() {
+			return lnerr
+		}
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		} else {
+			<-ticker.C
+		}
+	}
 }
 
 // NewExchangeWait returns the next available Exchange, or nil if timed out.
