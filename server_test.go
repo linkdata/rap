@@ -1,6 +1,7 @@
 package rap
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -59,9 +60,21 @@ func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (st *srvTester) Close() {
 	if !st.isClosed {
 		st.isClosed = true
-		st.srv.Shutdown(nil)
-		<-st.serveDone
+		st.srv.Close()
+		// st.srv.Shutdown(context.Background())
+		timer := time.NewTimer(time.Second * 5)
+		defer timer.Stop()
+		select {
+		case <-st.serveDone:
+		case <-timer.C:
+			assert.NoError(st.t, errors.New("server_test: Timeout waiting for server to stop"))
+		}
 	}
+}
+
+func Test_Server_simple(t *testing.T) {
+	st := newSrvTester(t)
+	st.Close()
 }
 
 func Test_Server_support_functions(t *testing.T) {

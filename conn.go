@@ -61,17 +61,21 @@ type Conn struct {
 	StatsCollector     // Where to report statistics (optional)
 	ReadTimeout        time.Duration
 	WriteTimeout       time.Duration
+	Handler            http.Handler
 	writeCh            chan FrameData
-	readChs            []chan FrameData
 	exchanges          chan *Exchange
 	exchangeLookup     []*Exchange
+	exchangeLastID     int32
 	readErrCh          chan error
 	writeErrCh         chan error
 	mu                 sync.Mutex
+	doneChan           chan struct{}
 	inShutdown         int32 // accessed atomically (non-zero means we're in Shutdown)
 	lastPingSent       int64 // Unix nanoseconds
 	lastPongRcvd       int64 // Unix nanoseconds
 	latency            int64 // Unix nanoseconds
+	isReadClosed       bool
+	isWriteClosed      bool
 }
 
 func (c *Conn) String() string {
@@ -85,24 +89,29 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		ReadTimeout:     DefaultReadTimeout,
 		WriteTimeout:    DefaultWriteTimeout,
 		writeCh:         make(chan FrameData),
-		readChs:         make([]chan FrameData, int(MaxExchangeID)+1),
-		exchanges:       make(chan *Exchange, int(MaxExchangeID)+1),
+		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
 		readErrCh:       make(chan error),
 		writeErrCh:      make(chan error),
+		doneChan:        make(chan struct{}),
 	}
-	for i := range c.exchangeLookup {
-		c.readChs[i] = make(chan FrameData, MaxSendWindowSize)
-		e := NewExchange(c, ExchangeID(i))
-		c.exchangeLookup[i] = e
-		c.exchanges <- e
-	}
+	/*
+		for i := range c.exchangeLookup {
+			e := NewExchange(c, ExchangeID(i))
+			c.exchangeLookup[i] = e
+			c.exchanges <- e
+		}
+	*/
 	return c
 }
 
 func connControlPingHandler(c *Conn, fd FrameData) (err error) {
 	fd.Header().SetConnControl(ConnControlPong)
-	c.writeCh <- fd
+	select {
+	case c.writeCh <- fd:
+	case <-c.doneChan:
+		return ErrServerClosed
+	}
 	return
 }
 
@@ -138,7 +147,10 @@ func (c *Conn) Ping() {
 	atomic.StoreInt64(&c.lastPingSent, time.Now().UnixNano())
 	fd.WriteInt64(c.lastPingSent)
 	fd.SetSizeValue()
-	c.writeCh <- fd
+	select {
+	case c.writeCh <- fd:
+	case <-c.doneChan:
+	}
 }
 
 // Latency returns the result of the last successful ping/pong measurement,
@@ -189,15 +201,21 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			continue
 		}
 
-		e := c.exchangeLookup[fd.Header().ExchangeID()]
+		id := fd.Header().ExchangeID()
+		e := c.exchangeLookup[id]
+		if e == nil {
+			if id < 1 || id > MaxExchangeID {
+				panic("rap: conn received invalid ExchangeID")
+			}
+			e = NewExchange(c, id)
+			if c.Handler != nil {
+				go e.ServeHTTP(c.Handler)
+			}
+			c.exchangeLookup[id] = e
+		}
 		// log.Print("Conn.ReadFrom(): ", fd, " sendW=", atomic.LoadInt32(&e.sendWindow), " recvW=", atomic.LoadInt32(&e.recvWindow))
 
-		if fd.Header().HasPayload() {
-			c.readChs[fd.Header().ExchangeID()] <- fd
-		} else {
-			FrameDataFree(fd)
-			e.ackCh <- struct{}{}
-		}
+		e.SubmitFrame(fd)
 	}
 	return
 }
@@ -219,6 +237,8 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 		var fd FrameData // fd starts out nil on each iteration
 
 		select {
+		case <-c.doneChan:
+			return 0, ErrServerClosed
 		case fd = <-c.writeCh:
 		default:
 			// no immediately available FrameData, flush the output
@@ -236,7 +256,12 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 		if err == nil {
 			// do a blocking read if we didn't get a fd
 			if fd == nil {
-				if fd = <-c.writeCh; fd == nil {
+				select {
+				case fd = <-c.writeCh:
+				case <-c.doneChan:
+					err = ErrServerClosed
+				}
+				if fd == nil {
 					// c.writeCh is closed
 					break
 				}
@@ -270,17 +295,20 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 
 // ServeHTTP processes incoming and outgoing frames for the Conn until closed.
 func (c *Conn) ServeHTTP(h http.Handler) (err error) {
-	if h != nil {
-	drainExchanges:
-		for {
-			select {
-			case e := <-c.exchanges:
-				go e.ServeHTTP(h)
-			default:
-				break drainExchanges
+	c.Handler = h
+	/*
+		if h != nil {
+		drainExchanges:
+			for {
+				select {
+				case e := <-c.exchanges:
+					go e.ServeHTTP(h)
+				default:
+					break drainExchanges
+				}
 			}
 		}
-	}
+	*/
 
 	go func() {
 		_, err := c.ReadFrom(bufio.NewReaderSize(c.ReadWriteCloser, 64*1024))
@@ -321,101 +349,139 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	return err
 }
 
-// CloseRead closes the reading part of a Conn
-func (c *Conn) CloseRead() (err error) {
-	select {
-	case err = <-c.readErrCh:
-		// reader already done
-	default:
-		timer := time.NewTimer(c.ReadTimeout)
-		defer timer.Stop()
-		// closing the I/O stream will cause the reader to stop with an error
-		if err = c.ReadWriteCloser.Close(); err != nil {
-			// log.Print("Conn.CloseRead(): c.ReadWriteCloser.Close(): ", err.Error())
-			return
-		}
+// closeRead closes the reading part of a Conn
+func (c *Conn) closeRead() (err error) {
+	if !c.isReadClosed {
+		c.isReadClosed = true
 		select {
 		case err = <-c.readErrCh:
-		case <-timer.C:
-			err = ErrTimeoutWaitingForReader
-			return
+			// reader already done
+		default:
+			timer := time.NewTimer(c.ReadTimeout)
+			defer timer.Stop()
+			// closing the I/O stream will cause the reader to stop with an error
+			if err = c.ReadWriteCloser.Close(); err != nil {
+				// log.Print("Conn.CloseRead(): c.ReadWriteCloser.Close(): ", err.Error())
+				return
+			}
+			select {
+			case err = <-c.readErrCh:
+			case <-timer.C:
+				err = ErrTimeoutWaitingForReader
+				return
+			}
 		}
-	}
-	// close exchanges' readCh as we will no longer write to them
-	for i, e := range c.exchangeLookup {
-		if e != nil {
-			close(e.ackCh)
+		// close exchanges' readCh as we will no longer write to them
+		for _, e := range c.exchangeLookup {
+			if e != nil {
+				if exerr := e.Close(); err == nil {
+					err = exerr
+				}
+			}
+			/*
+				if e != nil {
+					close(e.ackCh)
+				}
+				close(c.readChs[i])
+			*/
 		}
-		close(c.readChs[i])
 	}
 	return
 }
 
 // CloseWrite stops the writing part of a Conn
 func (c *Conn) CloseWrite() (err error) {
-	reapCount := 0
-	timer := time.NewTimer(c.ReadTimeout)
-	defer timer.Stop()
-	for reapCount < cap(c.exchanges) {
-		select {
-		case fd := <-c.writeCh:
-			FrameDataFree(fd)
-		case <-c.exchanges:
-			reapCount++
-		case <-timer.C:
-			// log.Print("Conn.Close(): timeout reaping exchanges (", cap(c.exchanges)-reapCount, " leaked)")
-			timer = time.NewTimer(c.ReadTimeout)
-			err = ErrTimeoutReapingExchanges
-			reapCount++
+	if !c.isWriteClosed {
+		c.isWriteClosed = true
+		reapCount := 0
+		timer := time.NewTimer(c.ReadTimeout)
+		defer timer.Stop()
+		for reapCount < cap(c.exchanges) {
+			select {
+			case fd := <-c.writeCh:
+				FrameDataFree(fd)
+			case <-c.exchanges:
+				reapCount++
+			case <-timer.C:
+				// log.Print("Conn.Close(): timeout reaping exchanges (", cap(c.exchanges)-reapCount, " leaked)")
+				timer = time.NewTimer(c.ReadTimeout)
+				err = ErrTimeoutReapingExchanges
+				reapCount++
+			}
 		}
+		// close(c.writeCh)
 	}
-	close(c.writeCh)
 	return
 }
 
-// Close closes the Conn
+func (c *Conn) closeDoneChanLocked() {
+	select {
+	case <-c.doneChan:
+	default:
+		close(c.doneChan)
+	}
+}
+
+// Close closes the Conn immediately.
 func (c *Conn) Close() (err error) {
-	err = c.CloseRead()
-	if err2 := c.CloseWrite(); err == nil {
-		err = err2
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closeDoneChanLocked()
+
+	// closing the I/O stream will cause the reader goroutine to stop with an error
+	err = c.ReadWriteCloser.Close()
+
+	/*
+		if werr := c.CloseWrite(); err == nil {
+			err = werr
+		}
+	*/
+	for _, e := range c.exchangeLookup {
+		if e != nil {
+			if eerr := e.Close(); err == nil {
+				err = eerr
+			}
+		}
 	}
 	return
 }
 
 // Shutdown gracefully shuts down the server without interrupting any
 // active connections.
-func (srv *Conn) Shutdown(ctx context.Context) error {
-	atomic.AddInt32(&srv.inShutdown, 1)
-	defer atomic.AddInt32(&srv.inShutdown, -1)
-
-	ticker := time.NewTicker(shutdownPollInterval)
-	defer ticker.Stop()
-	for {
-		if srv.closeIdleConns() {
-			return lnerr
-		}
-		if ctx != nil {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-ticker.C:
+func (c *Conn) Shutdown(ctx context.Context) error {
+	atomic.AddInt32(&c.inShutdown, 1)
+	defer atomic.AddInt32(&c.inShutdown, -1)
+	/*
+		ticker := time.NewTicker(shutdownPollInterval)
+		defer ticker.Stop()
+		for {
+			if ctx != nil {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+				}
+			} else {
+				<-ticker.C
 			}
-		} else {
-			<-ticker.C
 		}
-	}
+	*/
+	c.Close()
+	return nil
 }
 
 // NewExchangeWait returns the next available Exchange, or nil if timed out.
-func (c *Conn) NewExchangeWait(d time.Duration) *Exchange {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case e := <-c.exchanges:
-		return e
-	case <-timer.C:
-		return nil
+func (c *Conn) NewExchangeWait(d time.Duration) (e *Exchange) {
+	e = c.NewExchange()
+	if e == nil {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case e = <-c.exchanges:
+		case <-timer.C:
+		}
 	}
+	return
 }
 
 // NewExchange returns the next available Exchange, or nil if none are available.
@@ -424,20 +490,29 @@ func (c *Conn) NewExchange() *Exchange {
 	case e := <-c.exchanges:
 		return e
 	default:
-		return nil
+	}
+	for {
+		lastID := atomic.LoadInt32(&c.exchangeLastID)
+		if lastID >= int32(MaxExchangeID) {
+			return nil
+		}
+		nextID := lastID + 1
+		if atomic.CompareAndSwapInt32(&c.exchangeLastID, lastID, nextID) {
+			e := NewExchange(c, ExchangeID(nextID))
+			c.exchangeLookup[nextID] = e
+			return e
+		}
 	}
 }
 
-// ExchangeWrite is called by an Exchange when it wants to write
-// a FrameData.
-func (c *Conn) ExchangeWrite(exchangeID ExchangeID, fd FrameData) error {
-	c.writeCh <- fd
-	return nil
-}
-
-// ExchangeRead returns a FrameData for an Exchange read.
-func (c *Conn) ExchangeRead(exchangeID ExchangeID) (FrameData, error) {
-	return <-c.readChs[exchangeID], nil
+// ExchangeWrite allows an Exchange to write a FrameData
+func (c *Conn) ExchangeWrite(fd FrameData) error {
+	select {
+	case c.writeCh <- fd:
+		return nil
+	case <-c.doneChan:
+		return ErrServerClosed
+	}
 }
 
 // ExchangeRelease returns the Exchange to the Conn, allowing it to
@@ -454,4 +529,9 @@ func (c *Conn) ExchangeRelease(e *Exchange) {
 // ExchangeTimeout returns the Exchange timeout duration
 func (c *Conn) ExchangeTimeout() time.Duration {
 	return c.WriteTimeout
+}
+
+// ExchangeHandler returns the http.Handler used by the Exchange, or nil.
+func (c *Conn) ExchangeHandler() http.Handler {
+	return c.Handler
 }

@@ -2,6 +2,7 @@ package rap
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -10,13 +11,16 @@ import (
 	"time"
 )
 
+// ErrServerClosed is returned by the Server's Serve method after a call to Shutdown or Close.
+var ErrServerClosed = errors.New("rap: Server closed")
+
 // Server listens for incoming RAP connections and creates Conn's for them.
 type Server struct {
 	Addr           string       // TCP address to listen on, ":10111" if empty
 	Handler        http.Handler // HTTP handler to invoke
 	MaxConnections int          // maximum number of RAP Conn's to allow
 	inShutdown     int32        // accessed atomically (non-zero means we're in Shutdown)
-	listener       net.Listener
+	listeners      map[net.Listener]struct{}
 	bytesWritten   int64
 	bytesRead      int64
 	mu             sync.Mutex
@@ -65,11 +69,9 @@ func (srv *Server) Listen(address string) (net.Listener, error) {
 // Serve to handle requests on incoming connections.
 // If srv.Addr is blank, ":10111" is used.
 func (srv *Server) ListenAndServe() (err error) {
-	if srv.listener == nil {
-		srv.listener, err = srv.Listen("")
-	}
+	listener, err := srv.Listen("")
 	if err == nil {
-		err = srv.Serve(srv.listener)
+		err = srv.Serve(listener)
 	}
 	return
 }
@@ -80,6 +82,13 @@ func (srv *Server) ListenAndServe() (err error) {
 func (srv *Server) Serve(l net.Listener) error {
 	defer l.Close()
 	var tempDelay time.Duration // how long to sleep on accept failure
+
+	if srv.shuttingDown() {
+		return ErrServerClosed
+	}
+
+	srv.trackListener(l, true)
+	defer srv.trackListener(l, false)
 
 	maxConns := srv.MaxConnections
 	if maxConns < 1 {
@@ -94,6 +103,11 @@ func (srv *Server) Serve(l net.Listener) error {
 		// wait for active connections to fall to allowed levels
 		rwc, e := l.Accept()
 		if e != nil {
+			select {
+			case <-srv.getDoneChan():
+				return ErrServerClosed
+			default:
+			}
 			if ne, ok := e.(net.Error); ok && ne.Temporary() {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
@@ -140,6 +154,24 @@ func (srv *Server) ServeErrors() map[string]int {
 	return m
 }
 
+func (srv *Server) trackListener(ln net.Listener, add bool) {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if srv.listeners == nil {
+		srv.listeners = make(map[net.Listener]struct{})
+	}
+	if add {
+		// If the *Server is being reused after a previous
+		// Close or Shutdown, reset its doneChan:
+		if len(srv.listeners) == 0 && len(srv.activeConn) == 0 {
+			srv.doneChan = nil
+		}
+		srv.listeners[ln] = struct{}{}
+	} else {
+		delete(srv.listeners, ln)
+	}
+}
+
 func (srv *Server) trackConn(c *Conn) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
@@ -171,10 +203,23 @@ func (srv *Server) closeIdleConns() bool {
 }
 
 func (srv *Server) shuttingDown() bool {
-	return atomic.LoadInt32(&srv.inShutdown) != 0
+	if atomic.LoadInt32(&srv.inShutdown) == 0 {
+		select {
+		case <-srv.getDoneChan():
+			return true
+		default:
+		}
+	}
+	return false
 }
 
 var shutdownPollInterval = 500 * time.Millisecond
+
+func (srv *Server) getDoneChan() <-chan struct{} {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	return srv.getDoneChanLocked()
+}
 
 func (srv *Server) getDoneChanLocked() chan struct{} {
 	if srv.doneChan == nil {
@@ -187,41 +232,36 @@ func (srv *Server) closeDoneChanLocked() {
 	ch := srv.getDoneChanLocked()
 	select {
 	case <-ch:
-		// Already closed. Don't close again.
 	default:
-		// Safe to close here. We're the only closer, guarded
-		// by s.mu.
 		close(ch)
 	}
 }
 
+func (srv *Server) closeListenersLocked() error {
+	var err error
+	for ln := range srv.listeners {
+		if cerr := ln.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+		delete(srv.listeners, ln)
+	}
+	return err
+}
+
 // Shutdown gracefully shuts down the server without interrupting any
 // active connections.
-func (srv *Server) Shutdown(ctx context.Context) error {
+func (srv *Server) Shutdown(ctx context.Context) (lnerr error) {
 	atomic.AddInt32(&srv.inShutdown, 1)
 	defer atomic.AddInt32(&srv.inShutdown, -1)
-
 	srv.mu.Lock()
-	lnerr := srv.listener.Close()
+	lnerr = srv.closeListenersLocked()
 	srv.closeDoneChanLocked()
 	srv.mu.Unlock()
-
-	ticker := time.NewTicker(shutdownPollInterval)
-	defer ticker.Stop()
-	for {
-		if srv.closeIdleConns() {
-			return lnerr
-		}
-		if ctx != nil {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-ticker.C:
-			}
-		} else {
-			<-ticker.C
-		}
+	for c := range srv.activeConn {
+		c.Shutdown(ctx)
+		delete(srv.activeConn, c)
 	}
+	return
 }
 
 // Close immediately closes all active connections. For a
@@ -230,7 +270,7 @@ func (srv *Server) Close() error {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	srv.closeDoneChanLocked()
-	err := srv.listener.Close()
+	err := srv.closeListenersLocked()
 	for c := range srv.activeConn {
 		c.Close()
 		delete(srv.activeConn, c)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -27,20 +28,16 @@ var (
 // ExchangeConnection is the interface that an Exchange needs in order to
 // communicate with the outside world and clean up.
 type ExchangeConnection interface {
-	// ExchangeWrite is called by an Exchange when it wants to write
-	// a FrameData.
-	ExchangeWrite(ExchangeID, FrameData) error
-	// ExchangeReadChannel returns the FrameData channel that an Exchange should
-	// use when reading input frames. Called once when Exchange is initialized.
-	ExchangeRead(ExchangeID) (FrameData, error)
+	// ExchangeWrite allows an Exchange to write a FrameData
+	ExchangeWrite(fd FrameData) error
 	// ExchangeRelease returns the Exchange to the Conn, allowing it to
 	// be re-used for other requests.
 	ExchangeRelease(*Exchange)
-	// ExchangeTimeout returns the Exchange timeout duration
+	// ExchangeTimeout returns the timeout duration to be used by the Exchange.
 	ExchangeTimeout() time.Duration
+	// ExchangeHandler returns the http.Handler to used by the Exchange, or nil.
+	ExchangeHandler() http.Handler
 }
-
-type exchangeReleaser func(*Exchange)
 
 // Exchange is essentially a pipe. It maintains the state of a request-response
 // or WebSocket connection, moves data between the RAP and HTTP connections and
@@ -50,28 +47,69 @@ type Exchange struct {
 	ID               ExchangeID // Exchange ID
 	conn             ExchangeConnection
 	ackCh            chan struct{}
+	readCh           chan FrameData
+	doneChan         chan struct{}
+	mu               sync.Mutex
 	sendWindow       int         // number of frames still allowed to be in flight
 	fdw              FrameData   // FrameData being written to, nil after final frame sent
 	fdr              FrameData   // FrameData being read from by fr
 	fp               FrameParser // Frame parser (into fdr)
 	hasStarted       bool        // true if the exchange has sent or received the first frame
 	hasReceived      bool        // true if the exchange has received the first frame
-	hasSentClose     bool        // true if we have sent our final frame
-	hasReceivedClose bool        // true if the peer has sent a it's final frame
+	hasSentFinal     bool        // true if we have sent our final frame
+	hasReceivedFinal bool        // true if the peer has sent a it's final frame
 }
 
 func (e *Exchange) String() string {
 	return fmt.Sprintf("[Exchange %v sendW=%v started=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.ID, e.sendWindow, e.hasStarted, e.hasSentClose, e.hasReceivedClose, len(e.ackCh))
+		e.ID, e.sendWindow, e.hasStarted, e.hasSentFinal, e.hasReceivedFinal, len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
-func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) *Exchange {
-	return &Exchange{
+func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
+	e = &Exchange{
 		ID:         exchangeID,
 		conn:       conn,
 		sendWindow: SendWindowSize,
 		ackCh:      make(chan struct{}, MaxSendWindowSize),
+		readCh:     make(chan FrameData, MaxSendWindowSize),
+		doneChan:   make(chan struct{}),
+	}
+	// runtime.SetFinalizer(e, exchangeFinalizer)
+	return
+}
+
+func exchangeFinalizer(e *Exchange) {
+	e.closeDoneChanLocked()
+}
+
+func (e *Exchange) closeDoneChanLocked() {
+	select {
+	case <-e.doneChan:
+	default:
+		close(e.doneChan)
+	}
+}
+
+// SubmitFrame gives the Exchange an incoming FrameData.
+// None of the frames seen may be conn control frames.
+// A fd of nil indicates an EOF condition.
+func (e *Exchange) SubmitFrame(fd FrameData) error {
+	if fd != nil && !fd.Header().HasPayload() {
+		FrameDataFree(fd)
+		select {
+		case e.ackCh <- struct{}{}:
+			return nil
+		case <-e.doneChan:
+			return io.ErrClosedPipe
+		}
+	}
+
+	select {
+	case e.readCh <- fd:
+		return nil
+	case <-e.doneChan:
+		return io.ErrClosedPipe
 	}
 }
 
@@ -86,27 +124,28 @@ func (e *Exchange) readFrame() (err error) {
 		e.fp = nil
 	}
 
-	if e.hasReceivedClose {
+	if e.hasReceivedFinal {
 		// log.Print("Exchange.readFrame(): EOF e=", e)
 		return io.EOF
 	}
 
-	e.fdr, err = e.conn.ExchangeRead(e.ID)
-	if err != nil {
-		return err
-	}
-	if e.fdr == nil {
+	select {
+	case e.fdr = <-e.readCh:
+		if e.fdr == nil {
+			return io.EOF
+		}
+	case <-e.doneChan:
 		return io.EOF
 	}
 
 	e.fp = NewFrameParser(e.fdr)
 	if e.fdr.Header().IsFinal() {
-		e.hasReceivedClose = true
+		e.hasReceivedFinal = true
 		return
 	}
 	// Write ack frame
-	fda := FrameDataAllocID(e.ID)
-	return e.conn.ExchangeWrite(e.ID, fda)
+	e.conn.ExchangeWrite(FrameDataAllocID(e.ID))
+	return
 }
 
 // loadFrameReader ensures the frame reader has payload data or an error.
@@ -257,7 +296,7 @@ func (e *Exchange) WriteByte(c byte) error {
 // HasPayload().
 func (e *Exchange) Flush() (err error) {
 	// log.Print("Exchange.Flush() ", e)
-	if e.hasSentClose {
+	if e.hasSentFinal {
 		return io.ErrClosedPipe
 	}
 
@@ -267,7 +306,7 @@ func (e *Exchange) Flush() (err error) {
 
 	if len(e.fdw) > FrameMaxSize {
 		e.fdw = nil
-		e.sendClose()
+		e.sendFinal()
 		return ErrFrameTooBig
 	}
 
@@ -275,7 +314,7 @@ func (e *Exchange) Flush() (err error) {
 
 	if e.fdw.Header().IsFinal() {
 		// final frame is not acked
-		e.hasSentClose = true
+		e.hasSentFinal = true
 	} else {
 		// make sure window allows us to send
 		if err := e.waitForSendWindowSize(1); err != nil {
@@ -288,24 +327,24 @@ func (e *Exchange) Flush() (err error) {
 		e.fdw.Header().SetSizeValue(len(e.fdw) - FrameHeaderSize)
 	}
 
-	if err = e.conn.ExchangeWrite(e.ID, e.fdw); err == nil {
-		e.fdw = nil
-	}
+	err = e.conn.ExchangeWrite(e.fdw)
+	e.fdw = nil
 
 	return
 }
 
-func (e *Exchange) sendClose() {
-	if e.hasStarted && !e.hasSentClose {
-		e.hasSentClose = true
+func (e *Exchange) sendFinal() (err error) {
+	if e.hasStarted && !e.hasSentFinal {
+		e.hasSentFinal = true
 		if e.fdw != nil {
 			FrameDataFree(e.fdw)
 			e.fdw = nil
 		}
 		fdc := FrameDataAllocID(e.ID)
 		fdc.Header().SetFinal()
-		e.conn.ExchangeWrite(e.ID, fdc)
+		err = e.conn.ExchangeWrite(fdc)
 	}
+	return
 }
 
 func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
@@ -318,14 +357,16 @@ func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
 
 	for e.sendWindow < minimumRequiredWindowSize {
 		select {
+		case <-e.doneChan:
+			return io.ErrClosedPipe
 		case _, ok := <-e.ackCh:
 			if !ok {
-				e.sendClose()
+				e.sendFinal()
 				return io.ErrClosedPipe
 			}
 			e.sendWindow++
 		case <-timer.C:
-			// log.Print("Exchange.CloseWrite(): ackCh timeout ", e)
+			// log.Print("Exchange.waitForSendWindowSize(): ackCh timeout ", e)
 			return ErrTimeoutFlowControl
 		}
 	}
@@ -333,11 +374,11 @@ func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
 	return nil
 }
 
-// CloseWrite ensures that a frame with the Final bit set is sent, then
+// WriteFinal ensures that a frame with the Final bit set is sent, then
 // calls Flush(). It's a protocol error to send frames after this call.
-func (e *Exchange) CloseWrite() error {
-	// log.Print("Exchange.CloseWrite() ", e)
-	if e.hasSentClose {
+func (e *Exchange) WriteFinal() error {
+	// log.Print("Exchange.WriteFinal() ", e)
+	if e.hasSentFinal {
 		return io.ErrClosedPipe
 	}
 	e.writeStart()
@@ -353,12 +394,12 @@ func (e *Exchange) CloseWrite() error {
 	return err
 }
 
-// Close discards incoming data until the final frame is received.
-func (e *Exchange) Close() (err error) {
-	// log.Print("Exchange.Close() ", e)
-	for !e.hasReceivedClose {
+// waitForFinalFrame discards incoming data until the final frame is received.
+func (e *Exchange) waitForFinalFrame() (err error) {
+	// log.Print("Exchange.waitForFinalFrame() ", e)
+	for !e.hasReceivedFinal {
 		if err = e.readFrame(); err != nil {
-			// log.Print("Exchange.Close(): readFrame() ", err.Error())
+			// log.Print("Exchange.waitForFinalFrame(): readFrame() ", err.Error())
 			break
 		}
 		FrameDataFree(e.fdr)
@@ -368,21 +409,30 @@ func (e *Exchange) Close() (err error) {
 	return
 }
 
+// Close immediately closes an Exchange and frees any resouces.
+// The Exchange may not be used after being closed.
+func (e *Exchange) Close() (err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.closeDoneChanLocked()
+	return
+}
+
 // Stop returns an Exchange to it's initial state.
 func (e *Exchange) Stop() (err error) {
 	// log.Print("Exchange.Stop() ", e)
 	if e.hasStarted {
-		if !e.hasSentClose {
-			err = e.CloseWrite()
+		if !e.hasSentFinal {
+			err = e.WriteFinal()
 		}
-		if closeErr := e.Close(); err == nil {
-			err = closeErr
+		if finalErr := e.waitForFinalFrame(); err == nil {
+			err = finalErr
 		}
 	}
 	e.hasStarted = false
 	e.hasReceived = false
-	e.hasSentClose = false
-	e.hasReceivedClose = false
+	e.hasSentFinal = false
+	e.hasReceivedFinal = false
 	if e.sendWindow != SendWindowSize {
 		e.sendWindow = SendWindowSize
 		if err == nil {
@@ -407,7 +457,7 @@ func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 
 	if err = e.fdw.WriteRequest(r); err == nil {
 		if _, err = e.ReadFrom(r.Body); err == nil {
-			err = e.CloseWrite()
+			err = e.WriteFinal()
 		}
 	}
 

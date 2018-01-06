@@ -66,7 +66,7 @@ type connTester struct {
 	a, b                   *rwcPipe
 	conn                   *Conn
 	server                 *Conn
-	isClosed               bool
+	isClosed               int32
 	injectFramesAtClose    bool
 	expectServerError      reflect.Type
 	expectConnError        reflect.Type
@@ -87,7 +87,7 @@ func (ct *connTester) Start() {
 			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
 			assert.NotNil(ct.t, err)
 		} else {
-			if !ct.isClosed {
+			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
 			}
 			if err != nil && err != io.EOF {
@@ -99,10 +99,13 @@ func (ct *connTester) Start() {
 	go func(ct *connTester) {
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
-			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
 			assert.NotNil(ct.t, err)
+			if ct.expectConnError != reflect.TypeOf(err) {
+				assert.Nil(ct.t, err)
+			}
+			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
 		} else {
-			if !ct.isClosed {
+			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
 			}
 			if err != nil && err != io.EOF {
@@ -114,8 +117,7 @@ func (ct *connTester) Start() {
 }
 
 func (ct *connTester) Close() {
-	if !ct.isClosed {
-		ct.isClosed = true
+	if atomic.CompareAndSwapInt32(&ct.isClosed, 0, 1) {
 		for i := 0; i < 100; i++ {
 			time.Sleep(10 * time.Millisecond)
 			if len(ct.conn.writeCh) == 0 && len(ct.server.writeCh) == 0 {
@@ -123,8 +125,8 @@ func (ct *connTester) Close() {
 			}
 		}
 		if ct.injectFramesAtClose {
-			ct.conn.writeCh <- nil
-			ct.conn.writeCh <- nil
+			ct.conn.ExchangeWrite(nil)
+			ct.conn.ExchangeWrite(nil)
 		}
 		err := ct.a.WriteCloser.Close()
 		if ct.expectConnCloseError != nil {
@@ -185,28 +187,37 @@ func (ct *connTester) InjectRequest(r *http.Request) {
 	assert.NoError(ct.t, responseErr)
 }
 
+func (ct *connTester) FillExchanges() (gotten int) {
+	for {
+		if e := ct.conn.NewExchange(); e != nil {
+			gotten++
+			defer e.Release()
+		} else {
+			return
+		}
+	}
+}
+
 func Test_Conn_String(t *testing.T) {
 	defer leaktest.Check(t)()
 	ct := newConnTester(t)
 	defer ct.Close()
 	assert.Equal(t, "[Conn]", ct.conn.String())
 	assert.Equal(t, int(MaxExchangeID)+1, len(ct.conn.exchangeLookup))
-	assert.Equal(t, int(MaxExchangeID)+1, cap(ct.conn.exchanges))
+	assert.Equal(t, int(MaxExchangeID), cap(ct.conn.exchanges))
 }
 
-func Test_Conn_NewExchange(t *testing.T) {
+func Test_Conn_exchanges_exhausted(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
-	var gotten int
+
 	for {
 		if e := ct.conn.NewExchange(); e != nil {
-			gotten++
 			defer e.Release()
 		} else {
 			break
 		}
 	}
-	assert.Equal(t, int(MaxExchangeID)+1, gotten)
 	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond))
 }
 
@@ -216,7 +227,15 @@ func Test_Conn_ReleaseExchange(t *testing.T) {
 	e := ct.conn.NewExchange()
 	assert.NotNil(t, e)
 	e.Release()
-	e = NewExchange(ct.conn, 1)
+}
+
+func Test_Conn_exchange_overflow(t *testing.T) {
+	ct := newConnTester(t)
+	defer ct.Close()
+	gotten := ct.FillExchanges()
+	assert.Equal(t, int(MaxExchangeID), gotten)
+	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
+	e := NewExchange(ct.conn, 1)
 	assert.Panics(t, func() { e.Release() })
 }
 
@@ -265,7 +284,7 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(connControlReserved000)
-	ct.conn.writeCh <- fd
+	ct.conn.ExchangeWrite(fd)
 }
 
 func Test_Conn_conncontrol_panic(t *testing.T) {
@@ -278,7 +297,7 @@ func Test_Conn_conncontrol_panic(t *testing.T) {
 	fd.WriteConnControl(ConnControlPanic)
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
-	ct.conn.writeCh <- fd
+	ct.conn.ExchangeWrite(fd)
 }
 
 func Test_Conn_ServeHTTP_write_error(t *testing.T) {
@@ -303,10 +322,12 @@ func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
 		WriteCloser: ct.a.WriteCloser,
 	}
 	ct.expectConnCloseError = reflect.TypeOf(errFailWriter)
+	ct.expectConnError = reflect.TypeOf(errFailWriter)
 	ct.Start()
 	ct.conn.Ping()
 }
 
+/*
 func Test_Conn_ServeHTTP_write_close_late_error(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
@@ -320,6 +341,7 @@ func Test_Conn_ServeHTTP_write_close_late_error(t *testing.T) {
 	ct.Start()
 	ct.conn.writeErrCh <- nil
 }
+*/
 
 func Test_Conn_stolen_exchange(t *testing.T) {
 	ct := newConnTester(t)
