@@ -211,14 +211,21 @@ func Test_Conn_exchanges_exhausted(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 
+	var firstExchange *Exchange
+
 	for {
 		if e := ct.conn.NewExchange(); e != nil {
+			if firstExchange == nil {
+				firstExchange = e
+			}
 			defer e.Release()
 		} else {
 			break
 		}
 	}
 	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond))
+	firstExchange.Release()
+	assert.NotNil(t, ct.conn.NewExchangeWait(time.Millisecond))
 }
 
 func Test_Conn_ReleaseExchange(t *testing.T) {
