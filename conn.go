@@ -526,8 +526,3 @@ func (c *Conn) ExchangeRelease(e *Exchange) {
 func (c *Conn) ExchangeTimeout() time.Duration {
 	return c.WriteTimeout
 }
-
-// ExchangeHandler returns the http.Handler used by the Exchange, or nil.
-func (c *Conn) ExchangeHandler() http.Handler {
-	return c.Handler
-}

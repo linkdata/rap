@@ -74,10 +74,6 @@ func (et *exchangeTester) ExchangeTimeout() time.Duration {
 	return time.Millisecond * 100
 }
 
-func (et *exchangeTester) ExchangeHandler() http.Handler {
-	return et.handler
-}
-
 func (et *exchangeTester) Close() {
 	et.Exchange.Close()
 	et.CloseWrite()

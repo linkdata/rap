@@ -35,8 +35,6 @@ type ExchangeConnection interface {
 	ExchangeRelease(*Exchange)
 	// ExchangeTimeout returns the timeout duration to be used by the Exchange.
 	ExchangeTimeout() time.Duration
-	// ExchangeHandler returns the http.Handler to used by the Exchange, or nil.
-	ExchangeHandler() http.Handler
 }
 
 // Exchange is essentially a pipe. It maintains the state of a request-response
