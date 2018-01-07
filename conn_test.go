@@ -277,6 +277,18 @@ func Test_Conn_conncontrol_ping_pong(t *testing.T) {
 	}
 }
 
+func Test_Conn_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
+	ct := newConnTester(t)
+	defer ct.Close()
+	ct.expectServerError = reflect.TypeOf(io.ErrClosedPipe)
+	fd := FrameDataAlloc()
+	fd.WriteConnControl(ConnControlPing)
+	fd.WriteInt64(time.Now().UnixNano())
+	fd.SetSizeValue()
+	close(ct.server.doneChan)
+	connControlPingHandler(ct.server, fd)
+}
+
 func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
