@@ -38,3 +38,13 @@ func FrameDataFree(fd FrameData) {
 		}
 	}
 }
+
+// FrameDataRecycleID recycles a given FrameData with the given ID
+// or allocates a new FrameData and sets that up.
+func FrameDataRecycleID(fd FrameData, exchangeID ExchangeID) FrameData {
+	if fd == nil {
+		return FrameDataAllocID(exchangeID)
+	}
+	fd.ClearID(exchangeID)
+	return fd
+}

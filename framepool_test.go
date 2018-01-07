@@ -22,6 +22,15 @@ func Test_FramePool_FrameDataAllocID(t *testing.T) {
 	FrameDataFree(fd2)
 }
 
+func Test_FramePool_FrameDataRecycleID(t *testing.T) {
+	fd1 := FrameDataAllocID(MaxExchangeID)
+	assert.Equal(t, MaxExchangeID, fd1.Header().ExchangeID())
+	fd2 := FrameDataRecycleID(fd1, ExchangeID(1))
+	assert.Equal(t, ExchangeID(1), fd1.Header().ExchangeID())
+	assert.Equal(t, ExchangeID(1), fd2.Header().ExchangeID())
+	FrameDataFree(fd1)
+}
+
 func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
 	if RaceEnabled() {
 		t.Skip("skipping since -race is enabled")

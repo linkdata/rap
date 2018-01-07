@@ -55,11 +55,6 @@ func (et *exchangeTester) CloseWrite() {
 }
 
 func (et *exchangeTester) SubmitFrame(fd FrameData) {
-	if fd != nil {
-		if !fd.Header().HasPayload() {
-			panic("ook")
-		}
-	}
 	et.Exchange.SubmitFrame(fd)
 }
 
@@ -288,6 +283,37 @@ func Test_Exchange_StartAndRelease_illegal_record_type(t *testing.T) {
 	et.SubmitFrame(fd)
 	err := et.Exchange.Start(et)
 	assert.Equal(t, ErrUnhandledRecordType, err)
+	et.Exchange.Release()
+	assert.True(t, et.released)
+}
+
+func Test_Exchange_SubmitFrame_close_during_data_read(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+	fd := NewFrameData()
+	fd.WriteHeader(MaxExchangeID)
+	fd.WriteRecordType(RecordTypeUserFirst - 1)
+	fd.Header().SetHead()
+	fd.Header().SetBody()
+	fd.Header().SetFinal()
+	et.Exchange.Close()
+	et.SubmitFrame(fd)
+	err := et.Exchange.Start(et)
+	assert.Equal(t, io.EOF, err)
+	et.Exchange.Release()
+	assert.True(t, et.released)
+}
+
+func Test_Exchange_SubmitFrame_close_during_ack_read(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+	fd := NewFrameData()
+	fd.WriteHeader(MaxExchangeID)
+	fd.Header().SetFinal()
+	et.Exchange.Close()
+	et.SubmitFrame(fd)
+	err := et.Exchange.Start(et)
+	assert.Equal(t, io.EOF, err)
 	et.Exchange.Release()
 	assert.True(t, et.released)
 }

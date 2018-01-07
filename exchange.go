@@ -75,12 +75,7 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 		readCh:     make(chan FrameData, MaxSendWindowSize),
 		doneChan:   make(chan struct{}),
 	}
-	// runtime.SetFinalizer(e, exchangeFinalizer)
 	return
-}
-
-func exchangeFinalizer(e *Exchange) {
-	e.closeDoneChanLocked()
 }
 
 func (e *Exchange) closeDoneChanLocked() {
@@ -336,13 +331,10 @@ func (e *Exchange) Flush() (err error) {
 func (e *Exchange) sendFinal() (err error) {
 	if e.hasStarted && !e.hasSentFinal {
 		e.hasSentFinal = true
-		if e.fdw != nil {
-			FrameDataFree(e.fdw)
-			e.fdw = nil
-		}
-		fdc := FrameDataAllocID(e.ID)
+		fdc := FrameDataRecycleID(e.fdw, e.ID)
 		fdc.Header().SetFinal()
 		err = e.conn.ExchangeWrite(fdc)
+		e.fdw = nil
 	}
 	return
 }
