@@ -349,6 +349,7 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	return err
 }
 
+/*
 // closeRead closes the reading part of a Conn
 func (c *Conn) closeRead() (err error) {
 	if !c.isReadClosed {
@@ -378,12 +379,6 @@ func (c *Conn) closeRead() (err error) {
 					err = exerr
 				}
 			}
-			/*
-				if e != nil {
-					close(e.ackCh)
-				}
-				close(c.readChs[i])
-			*/
 		}
 	}
 	return
@@ -413,6 +408,7 @@ func (c *Conn) CloseWrite() (err error) {
 	}
 	return
 }
+*/
 
 func (c *Conn) closeDoneChanLocked() {
 	select {
