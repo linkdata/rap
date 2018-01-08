@@ -3,6 +3,7 @@ package rap
 import (
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,8 +14,7 @@ type srvTester struct {
 	t          *testing.T
 	isClosed   bool
 	srv        *Server
-	isServed   bool
-	haveServed chan struct{}
+	serveCount int64
 	serveDone  chan struct{}
 	serveErr   error
 }
@@ -25,36 +25,39 @@ func newSrvTester(t *testing.T) *srvTester {
 		srv: &Server{
 			Addr: srvAddr,
 		},
-		haveServed: make(chan struct{}),
-		serveDone:  make(chan struct{}),
+		serveDone: make(chan struct{}),
 	}
 	st.srv.Handler = st
 	go st.Serve()
 	return st
 }
 
+func (st *srvTester) haveServed() bool {
+	return atomic.LoadInt64(&st.serveCount) > 0
+}
+
 func (st *srvTester) Serve() {
 	st.serveErr = st.srv.ListenAndServe()
+	assert.Equal(st.t, ErrServerClosed, st.serveErr)
 	close(st.serveDone)
 }
 
 func (st *srvTester) WaitForServed() bool {
-	timer := time.NewTimer(time.Second)
-	defer timer.Stop()
-	select {
-	case <-st.haveServed:
-		return true
-	case <-timer.C:
+	ticker := time.NewTicker(time.Millisecond * 10)
+	defer ticker.Stop()
+
+	for ticks := 0; ticks < 10; ticks++ {
+		if st.haveServed() {
+			return true
+		}
+		<-ticker.C
 	}
 	return false
 }
 
 func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
-	if !st.isServed {
-		st.isServed = true
-		close(st.haveServed)
-	}
+	atomic.AddInt64(&st.serveCount, 1)
 }
 
 func (st *srvTester) Close() {
