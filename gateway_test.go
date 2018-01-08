@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const srvAddr string = "127.0.0.1:10111"
+const srvAddr string = "127.0.0.1:0" // "127.0.0.1:10111"
 
 type gwTester struct {
 	t          *testing.T

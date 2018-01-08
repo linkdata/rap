@@ -31,7 +31,7 @@ func Test_Client_server_seems_offline(t *testing.T) {
 func Test_Client_connect_and_close(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
-	c := NewClient(srvAddr)
+	c := NewClient(st.srv.Addr)
 	assert.NotNil(t, c)
 	c.DialTimeout = time.Second
 	e1, err := c.NewExchangeMayDial()
@@ -41,13 +41,15 @@ func Test_Client_connect_and_close(t *testing.T) {
 	e2 := c.NewExchange()
 	assert.NotNil(t, e2)
 	defer e2.Release()
-	assert.Equal(t, e1.conn, e2.conn)
+	if e1 != nil && e2 != nil {
+		assert.Equal(t, e1.conn, e2.conn)
+	}
 }
 
 func Test_Client_exhaust_conn(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
-	c := NewClient(srvAddr)
+	c := NewClient(st.srv.Addr)
 	assert.NotNil(t, c)
 	c.DialTimeout = time.Second
 
@@ -60,8 +62,10 @@ func Test_Client_exhaust_conn(t *testing.T) {
 		grabbed <- e
 		e = c.NewExchange()
 	}
-	assert.Equal(t, int(MaxExchangeID), cap(c.getConn().exchanges))
-	assert.Equal(t, 0, len(c.getConn().exchanges))
+	if firstConn != nil {
+		assert.Equal(t, int(MaxExchangeID), cap(firstConn.exchanges))
+		assert.Equal(t, 0, len(firstConn.exchanges))
+	}
 	e = c.NewExchange()
 	assert.Nil(t, e)
 
@@ -71,9 +75,12 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	assert.NotNil(t, e)
 	secondConn := c.getConn()
 	e.Release()
-	assert.NotEqual(t, len(firstConn.exchanges), len(secondConn.exchanges))
-	assert.Equal(t, int(MaxExchangeID), cap(c.conn.exchanges))
-	assert.Equal(t, 1, len(c.conn.exchanges))
+
+	if secondConn != nil {
+		assert.NotEqual(t, len(firstConn.exchanges), len(secondConn.exchanges))
+		assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
+		assert.Equal(t, 1, len(secondConn.exchanges))
+	}
 
 	// Now free all the Exchanges in the old conn
 releaseOldConn:

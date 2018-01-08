@@ -2,6 +2,7 @@ package rap
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -28,7 +29,10 @@ func newSrvTester(t *testing.T) *srvTester {
 		serveDone: make(chan struct{}),
 	}
 	st.srv.Handler = st
-	go st.Serve()
+	ln, lnerr := st.srv.Listen(srvAddr)
+	assert.NoError(t, lnerr)
+	assert.NotNil(t, ln)
+	go st.Serve(ln)
 	return st
 }
 
@@ -36,8 +40,8 @@ func (st *srvTester) haveServed() bool {
 	return atomic.LoadInt64(&st.serveCount) > 0
 }
 
-func (st *srvTester) Serve() {
-	st.serveErr = st.srv.ListenAndServe()
+func (st *srvTester) Serve(ln net.Listener) {
+	st.serveErr = st.srv.Serve(ln)
 	assert.Equal(st.t, ErrServerClosed, st.serveErr)
 	close(st.serveDone)
 }
