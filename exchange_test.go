@@ -54,8 +54,8 @@ func (et *exchangeTester) CloseWrite() {
 	}
 }
 
-func (et *exchangeTester) SubmitFrame(fd FrameData) {
-	et.Exchange.SubmitFrame(fd)
+func (et *exchangeTester) SubmitFrame(fd FrameData) error {
+	return et.Exchange.SubmitFrame(fd)
 }
 
 func (et *exchangeTester) ExchangeWrite(fd FrameData) error {
@@ -301,9 +301,8 @@ func Test_Exchange_SubmitFrame_close_during_data_read(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.Exchange.Close()
-	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
-	err := et.Exchange.Start(et)
-	assert.Equal(t, io.EOF, err)
+	err := et.SubmitFrame(nil)
+	assert.Equal(t, io.ErrClosedPipe, err)
 	et.Exchange.Release()
 	assert.True(t, et.released)
 }
