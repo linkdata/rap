@@ -152,11 +152,11 @@ func (fh FrameHeader) HasPayload() bool {
 // PayloadSize returns the number of payload bytes for a frame.
 // If you have ensured HasPayload() returns true, use SizeValue() directly.
 // This is valid for both ConnControl frames and data frames.
-func (fh FrameHeader) PayloadSize() int {
+func (fh FrameHeader) PayloadSize() (n int) {
 	if fh.HasPayload() {
-		return int(fh.SizeValue())
+		n = int(fh.SizeValue())
 	}
-	return 0
+	return
 }
 
 // IsConnControl returns true if the Exchange ID indicates this is a conn control frame.
