@@ -434,9 +434,11 @@ func (e *Exchange) Stop() (err error) {
 
 // Release calls Stop() and then calls the releaser function.
 func (e *Exchange) Release() {
-	// log.Print("Exchange.Release() ", e)
-	e.Stop()
-	e.conn.ExchangeRelease(e)
+	if e != nil {
+		// log.Print("Exchange.Release() ", e)
+		e.Stop()
+		e.conn.ExchangeRelease(e)
+	}
 }
 
 // WriteRequest writes a http.Request to the exchange, including it's Body and
