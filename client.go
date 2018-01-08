@@ -77,14 +77,6 @@ func (c *Client) setConn(conn *Conn) {
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.conn)), unsafe.Pointer(conn))
 }
 
-// NewExchange returns a new Exchange for use, or nil if none available.
-func (c *Client) NewExchange() *Exchange {
-	if conn := c.getConn(); conn != nil {
-		return conn.NewExchange()
-	}
-	return nil
-}
-
 func (c *Client) offlineError() (err error) {
 	if c.lastError != nil {
 		if c.firstAttempt == c.lastAttempt {
@@ -92,6 +84,22 @@ func (c *Client) offlineError() (err error) {
 		} else {
 			err = fmt.Errorf("upstream server has been unresponsive for %v, last error was: \"%v\"",
 				time.Now().Sub(c.firstAttempt), c.lastError)
+		}
+	}
+	return
+}
+
+// NewExchange returns a new Exchange for use, or nil if none available.
+func (c *Client) NewExchange() (e *Exchange) {
+	if conn := c.getConn(); conn != nil {
+		e = conn.NewExchange()
+	}
+	if e == nil {
+		bestConn := c.selectBestConn()
+		if bestConn != nil {
+			if e = bestConn.NewExchange(); e != nil {
+				c.setConn(bestConn)
+			}
 		}
 	}
 	return
