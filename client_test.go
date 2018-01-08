@@ -70,8 +70,8 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
 	secondConn := c.getConn()
-	assert.NotEqual(t, firstConn, secondConn)
 	e.Release()
+	assert.NotEqual(t, len(firstConn.exchanges), len(secondConn.exchanges))
 	assert.Equal(t, int(MaxExchangeID), cap(c.conn.exchanges))
 	assert.Equal(t, 1, len(c.conn.exchanges))
 
