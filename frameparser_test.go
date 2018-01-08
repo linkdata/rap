@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_FrameReader_String(t *testing.T) {
+func Test_FrameParser_String(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fp := NewFrameParser(fd)
@@ -21,7 +21,7 @@ func Test_FrameReader_String(t *testing.T) {
 	assert.Equal(t, "[FrameReader 34 012048656c6c6f20776f726c6420776974682061206c6f6e6765722073747269...]", fp.String())
 }
 
-func Test_FrameReader_Read(t *testing.T) {
+func Test_FrameParser_Read(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteString("quuxFooBAR")
@@ -31,7 +31,7 @@ func Test_FrameReader_Read(t *testing.T) {
 	assert.Equal(t, []byte{0xa, 0x71, 0x75, 0x75, 0x78, 0x46, 0x6f, 0x6f, 0x42, 0x41, 0x52}, ba)
 }
 
-func Test_FrameReader_ReadRequest_IllegalURL(t *testing.T) {
+func Test_FrameParser_ReadRequest_IllegalURL(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteStringNull()  // method
@@ -42,7 +42,7 @@ func Test_FrameReader_ReadRequest_IllegalURL(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func Test_FrameReader_ProxyResponse(t *testing.T) {
+func Test_FrameParser_ProxyResponse(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(MaxExchangeID)
 	fd.WriteResponse(200, 0, nil)
@@ -82,4 +82,13 @@ func Test_FrameReader_ProxyResponse(t *testing.T) {
 	fp.ProxyResponse(rr)
 	assert.Equal(t, 200, rr.Code)
 	assert.Equal(t, "123", rr.Header().Get("Content-Length"))
+}
+
+func Test_FrameParser_illegal_mapped(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0)
+	fd.WriteByte(0x00)
+	fd.WriteByte(0x02)
+	fp := NewFrameParser(fd)
+	assert.Panics(t, func() { fp.ReadString() })
 }

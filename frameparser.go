@@ -88,6 +88,7 @@ func (fp *FrameParser) ReadString() (s string, isNull bool) {
 		code := fp.ReadLen()
 		if code > 1 {
 			// TODO: string table lookup
+			panic("unmapped string index")
 		}
 		s = ""
 		if code < 1 {
