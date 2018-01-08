@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewFrameData(t *testing.T) {
+func Test_NewFrameData(t *testing.T) {
 	fd := NewFrameData()
 	assert.NotNil(t, fd)
 	assert.Equal(t, 0, fd.Buffered())
@@ -23,7 +23,7 @@ func TestNewFrameData(t *testing.T) {
 	assert.Equal(t, FrameMaxSize-FrameHeaderSize, fd.Available())
 }
 
-func TestNewFrameDataExchangeIDRange(t *testing.T) {
+func Test_NewFrameData_exchange_ID_range(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(ExchangeID(1))
 	assert.Equal(t, ExchangeID(1), fd.Header().ExchangeID())
@@ -32,7 +32,7 @@ func TestNewFrameDataExchangeIDRange(t *testing.T) {
 	assert.Panics(t, func() { fd.WriteHeader(ExchangeID(0xFFFF)) })
 }
 
-func TestFrameDataString(t *testing.T) {
+func Test_FrameData_String(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteString("Hello world")
@@ -409,4 +409,9 @@ func Test_FrameData_SetSizeValue(t *testing.T) {
 	assert.Equal(t, ConnControlPing, fd.Header().ConnControl())
 	assert.True(t, fd.Header().HasPayload())
 	assert.NotZero(t, fd.Header().SizeValue())
+}
+
+func Test_FrameData_SetSizeValue_too_small_fd(t *testing.T) {
+	fd := NewFrameData()
+	assert.Panics(t, func() { fd.SetSizeValue() })
 }
