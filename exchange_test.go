@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fortytw2/leaktest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -298,9 +299,18 @@ func Test_Exchange_SubmitFrame_close_during_ack_read(t *testing.T) {
 }
 
 func Test_Exchange_SubmitFrame_close_during_data_read(t *testing.T) {
+	defer leaktest.Check(t)()
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.Exchange.Close()
+waitForReaderToStop:
+	for {
+		select {
+		case et.Exchange.readCh <- nil:
+		default:
+			break waitForReaderToStop
+		}
+	}
 	err := et.SubmitFrame(nil)
 	assert.Equal(t, io.ErrClosedPipe, err)
 	et.Exchange.Release()
