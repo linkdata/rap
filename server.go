@@ -97,7 +97,9 @@ func (srv *Server) Serve(l net.Listener) error {
 			maxConns = 1
 		}
 	}
+	srv.serveErrorsMu.Lock()
 	srv.serveErrors = make(map[string]int)
+	defer srv.serveErrorsMu.Unlock()
 	srv.connLimiter = make(chan struct{}, maxConns)
 	for {
 		// wait for active connections to fall to allowed levels
