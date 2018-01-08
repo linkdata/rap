@@ -291,6 +291,14 @@ func Test_Exchange_SubmitFrame_close_during_ack_read(t *testing.T) {
 	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetFinal()
 	et.Exchange.Close()
+fillAckCh:
+	for {
+		select {
+		case et.Exchange.ackCh <- struct{}{}:
+		default:
+			break fillAckCh
+		}
+	}
 	et.SubmitFrame(fd)
 	err := et.Exchange.Start(et)
 	assert.Equal(t, io.EOF, err)
