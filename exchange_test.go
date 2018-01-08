@@ -297,6 +297,17 @@ func Test_Exchange_SubmitFrame_close_during_ack_read(t *testing.T) {
 	assert.True(t, et.released)
 }
 
+func Test_Exchange_SubmitFrame_close_during_data_read(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+	et.Exchange.Close()
+	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
+	err := et.Exchange.Start(et)
+	assert.Equal(t, io.EOF, err)
+	et.Exchange.Release()
+	assert.True(t, et.released)
+}
+
 func Test_Exchange_WriteByte(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
