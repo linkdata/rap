@@ -92,10 +92,7 @@ func (srv *Server) Serve(l net.Listener) error {
 
 	maxConns := srv.MaxConnections
 	if maxConns < 1 {
-		maxConns = ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1)
-		if maxConns < 1 {
-			maxConns = 1
-		}
+		maxConns = 1 + (ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1))
 	}
 	srv.serveErrorsMu.Lock()
 	srv.serveErrors = make(map[string]int)
