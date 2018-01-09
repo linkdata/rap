@@ -95,13 +95,6 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		writeErrCh:      make(chan error),
 		doneChan:        make(chan struct{}),
 	}
-	/*
-		for i := range c.exchangeLookup {
-			e := NewExchange(c, ExchangeID(i))
-			c.exchangeLookup[i] = e
-			c.exchanges <- e
-		}
-	*/
 	return c
 }
 
@@ -296,19 +289,6 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 // ServeHTTP processes incoming and outgoing frames for the Conn until closed.
 func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	c.Handler = h
-	/*
-		if h != nil {
-		drainExchanges:
-			for {
-				select {
-				case e := <-c.exchanges:
-					go e.ServeHTTP(h)
-				default:
-					break drainExchanges
-				}
-			}
-		}
-	*/
 
 	go func() {
 		_, err := c.ReadFrom(bufio.NewReaderSize(c.ReadWriteCloser, 64*1024))
@@ -349,67 +329,6 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	return err
 }
 
-/*
-// closeRead closes the reading part of a Conn
-func (c *Conn) closeRead() (err error) {
-	if !c.isReadClosed {
-		c.isReadClosed = true
-		select {
-		case err = <-c.readErrCh:
-			// reader already done
-		default:
-			timer := time.NewTimer(c.ReadTimeout)
-			defer timer.Stop()
-			// closing the I/O stream will cause the reader to stop with an error
-			if err = c.ReadWriteCloser.Close(); err != nil {
-				// log.Print("Conn.CloseRead(): c.ReadWriteCloser.Close(): ", err.Error())
-				return
-			}
-			select {
-			case err = <-c.readErrCh:
-			case <-timer.C:
-				err = ErrTimeoutWaitingForReader
-				return
-			}
-		}
-		// close exchanges' readCh as we will no longer write to them
-		for _, e := range c.exchangeLookup {
-			if e != nil {
-				if exerr := e.Close(); err == nil {
-					err = exerr
-				}
-			}
-		}
-	}
-	return
-}
-
-// CloseWrite stops the writing part of a Conn
-func (c *Conn) CloseWrite() (err error) {
-	if !c.isWriteClosed {
-		c.isWriteClosed = true
-		reapCount := 0
-		timer := time.NewTimer(c.ReadTimeout)
-		defer timer.Stop()
-		for reapCount < cap(c.exchanges) {
-			select {
-			case fd := <-c.writeCh:
-				FrameDataFree(fd)
-			case <-c.exchanges:
-				reapCount++
-			case <-timer.C:
-				// log.Print("Conn.Close(): timeout reaping exchanges (", cap(c.exchanges)-reapCount, " leaked)")
-				timer = time.NewTimer(c.ReadTimeout)
-				err = ErrTimeoutReapingExchanges
-				reapCount++
-			}
-		}
-		// close(c.writeCh)
-	}
-	return
-}
-*/
-
 func (c *Conn) closeDoneChanLocked() {
 	select {
 	case <-c.doneChan:
@@ -427,11 +346,6 @@ func (c *Conn) Close() (err error) {
 	// closing the I/O stream will cause the reader goroutine to stop with an error
 	err = c.ReadWriteCloser.Close()
 
-	/*
-		if werr := c.CloseWrite(); err == nil {
-			err = werr
-		}
-	*/
 	for _, e := range c.exchangeLookup {
 		if e != nil {
 			if eerr := e.Close(); err == nil {
