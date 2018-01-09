@@ -399,7 +399,7 @@ func (e *Exchange) waitForFinalFrame() (err error) {
 	return
 }
 
-// Close immediately closes an Exchange and frees any resouces.
+// Close immediately closes an Exchange and frees any resources.
 // The Exchange may not be used after being closed.
 func (e *Exchange) Close() (err error) {
 	e.mu.Lock()
