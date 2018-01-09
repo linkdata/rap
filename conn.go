@@ -197,9 +197,6 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		id := fd.Header().ExchangeID()
 		e := c.exchangeLookup[id]
 		if e == nil {
-			if id < 1 || id > MaxExchangeID {
-				panic("rap: conn received invalid ExchangeID")
-			}
 			e = NewExchange(c, id)
 			if c.Handler != nil {
 				go e.ServeHTTP(c.Handler)
