@@ -63,7 +63,11 @@ func (srv *Server) Listen(address string) (net.Listener, error) {
 // Serve to handle requests on incoming connections.
 // If srv.Addr is blank, ":10111" is used.
 func (srv *Server) ListenAndServe() (err error) {
-	listener, err := srv.Listen(":10111")
+	addr := srv.Addr
+	if addr == "" {
+		addr = ":10111"
+	}
+	listener, err := srv.Listen(addr)
 	if err == nil {
 		err = srv.Serve(listener)
 	}
