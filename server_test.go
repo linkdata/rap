@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fortytw2/leaktest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -80,8 +81,19 @@ func (st *srvTester) Close() {
 }
 
 func Test_Server_simple(t *testing.T) {
+	defer leaktest.Check(t)()
 	st := newSrvTester(t)
 	st.Close()
+}
+
+func Test_Server_ListenAndServe(t *testing.T) {
+	defer leaktest.Check(t)()
+	srv := &Server{Addr: "127.0.0.1:"}
+	go func() {
+		err := srv.ListenAndServe()
+		assert.Equal(t, ErrServerClosed, err)
+	}()
+	assert.NoError(t, srv.Close())
 }
 
 func Test_Server_support_functions(t *testing.T) {
