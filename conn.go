@@ -343,8 +343,9 @@ func (c *Conn) Close() (err error) {
 	// closing the I/O stream will cause the reader goroutine to stop with an error
 	err = c.ReadWriteCloser.Close()
 
-	for _, e := range c.exchangeLookup {
+	for i, e := range c.exchangeLookup {
 		if e != nil {
+			c.exchangeLookup[i] = nil
 			if eerr := e.Close(); err == nil {
 				err = eerr
 			}
@@ -353,8 +354,8 @@ func (c *Conn) Close() (err error) {
 	return
 }
 
-// Shutdown gracefully shuts down the server without interrupting any
-// active connections.
+// Shutdown gracefully shuts down the connection without interrupting any
+// active exchanges.
 func (c *Conn) Shutdown(ctx context.Context) error {
 	atomic.AddInt32(&c.inShutdown, 1)
 	defer atomic.AddInt32(&c.inShutdown, -1)
