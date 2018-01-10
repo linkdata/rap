@@ -2,7 +2,6 @@ package rap
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -70,7 +69,6 @@ type Conn struct {
 	writeErrCh         chan error
 	mu                 sync.Mutex
 	doneChan           chan struct{}
-	inShutdown         int32 // accessed atomically (non-zero means we're in Shutdown)
 	lastPingSent       int64 // Unix nanoseconds
 	lastPongRcvd       int64 // Unix nanoseconds
 	latency            int64 // Unix nanoseconds
@@ -196,6 +194,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		id := fd.Header().ExchangeID()
 		e := c.exchangeLookup[id]
+
 		if e == nil {
 			e = NewExchange(c, id)
 			if c.Handler != nil {
@@ -352,30 +351,6 @@ func (c *Conn) Close() (err error) {
 		}
 	}
 	return
-}
-
-// Shutdown gracefully shuts down the connection without interrupting any
-// active exchanges.
-func (c *Conn) Shutdown(ctx context.Context) error {
-	atomic.AddInt32(&c.inShutdown, 1)
-	defer atomic.AddInt32(&c.inShutdown, -1)
-	/*
-		ticker := time.NewTicker(shutdownPollInterval)
-		defer ticker.Stop()
-		for {
-			if ctx != nil {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-ticker.C:
-				}
-			} else {
-				<-ticker.C
-			}
-		}
-	*/
-	c.Close()
-	return nil
 }
 
 // NewExchangeWait returns the next available Exchange, or nil if timed out.

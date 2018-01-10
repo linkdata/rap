@@ -1,7 +1,6 @@
 package rap
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net"
@@ -11,7 +10,7 @@ import (
 	"time"
 )
 
-// ErrServerClosed is returned by the Server's Serve method after a call to Shutdown or Close.
+// ErrServerClosed is returned by the Server's Serve method after a call to Close.
 var ErrServerClosed = errors.New("rap: Server closed")
 
 // Server listens for incoming RAP connections and creates Conn's for them.
@@ -19,7 +18,6 @@ type Server struct {
 	Addr           string       // TCP address to listen on, ":10111" if empty
 	Handler        http.Handler // HTTP handler to invoke
 	MaxConnections int          // maximum number of RAP Conn's to allow
-	inShutdown     int32        // accessed atomically (non-zero means we're in Shutdown)
 	listeners      map[net.Listener]struct{}
 	bytesWritten   int64
 	bytesRead      int64
@@ -81,8 +79,10 @@ func (srv *Server) Serve(l net.Listener) error {
 	defer l.Close()
 	var tempDelay time.Duration // how long to sleep on accept failure
 
-	if srv.shuttingDown() {
+	select {
+	case <-srv.getDoneChan():
 		return ErrServerClosed
+	default:
 	}
 
 	srv.trackListener(l, true)
@@ -186,31 +186,10 @@ func (srv *Server) closeIdleConns() bool {
 	quiescent := true
 	for c := range srv.activeConn {
 		c.Close()
-
-		/*
-			if len(c.exchanges) < cap(c.exchanges) {
-				quiescent = false
-				continue
-			}
-			c.Close()
-		*/
 		delete(srv.activeConn, c)
 	}
 	return quiescent
 }
-
-func (srv *Server) shuttingDown() bool {
-	if atomic.LoadInt32(&srv.inShutdown) == 0 {
-		select {
-		case <-srv.getDoneChan():
-			return true
-		default:
-		}
-	}
-	return false
-}
-
-var shutdownPollInterval = 500 * time.Millisecond
 
 func (srv *Server) getDoneChan() <-chan struct{} {
 	srv.mu.Lock()
@@ -245,24 +224,7 @@ func (srv *Server) closeListenersLocked() error {
 	return err
 }
 
-// Shutdown gracefully shuts down the server without interrupting any
-// active connections.
-func (srv *Server) Shutdown(ctx context.Context) (lnerr error) {
-	atomic.AddInt32(&srv.inShutdown, 1)
-	defer atomic.AddInt32(&srv.inShutdown, -1)
-	srv.mu.Lock()
-	lnerr = srv.closeListenersLocked()
-	srv.closeDoneChanLocked()
-	srv.mu.Unlock()
-	for c := range srv.activeConn {
-		c.Shutdown(ctx)
-		delete(srv.activeConn, c)
-	}
-	return
-}
-
-// Close immediately closes all active connections. For a
-// graceful shutdown, use Shutdown.
+// Close immediately closes all active connections.
 func (srv *Server) Close() error {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()

@@ -69,7 +69,6 @@ func (st *srvTester) Close() {
 	if !st.isClosed {
 		st.isClosed = true
 		st.srv.Close()
-		// st.srv.Shutdown(context.Background())
 		timer := time.NewTimer(time.Second * 5)
 		defer timer.Stop()
 		select {
