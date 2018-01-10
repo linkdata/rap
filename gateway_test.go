@@ -13,6 +13,7 @@ const srvAddr string = "127.0.0.1:0" // "127.0.0.1:10111"
 
 type gwTester struct {
 	t          *testing.T
+	st         *srvTester
 	isServed   bool
 	haveServed chan struct{}
 }
@@ -20,6 +21,7 @@ type gwTester struct {
 func newGWTester(t *testing.T) *gwTester {
 	return &gwTester{
 		t:          t,
+		st:         newSrvTester(),
 		haveServed: make(chan struct{}),
 	}
 }
