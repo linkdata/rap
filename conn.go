@@ -193,18 +193,24 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		}
 
 		id := fd.Header().ExchangeID()
-		e := c.exchangeLookup[id]
-
-		if e == nil {
-			e = NewExchange(c, id)
-			if c.Handler != nil {
-				go e.ServeHTTP(c.Handler)
-			}
-			c.exchangeLookup[id] = e
-		}
+		e := c.getExchangeForID(id)
 		// log.Print("Conn.ReadFrom(): ", fd, " sendW=", atomic.LoadInt32(&e.sendWindow), " recvW=", atomic.LoadInt32(&e.recvWindow))
 
 		e.SubmitFrame(fd)
+	}
+	return
+}
+
+func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
+	e = c.exchangeLookup[id]
+	if e == nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		e = NewExchange(c, id)
+		c.exchangeLookup[id] = e
+		if c.Handler != nil {
+			go e.ServeHTTP(c.Handler)
+		}
 	}
 	return
 }
