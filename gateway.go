@@ -1,7 +1,6 @@
 package rap
 
 import (
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -57,14 +56,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		rwc, buf, err := hj.Hijack()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			panic(err.Error())
 		}
 		defer rwc.Close()
 		br := buf.Reader
 		if br.Buffered() > 0 {
-			log.Print("Gateway.ServeHTTP(): websocket client sent data before handshake was complete")
-			return
+			panic("Gateway.ServeHTTP(): websocket client sent data before handshake was complete")
 		}
 		e.initiateWebsocket(rwc, buf, r)
 		return
