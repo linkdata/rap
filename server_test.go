@@ -37,6 +37,36 @@ func newSrvTester(t *testing.T) *srvTester {
 	return st
 }
 
+type wrapListener struct {
+	net.Listener
+	AcceptError net.Error
+}
+
+func (wl *wrapListener) Accept() (net.Conn, error) {
+	if wl.AcceptError != nil {
+		return nil, wl.AcceptError
+	}
+	return wl.Listener.Accept()
+}
+
+type tempNetError struct {
+	counter int
+}
+
+func (tne *tempNetError) Error() string {
+	return "tempNetError"
+}
+
+func (tne *tempNetError) Timeout() bool {
+	tne.counter++
+	return tne.counter < 5
+}
+
+func (tne *tempNetError) Temporary() bool {
+	tne.counter++
+	return tne.counter < 5
+}
+
 func (st *srvTester) haveServed() bool {
 	return atomic.LoadInt64(&st.serveCount) > 0
 }
@@ -93,6 +123,18 @@ func Test_Server_ListenAndServe(t *testing.T) {
 		assert.Equal(t, ErrServerClosed, err)
 	}()
 	assert.NoError(t, srv.Close())
+}
+
+func Test_Server_Serve_listen_temporary_error(t *testing.T) {
+	srv := &Server{
+		Addr: srvAddr,
+	}
+	ln, lnerr := srv.Listen(srvAddr)
+	assert.NoError(t, lnerr)
+	assert.NotNil(t, ln)
+	srverr := srv.Serve(&wrapListener{Listener: ln, AcceptError: &tempNetError{}})
+	srv.Close()
+	assert.IsType(t, &tempNetError{}, srverr)
 }
 
 func Test_Server_support_functions(t *testing.T) {
