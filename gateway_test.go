@@ -2,6 +2,7 @@ package rap
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +80,31 @@ func Test_Gateway_ServeHTTP_with_body(t *testing.T) {
 	assert.NoError(t, gw.Close())
 }
 
+func Test_Gateway_ServeHTTP_overflow_headers(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	gw := NewGateway(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("NotReallyAMethod", "/overflow", nil)
+	req.ContentLength = -1
+	for i := 0; i < 8000; i++ {
+		req.Header.Add(fmt.Sprint("Header", i), fmt.Sprint("Value", i))
+	}
+	assert.Panics(t, func() { gw.ServeHTTP(rr, req) })
+	assert.False(t, st.haveServed())
+	assert.NoError(t, gw.Close())
+}
+
+func Test_Gateway_no_answer(t *testing.T) {
+	gw := NewGateway(noSrvAddr)
+	gw.Client.DialTimeout = time.Millisecond * 10
+	// send simple request
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	gw.ServeHTTP(rr, r)
+	assert.Equal(t, http.StatusGatewayTimeout, rr.Code)
+}
+
 func Test_Gateway_simple(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
@@ -126,14 +152,4 @@ func Test_Gateway_simple(t *testing.T) {
 		gw.ServeHTTP(rr, r)
 		assert.Equal(t, http.StatusInternalServerError, rr.Code)
 	*/
-}
-
-func Test_Gateway_no_answer(t *testing.T) {
-	gw := NewGateway(noSrvAddr)
-	gw.Client.DialTimeout = time.Millisecond * 10
-	// send simple request
-	rr := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	gw.ServeHTTP(rr, r)
-	assert.Equal(t, http.StatusGatewayTimeout, rr.Code)
 }
