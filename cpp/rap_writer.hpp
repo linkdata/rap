@@ -65,10 +65,9 @@ class writer {
     return *this;
   }
 
-  // 16-bit MSB
+  // 16-bit MSB written using length
   const rap::writer &operator<<(uint16_t n) const {
-    sb_.sputc(static_cast<char>(n >> 8));
-    sb_.sputc(static_cast<char>(n));
+    write_length(n);
     return *this;
   }
 
