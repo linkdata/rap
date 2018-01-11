@@ -19,9 +19,6 @@ func NewReverseProxy(u *url.URL, maxConnections int) (rp *ReverseProxy) {
 	if maxConnections < 1 {
 		maxConnections = 512
 	}
-	if maxConnections > 0xffff {
-		maxConnections = 0xffff
-	}
 
 	transports := make(chan *http.Transport, maxConnections)
 	for i := 0; i < cap(transports); i++ {
