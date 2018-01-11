@@ -1,6 +1,8 @@
 package rap
 
 import (
+	"bytes"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -61,6 +63,18 @@ func Test_Gateway_ServeHTTP(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
 	gw.ServeHTTP(rr, r)
+	assert.True(t, st.haveServed())
+	assert.NoError(t, gw.Close())
+}
+
+func Test_Gateway_ServeHTTP_with_body(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	gw := NewGateway(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", ioutil.NopCloser(bytes.NewBufferString("Hello world body!")))
+	req.ContentLength = -1
+	gw.ServeHTTP(rr, req)
 	assert.True(t, st.haveServed())
 	assert.NoError(t, gw.Close())
 }
