@@ -178,19 +178,6 @@ func (srv *Server) trackConn(c *Conn) {
 	srv.activeConn[c] = struct{}{}
 }
 
-// closeIdleConns closes all idle connections and reports whether the
-// server is quiescent.
-func (srv *Server) closeIdleConns() bool {
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
-	quiescent := true
-	for c := range srv.activeConn {
-		c.Close()
-		delete(srv.activeConn, c)
-	}
-	return quiescent
-}
-
 func (srv *Server) getDoneChan() <-chan struct{} {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
