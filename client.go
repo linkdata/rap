@@ -94,14 +94,12 @@ func (c *Client) setConn(conn *Conn) {
 }
 
 func (c *Client) offlineError() (err error) {
-	err = c.lastError
-	if err == nil {
-		if c.firstAttempt != c.lastAttempt {
-			err = fmt.Errorf("upstream server has been unresponsive for %v, last error was: \"%v\"",
-				time.Now().Sub(c.firstAttempt), c.lastError)
-		} else {
-			err = fmt.Errorf("upstream server unresponsive")
-		}
+	if err = c.lastError; err == nil {
+		err = fmt.Errorf("upstream server unresponsive")
+	}
+	if c.firstAttempt != c.lastAttempt {
+		err = fmt.Errorf("%v; no response for %v",
+			err, time.Now().Sub(c.firstAttempt))
 	}
 	return
 }

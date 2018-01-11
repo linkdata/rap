@@ -24,6 +24,7 @@ func Test_Client_no_answer(t *testing.T) {
 func Test_Client_server_seems_offline(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	defer c.Close()
+	assert.Error(t, c.offlineError())
 	c.DialTimeout = time.Millisecond * 10
 	c.firstAttempt = time.Now().Add(-time.Second)
 	e, err := c.NewExchangeMayDial()
