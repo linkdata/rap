@@ -9,10 +9,12 @@ const noSrvAddr string = "192.0.2.1:1"
 func Test_Client_NewClient(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	assert.NotNil(t, c)
+	defer c.Close()
 }
 
 func Test_Client_no_answer(t *testing.T) {
 	c := NewClient(noSrvAddr)
+	defer c.Close()
 	c.DialTimeout = time.Millisecond * 10
 	e, err := c.NewExchangeMayDial()
 	assert.Nil(t, e)
@@ -21,6 +23,7 @@ func Test_Client_no_answer(t *testing.T) {
 
 func Test_Client_server_seems_offline(t *testing.T) {
 	c := NewClient(noSrvAddr)
+	defer c.Close()
 	c.DialTimeout = time.Millisecond * 10
 	c.firstAttempt = time.Now().Add(-time.Second)
 	e, err := c.NewExchangeMayDial()
@@ -32,6 +35,7 @@ func Test_Client_connect_and_close(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
+	defer c.Close()
 	assert.NotNil(t, c)
 	c.DialTimeout = time.Second
 	e1, err := c.NewExchangeMayDial()
@@ -51,6 +55,7 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
 	assert.NotNil(t, c)
+	defer c.Close()
 	c.DialTimeout = time.Second
 
 	grabbed := make(chan *Exchange, MaxExchangeID*2+1)

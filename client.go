@@ -31,9 +31,25 @@ func NewClient(addr string) *Client {
 	}
 }
 
-// dial creates a new RAP Conn to the server.
+// Close closes all connections.
+func (c *Client) Close() (err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, conn := range c.conns {
+		c.conns[i] = nil
+		if conn != nil {
+			if connerr := conn.Close(); err == nil {
+				err = connerr
+			}
+		}
+	}
+	c.conns = nil
+	return
+}
+
+// dialLocked creates a new RAP Conn to the server.
 // Must run with the mutex locked.
-func (c *Client) dial() *Conn {
+func (c *Client) dialLocked() *Conn {
 	rwc, err := net.DialTimeout("tcp", c.Addr, c.DialTimeout)
 	if err != nil {
 		c.lastError = err
@@ -116,7 +132,7 @@ func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
 		if bestConn == nil {
 			// not enough free, make a new connection
 			if c.lastAttempt.Before(startTime) {
-				bestConn = c.dial()
+				bestConn = c.dialLocked()
 			}
 			if bestConn == nil {
 				return nil, c.offlineError()
