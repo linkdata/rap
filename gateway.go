@@ -24,6 +24,11 @@ func NewGateway(addr string) *Gateway {
 	}
 }
 
+// Close closes the gateway's connections.
+func (g *Gateway) Close() error {
+	return g.Client.Close()
+}
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// log.Print("Gateway.ServeHTTP() ", r)
 	e := g.Client.NewExchange()
@@ -32,12 +37,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var err error
 		e, err = g.Client.NewExchangeMayDial()
 		if e == nil {
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusGatewayTimeout)
-			} else {
-				log.Print("Gateway.ServeHTTP(): can't allocate exchange and nil error")
-				http.Error(w, "can't allocate exchange", http.StatusInternalServerError)
-			}
+			http.Error(w, err.Error(), http.StatusGatewayTimeout)
 			return
 		}
 	}
