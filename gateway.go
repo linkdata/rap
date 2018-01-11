@@ -53,8 +53,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		strings.ToLower(r.Header["Connection"][0]) == "upgrade" {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
-			http.Error(w, "Gateway.ServeHTTP(): http.Hijacker unsupported", http.StatusInternalServerError)
-			return
+			panic("Gateway.ServeHTTP(): http.Hijacker unsupported")
 		}
 		rwc, buf, err := hj.Hijack()
 		if err != nil {

@@ -95,6 +95,19 @@ func Test_Gateway_ServeHTTP_overflow_headers(t *testing.T) {
 	assert.NoError(t, gw.Close())
 }
 
+func Test_Gateway_ServeHTTP_websocket_missing_hijack(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	gw := NewGateway(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Add("Upgrade", "websocket")
+	req.Header.Add("Connection", "upgrade")
+	assert.Panics(t, func() { gw.ServeHTTP(rr, req) })
+	assert.False(t, st.haveServed())
+	assert.NoError(t, gw.Close())
+}
+
 func Test_Gateway_no_answer(t *testing.T) {
 	gw := NewGateway(noSrvAddr)
 	gw.Client.DialTimeout = time.Millisecond * 10
