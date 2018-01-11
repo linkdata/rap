@@ -2,6 +2,7 @@ package rap
 
 import (
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -39,14 +40,28 @@ func newSrvTester(t *testing.T) *srvTester {
 
 type wrapListener struct {
 	net.Listener
-	AcceptError net.Error
+	AcceptError   net.Error
+	CloseError    error
+	listenStarted chan struct{}
 }
 
 func (wl *wrapListener) Accept() (net.Conn, error) {
+	if wl.listenStarted != nil {
+		close(wl.listenStarted)
+		wl.listenStarted = nil
+	}
 	if wl.AcceptError != nil {
 		return nil, wl.AcceptError
 	}
 	return wl.Listener.Accept()
+}
+
+func (wl *wrapListener) Close() (err error) {
+	err = wl.Listener.Close()
+	if err == nil {
+		err = wl.CloseError
+	}
+	return
 }
 
 type tempNetError struct {
@@ -145,9 +160,26 @@ func Test_Server_Close_double_close(t *testing.T) {
 	assert.NoError(t, lnerr)
 	assert.NotNil(t, ln)
 	srverr := srv.Serve(&wrapListener{Listener: ln, AcceptError: &tempNetError{counter: 10}})
-	srv.Close()
-	srv.Close()
+	assert.NoError(t, srv.Close())
+	assert.NoError(t, srv.Close())
 	assert.IsType(t, &tempNetError{}, srverr)
+}
+
+func Test_Server_Close_listener_error(t *testing.T) {
+	srv := &Server{
+		Addr: srvAddr,
+	}
+	ln, lnerr := srv.Listen(srvAddr)
+	assert.NoError(t, lnerr)
+	assert.NotNil(t, ln)
+	ls := make(chan struct{})
+	wl := &wrapListener{Listener: ln, CloseError: io.ErrUnexpectedEOF, listenStarted: ls}
+	go func() {
+		srverr := srv.Serve(wl)
+		assert.Equal(t, ErrServerClosed, srverr)
+	}()
+	<-ls
+	assert.Equal(t, io.ErrUnexpectedEOF, srv.Close())
 }
 
 func Test_Server_support_functions(t *testing.T) {
