@@ -49,28 +49,20 @@ func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func Test_Gateway_ServeHTTP(t *testing.T) {
-	/*
-		gt := newGWTester(t)
-		srv := &Server{
-			Addr:    srvAddr,
-			Handler: gt,
-		}
-		go func() {
-			assert.Error(t, srv.ListenAndServe())
-		}()
-	*/
+func Test_Gateway_NewGateway(t *testing.T) {
 	gw := NewGateway(srvAddr)
+	assert.NoError(t, gw.Close())
+}
+
+func Test_Gateway_ServeHTTP(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
+	gw := NewGateway(st.srv.Addr)
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
 	gw.ServeHTTP(rr, r)
-	/*
-		wfs := gt.WaitForServed()
-		srv.listener.Close()
-		assert.True(t, wfs)
-	*/
+	assert.True(t, st.haveServed())
+	assert.NoError(t, gw.Close())
 }
 
 func Test_Gateway_simple(t *testing.T) {
