@@ -85,7 +85,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			requestErr = e.WriteRequest(r)
+			if requestErr = e.WriteRequest(r); requestErr != nil {
+				e.Close()
+			}
 		}()
 		responseErr = e.ProxyResponse(w)
 		wg.Wait()
@@ -102,8 +104,5 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if responseErr != nil {
 		errorText += " responseErr=" + responseErr.Error()
 	}
-	log.Print(errorText)
-	if !e.hasReceived {
-		http.Error(w, errorText, http.StatusInternalServerError)
-	}
+	panic(errorText)
 }
