@@ -20,10 +20,14 @@ type gwTester struct {
 
 func newGWTester(t *testing.T) *gwTester {
 	return &gwTester{
-		t:          t,
-		st:         newSrvTester(),
+		t: t,
+		// st:         newSrvTester(t),
 		haveServed: make(chan struct{}),
 	}
+}
+
+func (gt *gwTester) Close() {
+	gt.st.Close()
 }
 
 func (gt *gwTester) WaitForServed() bool {
@@ -45,7 +49,7 @@ func (gt *gwTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func Test_Gateway_ListenAndServe(t *testing.T) {
+func Test_Gateway_ServeHTTP(t *testing.T) {
 	/*
 		gt := newGWTester(t)
 		srv := &Server{
