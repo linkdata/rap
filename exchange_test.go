@@ -303,7 +303,8 @@ fillAckCh:
 	err := et.Exchange.Start(et)
 	assert.Equal(t, io.EOF, err)
 	et.Exchange.Release()
-	assert.True(t, et.released)
+	// A Close()'d Exchange must not be released
+	assert.False(t, et.released)
 }
 
 func Test_Exchange_SubmitFrame_close_during_data_read(t *testing.T) {
@@ -322,7 +323,7 @@ waitForReaderToStop:
 	err := et.SubmitFrame(nil)
 	assert.Equal(t, io.ErrClosedPipe, err)
 	et.Exchange.Release()
-	assert.True(t, et.released)
+	assert.False(t, et.released)
 }
 
 func Test_Exchange_WriteByte(t *testing.T) {
