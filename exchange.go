@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,6 +57,7 @@ type Exchange struct {
 	hasReceived      bool        // true if the exchange has received the first frame
 	hasSentFinal     bool        // true if we have sent our final frame
 	hasReceivedFinal bool        // true if the peer has sent a it's final frame
+	hasClosed        int32       // nonzero if Close() has been called for the Exchange
 }
 
 func (e *Exchange) String() string {
@@ -402,6 +404,7 @@ func (e *Exchange) waitForFinalFrame() (err error) {
 // Close immediately closes an Exchange and frees any resources.
 // The Exchange may not be used after being closed.
 func (e *Exchange) Close() (err error) {
+	atomic.AddInt32(&e.hasClosed, 1)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.closeDoneChanLocked()
@@ -434,7 +437,7 @@ func (e *Exchange) Stop() (err error) {
 
 // Release calls Stop() and then calls the releaser function.
 func (e *Exchange) Release() {
-	if e != nil {
+	if e != nil && atomic.LoadInt32(&e.hasClosed) == 0 {
 		// log.Print("Exchange.Release() ", e)
 		e.Stop()
 		e.conn.ExchangeRelease(e)
