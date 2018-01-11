@@ -137,6 +137,19 @@ func Test_Server_Serve_listen_temporary_error(t *testing.T) {
 	assert.IsType(t, &tempNetError{}, srverr)
 }
 
+func Test_Server_Close_double_close(t *testing.T) {
+	srv := &Server{
+		Addr: srvAddr,
+	}
+	ln, lnerr := srv.Listen(srvAddr)
+	assert.NoError(t, lnerr)
+	assert.NotNil(t, ln)
+	srverr := srv.Serve(&wrapListener{Listener: ln, AcceptError: &tempNetError{counter: 10}})
+	srv.Close()
+	srv.Close()
+	assert.IsType(t, &tempNetError{}, srverr)
+}
+
 func Test_Server_support_functions(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
