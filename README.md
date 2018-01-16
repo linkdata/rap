@@ -106,7 +106,7 @@ MSB encoded 7 bits at a time, with the high bit functioning as a stop bit. For e
 ### `int64`
 
 If the value is zero or positive, shift the value left one bit and encode as a `uint64`.
-If the value is negative, shift the absolute value left one bit and set the lowest bit to one, then encode as a `uint64`.
+If the value is negative, shift the absolute value left one bit and flip all the bits, then encode as a `uint64`.
 
 ### `length`
 
