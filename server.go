@@ -88,14 +88,9 @@ func (srv *Server) Serve(l net.Listener) error {
 	srv.trackListener(l, true)
 	defer srv.trackListener(l, false)
 
-	maxConns := srv.MaxConnections
-	if maxConns < 1 {
-		maxConns = 1 + (ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1))
-	}
 	srv.serveErrorsMu.Lock()
 	srv.serveErrors = make(map[string]int)
 	defer srv.serveErrorsMu.Unlock()
-	srv.connLimiter = make(chan struct{}, maxConns)
 	for {
 		// wait for active connections to fall to allowed levels
 		rwc, e := l.Accept()
@@ -125,7 +120,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		if tcpconn, ok := rwc.(*net.TCPConn); ok {
 			tcpconn.SetNoDelay(false)
 		}
-		srv.connLimiter <- struct{}{}
+		srv.getConnLimiter() <- struct{}{}
 		go func(rwc io.ReadWriteCloser) {
 			conn := NewConn(rwc)
 			conn.StatsCollector = srv
@@ -135,7 +130,7 @@ func (srv *Server) Serve(l net.Listener) error {
 				defer srv.serveErrorsMu.Unlock()
 				srv.serveErrors[err.Error()]++
 			}
-			<-srv.connLimiter
+			<-srv.getConnLimiter()
 		}(rwc)
 	}
 }
@@ -200,6 +195,23 @@ func (srv *Server) closeDoneChanLocked() {
 	}
 }
 
+func (srv *Server) getConnLimiter() chan struct{} {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	return srv.getConnLimiterLocked()
+}
+
+func (srv *Server) getConnLimiterLocked() chan struct{} {
+	if srv.connLimiter == nil {
+		maxConns := srv.MaxConnections
+		if maxConns < 1 {
+			maxConns = 1 + (ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1))
+		}
+		srv.connLimiter = make(chan struct{}, maxConns)
+	}
+	return srv.connLimiter
+}
+
 func (srv *Server) closeListenersLocked() error {
 	var err error
 	for ln := range srv.listeners {
@@ -226,7 +238,7 @@ func (srv *Server) Close() error {
 
 // ActiveConns returns the number of active RAP connections.
 func (srv *Server) ActiveConns() int {
-	return len(srv.connLimiter)
+	return len(srv.getConnLimiter())
 }
 
 // AddBytesWritten adds n to the number of bytes written statistic.
