@@ -57,15 +57,24 @@ func (srv *Server) Listen(address string) (net.Listener, error) {
 	return ln, err
 }
 
+// DefaultListenAddr returns the default address:port
+// to listen on.
+func (srv *Server) DefaultListenAddr() string {
+	return ":10111"
+}
+
+func (srv *Server) getListenAddr(addr string) string {
+	if addr == "" {
+		return srv.DefaultListenAddr()
+	}
+	return addr
+}
+
 // ListenAndServe listens on the TCP network address srv.Addr and then calls
 // Serve to handle requests on incoming connections.
 // If srv.Addr is blank, ":10111" is used.
 func (srv *Server) ListenAndServe() (err error) {
-	addr := srv.Addr
-	if addr == "" {
-		addr = ":10111"
-	}
-	listener, err := srv.Listen(addr)
+	listener, err := srv.Listen(srv.getListenAddr(srv.Addr))
 	if err == nil {
 		err = srv.Serve(listener)
 	}

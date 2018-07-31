@@ -133,6 +133,7 @@ func (st *srvTester) Close() {
 func Test_Server_simple(t *testing.T) {
 	defer leaktest.Check(t)()
 	st := newSrvTester(t)
+	assert.Equal(t, st.srv.DefaultListenAddr(), st.srv.getListenAddr(""))
 	st.Close()
 }
 
@@ -144,6 +145,7 @@ func Test_Server_ListenAndServe(t *testing.T) {
 		assert.Equal(t, ErrServerClosed, err)
 	}()
 	assert.NoError(t, srv.Close())
+
 }
 
 func Test_Server_Serve_listen_temporary_error(t *testing.T) {
