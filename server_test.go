@@ -97,7 +97,7 @@ func (st *srvTester) WaitForServed() bool {
 	ticker := time.NewTicker(time.Millisecond * 10)
 	defer ticker.Stop()
 
-	for ticks := 0; ticks < 100; ticks++ {
+	for ticks := 0; ticks < 10; ticks++ {
 		if st.haveServed() {
 			return true
 		}
