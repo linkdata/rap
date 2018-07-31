@@ -90,7 +90,7 @@ func (srv *Server) Serve(l net.Listener) error {
 
 	srv.serveErrorsMu.Lock()
 	srv.serveErrors = make(map[string]int)
-	defer srv.serveErrorsMu.Unlock()
+	srv.serveErrorsMu.Unlock()
 	for {
 		// wait for active connections to fall to allowed levels
 		rwc, e := l.Accept()
