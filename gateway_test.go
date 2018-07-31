@@ -92,6 +92,9 @@ func Test_Gateway_ServeHTTP_overflow_headers(t *testing.T) {
 	}
 	assert.Panics(t, func() { gw.ServeHTTP(rr, req) })
 	assert.False(t, st.haveServed())
+	se := st.srv.ServeErrors()
+	assert.NotNil(t, se)
+	assert.Zero(t, len(se))
 	assert.NoError(t, gw.Close())
 }
 
