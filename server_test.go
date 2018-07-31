@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -96,7 +97,7 @@ func (st *srvTester) WaitForServed() bool {
 	ticker := time.NewTicker(time.Millisecond * 10)
 	defer ticker.Stop()
 
-	for ticks := 0; ticks < 10; ticks++ {
+	for ticks := 0; ticks < 100; ticks++ {
 		if st.haveServed() {
 			return true
 		}
@@ -106,8 +107,13 @@ func (st *srvTester) WaitForServed() bool {
 }
 
 func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	w.WriteHeader(200)
 	atomic.AddInt64(&st.serveCount, 1)
+	if req.Method == "KILL" {
+		st.srv.Close()
+
+	} else {
+		w.WriteHeader(200)
+	}
 }
 
 func (st *srvTester) Close() {
@@ -183,6 +189,7 @@ func Test_Server_Close_listener_error(t *testing.T) {
 }
 
 func Test_Server_support_functions(t *testing.T) {
+	defer leaktest.Check(t)()
 	st := newSrvTester(t)
 	defer st.Close()
 	em := st.srv.ServeErrors()
@@ -197,31 +204,17 @@ func Test_Server_support_functions(t *testing.T) {
 	assert.Equal(t, int64(2), st.srv.BytesWritten())
 }
 
-/*
 func Test_Server_serve_errors(t *testing.T) {
+	defer leaktest.Check(t)()
 	st := newSrvTester(t)
 	defer st.Close()
-	gw := NewGateway(srvAddr)
-	assert.NotNil(t, gw)
+	gw := NewGateway(st.srv.Addr)
 	rr := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	gw.ServeHTTP(rr, r)
-	assert.True(t, st.WaitForServed())
-	assert.NotNil(t, st.srv)
-	assert.NotNil(t, st.srv.listener)
-	assert.NotNil(t, gw.Client)
-	conn := gw.Client.getConn()
-	assert.NotNil(t, conn)
-	if conn != nil {
-		conn.CloseWrite()
-	}
-	rr = httptest.NewRecorder()
-	r = httptest.NewRequest("GET", "/", nil)
-	gw.ServeHTTP(rr, r)
-	assert.NotNil(t, st.srv)
-	assert.NotNil(t, st.srv.listener)
-	st.srv.listener.Close()
-	em := st.srv.ServeErrors()
-	assert.Equal(t, 1, len(em))
+	r := httptest.NewRequest("KILL", "/", nil)
+	assert.Panics(t, func() { gw.ServeHTTP(rr, r) })
+	assert.True(t, st.haveServed())
+	se := st.srv.ServeErrors()
+	assert.NotNil(t, se)
+	assert.NotZero(t, len(se))
+	assert.Error(t, gw.Close())
 }
-*/
