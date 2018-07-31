@@ -202,10 +202,10 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 }
 
 func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	e = c.exchangeLookup[id]
 	if e == nil {
-		c.mu.Lock()
-		defer c.mu.Unlock()
 		e = NewExchange(c, id)
 		c.exchangeLookup[id] = e
 		if c.Handler != nil {
