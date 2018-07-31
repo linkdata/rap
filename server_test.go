@@ -187,6 +187,7 @@ func Test_Server_support_functions(t *testing.T) {
 	defer st.Close()
 	em := st.srv.ServeErrors()
 	assert.NotNil(t, em)
+	assert.Zero(t, len(em))
 	assert.Zero(t, st.srv.ActiveConns())
 	assert.Zero(t, st.srv.BytesWritten())
 	assert.Zero(t, st.srv.BytesRead())
