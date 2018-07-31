@@ -21,37 +21,82 @@ type exchangeTester struct {
 	doneClosed  bool
 	writeClosed bool
 	readClosed  bool
-	writeCh     chan FrameData
-	lastWritten FrameData
+	conn        ExchangeConnection
 	Exchange    *Exchange
 	handler     http.Handler
 }
 
-func newExchangeTester(t *testing.T) *exchangeTester {
-	et := &exchangeTester{
-		t:       t,
+type exchangeTesterWriter struct {
+	et          *exchangeTester
+	writeCh     chan FrameData
+	lastWritten FrameData
+}
+
+func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
+	etw := &exchangeTesterWriter{
+		et:      et,
 		writeCh: make(chan FrameData),
 	}
-	et.Exchange = NewExchange(et, MaxExchangeID)
-	et.wg.Add(1)
 
 	go func() {
 		for {
-			fd := <-et.writeCh
+			fd := <-etw.writeCh
 			if fd == nil {
 				break
 			}
-			et.lastWritten = fd
+			etw.lastWritten = fd
 		}
 	}()
 
+	return etw
+}
+
+func (etw *exchangeTesterWriter) ExchangeWrite(fd FrameData) error {
+	if !etw.et.writeClosed {
+		etw.writeCh <- fd
+		return nil
+	}
+	return io.ErrClosedPipe
+}
+
+func (etw *exchangeTesterWriter) ExchangeRelease(e *Exchange) {
+	etw.et.released = true
+}
+
+func (etw *exchangeTesterWriter) ExchangeTimeout() time.Duration {
+	return time.Millisecond * 100
+}
+
+func newExchangeTester(t *testing.T) *exchangeTester {
+	et := &exchangeTester{
+		t: t,
+	}
+	et.conn = newExchangeTesterWriter(et)
+	et.Exchange = NewExchange(et, MaxExchangeID)
+	et.wg.Add(1)
+	return et
+}
+
+func newExchangeTesterUsingClient(t *testing.T, c *Client) *exchangeTester {
+	exchange, e := c.NewExchangeMayDial()
+	assert.NoError(t, e)
+	assert.NotNil(t, exchange)
+	assert.NotNil(t, exchange.conn)
+	et := &exchangeTester{
+		t:        t,
+		conn:     exchange.conn,
+		Exchange: exchange,
+	}
+	et.wg.Add(1)
 	return et
 }
 
 func (et *exchangeTester) CloseWrite() {
 	if !et.writeClosed {
 		et.writeClosed = true
-		close(et.writeCh)
+		if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+			close(etw.writeCh)
+		}
 	}
 }
 
@@ -61,18 +106,18 @@ func (et *exchangeTester) SubmitFrame(fd FrameData) error {
 
 func (et *exchangeTester) ExchangeWrite(fd FrameData) error {
 	if !et.writeClosed {
-		et.writeCh <- fd
-		return nil
+		return et.conn.ExchangeWrite(fd)
 	}
 	return io.ErrClosedPipe
 }
 
 func (et *exchangeTester) ExchangeRelease(e *Exchange) {
 	et.released = true
+	et.conn.ExchangeRelease(e)
 }
 
 func (et *exchangeTester) ExchangeTimeout() time.Duration {
-	return time.Millisecond * 100
+	return et.conn.ExchangeTimeout()
 }
 
 func (et *exchangeTester) Close() {
