@@ -181,10 +181,7 @@ func Test_Client_ServeHTTP_no_answer(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	c.DialTimeout = time.Millisecond * 10
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Add("Upgrade", "websocket")
-	req.Header.Add("Connection", "upgrade")
-	c.ServeHTTP(rr, req)
+	c.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
 	assert.Equal(t, http.StatusGatewayTimeout, rr.Code)
 	assert.NoError(t, c.Close())
 }
