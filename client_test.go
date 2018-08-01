@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -173,5 +174,17 @@ func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
 	req.Header.Add("Connection", "upgrade")
 	assert.Panics(t, func() { c.ServeHTTP(rr, req) })
 	assert.False(t, st.haveServed())
+	assert.NoError(t, c.Close())
+}
+
+func Test_Client_ServeHTTP_no_answer(t *testing.T) {
+	c := NewClient(noSrvAddr)
+	c.DialTimeout = time.Millisecond * 10
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Add("Upgrade", "websocket")
+	req.Header.Add("Connection", "upgrade")
+	c.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusGatewayTimeout, rr.Code)
 	assert.NoError(t, c.Close())
 }
