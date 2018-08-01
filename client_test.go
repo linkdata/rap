@@ -1,8 +1,15 @@
 package rap
 
-import "testing"
-import "github.com/stretchr/testify/assert"
-import "time"
+import (
+	"bytes"
+	"fmt"
+	"io/ioutil"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+)
 
 const noSrvAddr string = "192.0.2.1:1"
 
@@ -113,4 +120,58 @@ releaseOldConn:
 	for len(grabbed) > 0 {
 		(<-grabbed).Release()
 	}
+}
+
+func Test_Client_ServeHTTP(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	c.ServeHTTP(rr, r)
+	assert.True(t, st.haveServed())
+	assert.NoError(t, c.Close())
+}
+
+func Test_Client_ServeHTTP_with_body(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", ioutil.NopCloser(bytes.NewBufferString("Hello world body!")))
+	req.ContentLength = -1
+	c.ServeHTTP(rr, req)
+	assert.True(t, st.haveServed())
+	assert.NoError(t, c.Close())
+}
+
+func Test_Client_ServeHTTP_overflow_headers(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("NotReallyAMethod", "/overflow", nil)
+	req.ContentLength = -1
+	for i := 0; i < 8000; i++ {
+		req.Header.Add(fmt.Sprint("Header", i), fmt.Sprint("Value", i))
+	}
+	assert.Panics(t, func() { c.ServeHTTP(rr, req) })
+	assert.False(t, st.haveServed())
+	se := st.srv.ServeErrors()
+	assert.NotNil(t, se)
+	assert.Zero(t, len(se))
+	assert.NoError(t, c.Close())
+}
+
+func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Add("Upgrade", "websocket")
+	req.Header.Add("Connection", "upgrade")
+	assert.Panics(t, func() { c.ServeHTTP(rr, req) })
+	assert.False(t, st.haveServed())
+	assert.NoError(t, c.Close())
 }

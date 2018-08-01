@@ -3,6 +3,8 @@ package rap
 import (
 	"fmt"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -143,4 +145,78 @@ func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
 		}
 	}
 	return e, nil
+}
+
+func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e := c.NewExchange()
+
+	if e == nil {
+		var err error
+		e, err = c.NewExchangeMayDial()
+		if e == nil {
+			http.Error(w, err.Error(), http.StatusGatewayTimeout)
+			return
+		}
+	}
+
+	defer e.Release() // will do Stop() before release
+
+	// Detect and handle WebSocket requests.
+	if len(r.Header["Upgrade"]) > 0 &&
+		len(r.Header["Connection"]) > 0 &&
+		r.ProtoAtLeast(1, 1) &&
+		r.Method == "GET" &&
+		strings.ToLower(r.Header["Upgrade"][0]) == "websocket" &&
+		strings.ToLower(r.Header["Connection"][0]) == "upgrade" {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
+		}
+		rwc, buf, err := hj.Hijack()
+		if err != nil {
+			panic(err.Error())
+		}
+		defer rwc.Close()
+		br := buf.Reader
+		if br.Buffered() > 0 {
+			panic("rap.Client.ServeHTTP(): websocket client sent data before handshake was complete")
+		}
+		e.initiateWebsocket(rwc, buf, r)
+		return
+	}
+
+	var requestErr error
+	var responseErr error
+
+	if r.ContentLength == 0 {
+		// we can run this without a separate goroutine as request has no body.
+		requestErr = e.WriteRequest(r)
+		responseErr = e.ProxyResponse(w)
+	} else {
+		// we allow a response to send before request has finished sending,
+		// useful when the upstream does stream processing (such as echoing).
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if requestErr = e.WriteRequest(r); requestErr != nil {
+				e.Close()
+			}
+		}()
+		responseErr = e.ProxyResponse(w)
+		wg.Wait()
+	}
+
+	if responseErr == nil && requestErr == nil {
+		return
+	}
+
+	errorText := "rap.Client.ServeHTTP():"
+	if requestErr != nil {
+		errorText += " requestErr=" + requestErr.Error()
+	}
+	if responseErr != nil {
+		errorText += " responseErr=" + responseErr.Error()
+	}
+	panic(errorText)
 }

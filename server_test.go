@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const srvAddr string = "127.0.0.1:0" // "127.0.0.1:10111"
+
 type srvTester struct {
 	t          *testing.T
 	isClosed   bool
@@ -210,13 +212,13 @@ func Test_Server_serve_errors(t *testing.T) {
 	defer leaktest.Check(t)()
 	st := newSrvTester(t)
 	defer st.Close()
-	gw := NewGateway(st.srv.Addr)
+	c := NewClient(st.srv.Addr)
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest("KILL", "/", nil)
-	assert.Panics(t, func() { gw.ServeHTTP(rr, r) })
+	assert.Panics(t, func() { c.ServeHTTP(rr, r) })
 	assert.True(t, st.haveServed())
 	se := st.srv.ServeErrors()
 	assert.NotNil(t, se)
 	assert.NotZero(t, len(se))
-	assert.Error(t, gw.Close())
+	assert.Error(t, c.Close())
 }
