@@ -131,6 +131,7 @@ func (fp *FrameParser) ReadRequest() (req *http.Request, err error) {
 		ProtoMinor: 1,
 		Header:     make(http.Header),
 		Close:      false,
+		RequestURI: urlString,
 	}
 
 	if queryKey, isNull := fp.ReadString(); !isNull {
