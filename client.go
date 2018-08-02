@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -161,29 +160,34 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer e.Release() // will do Stop() before release
 
-	// Detect and handle WebSocket requests.
-	if len(r.Header["Upgrade"]) > 0 &&
-		len(r.Header["Connection"]) > 0 &&
-		r.ProtoAtLeast(1, 1) &&
-		r.Method == "GET" &&
-		strings.ToLower(r.Header["Upgrade"][0]) == "websocket" &&
-		strings.ToLower(r.Header["Connection"][0]) == "upgrade" {
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
+	/*
+		isWebsocketRequest := false
+
+		// Detect and handle WebSocket requests.
+		if len(r.Header["Upgrade"]) > 0 &&
+			len(r.Header["Connection"]) > 0 &&
+			r.ProtoAtLeast(1, 1) &&
+			r.Method == "GET" &&
+			strings.ToLower(r.Header["Upgrade"][0]) == "websocket" &&
+			strings.ToLower(r.Header["Connection"][0]) == "upgrade" {
+			isWebsocketRequest = true
+
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
+			}
+			rwc, buf, err := hj.Hijack()
+			if err != nil {
+				panic(err.Error())
+			}
+			defer rwc.Close()
+			br := buf.Reader
+			if br.Buffered() > 0 {
+				panic("rap.Client.ServeHTTP(): websocket client sent data before handshake was complete")
+			}
+			e.initiateWebsocket(rwc, buf, r)
 		}
-		rwc, buf, err := hj.Hijack()
-		if err != nil {
-			panic(err.Error())
-		}
-		defer rwc.Close()
-		br := buf.Reader
-		if br.Buffered() > 0 {
-			panic("rap.Client.ServeHTTP(): websocket client sent data before handshake was complete")
-		}
-		e.initiateWebsocket(rwc, buf, r)
-		return
-	}
+	*/
 
 	var requestErr error
 	var responseErr error

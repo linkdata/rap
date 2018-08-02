@@ -169,11 +169,14 @@ func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest("GET", "/ws", nil)
 	req.Header.Add("Upgrade", "websocket")
 	req.Header.Add("Connection", "upgrade")
-	assert.Panics(t, func() { c.ServeHTTP(rr, req) })
-	assert.False(t, st.haveServed())
+	req.Header.Add("Sec-Websocket-Version", "13")
+	req.Header.Add("Sec-WebSocket-Key", "13")
+	c.ServeHTTP(rr, req)
+	assert.True(t, st.haveServed())
+	assert.Equal(t, 500, rr.Code)
 	assert.NoError(t, c.Close())
 }
 

@@ -3,6 +3,7 @@ package rap
 import (
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,35 +12,11 @@ import (
 	"time"
 
 	"github.com/fortytw2/leaktest"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
 
 const srvAddr string = "127.0.0.1:0" // "127.0.0.1:10111"
-
-type srvTester struct {
-	t          *testing.T
-	isClosed   bool
-	srv        *Server
-	serveCount int64
-	serveDone  chan struct{}
-	serveErr   error
-}
-
-func newSrvTester(t *testing.T) *srvTester {
-	st := &srvTester{
-		t: t,
-		srv: &Server{
-			Addr: srvAddr,
-		},
-		serveDone: make(chan struct{}),
-	}
-	st.srv.Handler = st
-	ln, lnerr := st.srv.Listen(srvAddr)
-	assert.NoError(t, lnerr)
-	assert.NotNil(t, ln)
-	go st.Serve(ln)
-	return st
-}
 
 type wrapListener struct {
 	net.Listener
@@ -85,6 +62,31 @@ func (tne *tempNetError) Temporary() bool {
 	return tne.counter < 5
 }
 
+type srvTester struct {
+	t          *testing.T
+	isClosed   bool
+	srv        *Server
+	serveCount int64
+	serveDone  chan struct{}
+	serveErr   error
+}
+
+func newSrvTester(t *testing.T) *srvTester {
+	st := &srvTester{
+		t: t,
+		srv: &Server{
+			Addr: srvAddr,
+		},
+		serveDone: make(chan struct{}),
+	}
+	st.srv.Handler = st
+	ln, lnerr := st.srv.Listen(srvAddr)
+	assert.NoError(t, lnerr)
+	assert.NotNil(t, ln)
+	go st.Serve(ln)
+	return st
+}
+
 func (st *srvTester) haveServed() bool {
 	return atomic.LoadInt64(&st.serveCount) > 0
 }
@@ -108,13 +110,42 @@ func (st *srvTester) WaitForServed() bool {
 	return false
 }
 
+var upgrader = websocket.Upgrader{} // use default options
+
 func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	atomic.AddInt64(&st.serveCount, 1)
-	if req.Method == "KILL" {
+	switch req.Method {
+	case "KILL":
 		st.srv.Close()
+		return
+	case "GET":
+		switch req.RequestURI {
+		case "/ws":
+			st.handleWebsocket(w, req)
+			return
+		}
+	}
+	w.WriteHeader(200)
+}
 
-	} else {
-		w.WriteHeader(200)
+func (st *srvTester) handleWebsocket(w http.ResponseWriter, r *http.Request) {
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	for {
+		mt, message, err := c.ReadMessage()
+		if err != nil {
+			log.Println("read:", err)
+			break
+		}
+		log.Printf("recv: %s", message)
+		err = c.WriteMessage(mt, message)
+		if err != nil {
+			log.Println("write:", err)
+			break
+		}
 	}
 }
 
