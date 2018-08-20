@@ -74,10 +74,13 @@ type Conn struct {
 	latency            int64 // Unix nanoseconds
 	isReadClosed       bool
 	isWriteClosed      bool
+	identity           int64
 }
 
+var identityCounter int64
+
 func (c *Conn) String() string {
-	return fmt.Sprintf("[Conn]")
+	return fmt.Sprintf("[Conn %v]", c.identity)
 }
 
 // NewConn creates a new Conn and initializes it.
@@ -92,6 +95,7 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		readErrCh:       make(chan error),
 		writeErrCh:      make(chan error),
 		doneChan:        make(chan struct{}),
+		identity:        atomic.AddInt64(&identityCounter, 1),
 	}
 	return c
 }
@@ -183,8 +187,6 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			break
 		}
 
-		// log.Print("Conn.ReadFrom(): ", fd)
-
 		if fd.Header().IsConnControl() {
 			if err = connControlHandlers[fd.Header().ConnControl()](c, fd); err != nil {
 				return
@@ -194,7 +196,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		id := fd.Header().ExchangeID()
 		e := c.getExchangeForID(id)
-		// log.Print("Conn.ReadFrom(): ", fd, " sendW=", atomic.LoadInt32(&e.sendWindow), " recvW=", atomic.LoadInt32(&e.recvWindow))
+		//	log.Print("READ ", c, fd, " sendW=", e.getSendWindow())
 
 		e.SubmitFrame(fd)
 	}
@@ -209,7 +211,7 @@ func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
 		e = NewExchange(c, id)
 		c.exchangeLookup[id] = e
 		if c.Handler != nil {
-			go e.ServeHTTP(c.Handler)
+			go e.RepeatServeHTTP(c.Handler)
 		}
 	}
 	return
@@ -263,7 +265,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("Conn.WriteTo(): ", fd)
+			// log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow())
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)
@@ -331,11 +333,14 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	return err
 }
 
-func (c *Conn) closeDoneChanLocked() {
+// returns true if doneChan was closed now, false if already closed
+func (c *Conn) closeDoneChanLocked() bool {
 	select {
 	case <-c.doneChan:
+		return false
 	default:
 		close(c.doneChan)
+		return true
 	}
 }
 
@@ -343,19 +348,42 @@ func (c *Conn) closeDoneChanLocked() {
 func (c *Conn) Close() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.closeDoneChanLocked()
 
-	// closing the I/O stream will cause the reader goroutine to stop with an error
-	err = c.ReadWriteCloser.Close()
+	if c.closeDoneChanLocked() {
+		// closing the I/O stream will cause the reader goroutine to stop with an error
+		err = c.ReadWriteCloser.Close()
 
-	for i, e := range c.exchangeLookup {
-		if e != nil {
-			c.exchangeLookup[i] = nil
-			if eerr := e.Close(); err == nil {
-				err = eerr
+		// Drain the unused exchange channel
+	drain:
+		for {
+			select {
+			case e := <-c.exchanges:
+				e.OnRecycle(nil)
+				c.exchangeLookup[e.ID] = nil
+			default:
+				break drain
+			}
+		}
+
+		// Close all exchanges we know of (in the lookup table)
+		// those will be in-progress exchanges
+		for i, e := range c.exchangeLookup {
+			if e != nil {
+				c.exchangeLookup[i] = nil
+				eerr := e.Close()
+				if err == nil {
+					switch {
+					case eerr == ErrServerClosed:
+					case eerr == io.ErrClosedPipe:
+					case eerr == io.EOF:
+					default:
+						err = eerr
+					}
+				}
 			}
 		}
 	}
+
 	return
 }
 
@@ -388,6 +416,7 @@ func (c *Conn) NewExchange() *Exchange {
 		nextID := lastID + 1
 		if atomic.CompareAndSwapInt32(&c.exchangeLastID, lastID, nextID) {
 			e := NewExchange(c, ExchangeID(nextID))
+			e.OnRecycle(c.ExchangeRelease)
 			c.exchangeLookup[nextID] = e
 			return e
 		}
@@ -415,7 +444,7 @@ func (c *Conn) ExchangeRelease(e *Exchange) {
 	return
 }
 
-// ExchangeTimeout returns the Exchange timeout duration
-func (c *Conn) ExchangeTimeout() time.Duration {
-	return c.WriteTimeout
+// ExchangeAbortChannel returns the abort signalling channel
+func (c *Conn) ExchangeAbortChannel() <-chan struct{} {
+	return c.doneChan
 }

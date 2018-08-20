@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -64,7 +65,8 @@ func (tne *tempNetError) Temporary() bool {
 
 type srvTester struct {
 	t          *testing.T
-	isClosed   bool
+	closeOnce  sync.Once
+	closeCh    chan struct{}
 	srv        *Server
 	serveCount int64
 	serveDone  chan struct{}
@@ -77,6 +79,7 @@ func newSrvTester(t *testing.T) *srvTester {
 		srv: &Server{
 			Addr: srvAddr,
 		},
+		closeCh:   make(chan struct{}),
 		serveDone: make(chan struct{}),
 	}
 	st.srv.Handler = st
@@ -92,9 +95,13 @@ func (st *srvTester) haveServed() bool {
 }
 
 func (st *srvTester) Serve(ln net.Listener) {
-	st.serveErr = st.srv.Serve(ln)
-	assert.Equal(st.t, ErrServerClosed, st.serveErr)
-	close(st.serveDone)
+	defer close(st.serveDone)
+	select {
+	case <-st.closeCh:
+	default:
+		st.serveErr = st.srv.Serve(ln)
+		assert.Equal(st.t, ErrServerClosed, st.serveErr)
+	}
 }
 
 func (st *srvTester) WaitForServed() bool {
@@ -150,8 +157,8 @@ func (st *srvTester) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (st *srvTester) Close() {
-	if !st.isClosed {
-		st.isClosed = true
+	st.closeOnce.Do(func() {
+		close(st.closeCh)
 		st.srv.Close()
 		timer := time.NewTimer(time.Second * 5)
 		defer timer.Stop()
@@ -160,10 +167,20 @@ func (st *srvTester) Close() {
 		case <-timer.C:
 			assert.NoError(st.t, errors.New("server_test: Timeout waiting for server to stop"))
 		}
-	}
+	})
 }
 
+var pprofsync sync.Once
+
 func Test_Server_simple(t *testing.T) {
+	/*
+		pprofsync.Do(func() {
+			go func() {
+				log.Println(http.ListenAndServe("localhost:6060", nil))
+			}()
+		})
+	*/
+
 	defer leaktest.Check(t)()
 	st := newSrvTester(t)
 	assert.Equal(t, st.srv.DefaultListenAddr(), st.srv.getListenAddr(""))
@@ -248,8 +265,15 @@ func Test_Server_serve_errors(t *testing.T) {
 	r := httptest.NewRequest("KILL", "/", nil)
 	assert.Panics(t, func() { c.ServeHTTP(rr, r) })
 	assert.True(t, st.haveServed())
-	se := st.srv.ServeErrors()
-	assert.NotNil(t, se)
-	assert.NotZero(t, len(se))
-	assert.Error(t, c.Close())
+	// wait for ServerErrors to be populated
+	for attempt := 0; attempt < 1000; attempt++ {
+		time.Sleep(time.Millisecond)
+		se := st.srv.ServeErrors()
+		assert.NotNil(t, se)
+		if len(se) > 0 {
+			assert.NoError(t, c.Close())
+			return
+		}
+	}
+	assert.Fail(t, "failed to get server errors")
 }

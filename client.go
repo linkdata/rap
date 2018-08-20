@@ -158,7 +158,7 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	defer e.Release() // will do Stop() before release
+	defer e.Close()
 
 	/*
 		isWebsocketRequest := false
@@ -194,8 +194,9 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.ContentLength == 0 {
 		// we can run this without a separate goroutine as request has no body.
-		requestErr = e.WriteRequest(r)
-		responseErr = e.ProxyResponse(w)
+		if requestErr = e.WriteRequest(r); requestErr == nil {
+			responseErr = e.ProxyResponse(w)
+		}
 	} else {
 		// we allow a response to send before request has finished sending,
 		// useful when the upstream does stream processing (such as echoing).
