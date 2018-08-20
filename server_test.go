@@ -173,11 +173,13 @@ func (st *srvTester) Close() {
 var pprofsync sync.Once
 
 func Test_Server_simple(t *testing.T) {
-	pprofsync.Do(func() {
-		go func() {
-			log.Println(http.ListenAndServe("localhost:6060", nil))
-		}()
-	})
+	/*
+		pprofsync.Do(func() {
+			go func() {
+				log.Println(http.ListenAndServe("localhost:6060", nil))
+			}()
+		})
+	*/
 
 	defer leaktest.Check(t)()
 	st := newSrvTester(t)
