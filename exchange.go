@@ -7,8 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -192,12 +190,6 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 	return
 }
 
-func (e *Exchange) panicDump(msg string) {
-	pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)
-	fmt.Fprintln(os.Stderr, e)
-	panic(msg)
-}
-
 // SubmitFrame gives the Exchange an incoming FrameData.
 // None of the frames seen may be conn control frames.
 // A fd of nil indicates an EOF condition.
@@ -209,7 +201,7 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		// final frame
 		if fd != nil {
 			if fd.Header().HasPayload() {
-				e.panicDump(fmt.Sprint("final frame has payload: ", fd))
+				panic(fmt.Sprint("final frame has payload: ", fd))
 			}
 			FrameDataFree(fd)
 		}
@@ -217,7 +209,7 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		select {
 		case <-e.remoteClosed:
 			if fd != nil {
-				e.panicDump("received multiple final frames")
+				panic("received multiple final frames")
 			}
 		default:
 			close(e.remoteClosed)
@@ -234,14 +226,14 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		select {
 		case e.ackCh <- struct{}{}:
 		default:
-			e.panicDump(fmt.Sprint("ACK would block: ", fd))
+			panic(fmt.Sprint("ACK would block: ", fd))
 		}
 	} else {
 		// data frame
 		select {
 		case e.readCh <- fd:
 		default:
-			e.panicDump(fmt.Sprint("DATA would block: ", fd))
+			panic(fmt.Sprint("DATA would block: ", fd))
 		}
 	}
 
@@ -624,7 +616,7 @@ func (e *Exchange) recycle() {
 			e.localClosed = make(chan struct{})
 			e.remoteClosed = make(chan struct{})
 		} else {
-			e.panicDump("Recycle() requires both local and remote channels closed")
+			panic("Recycle() requires both local and remote channels closed")
 		}
 		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
 		atomic.StoreInt32(&e.didStart, 0)
