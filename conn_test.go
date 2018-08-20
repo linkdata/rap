@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	_ "net/http/pprof"
 
 	"github.com/fortytw2/leaktest"
 	"github.com/stretchr/testify/assert"
@@ -78,6 +81,9 @@ type connTester struct {
 
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
+	if req.Body != nil {
+		io.Copy(ioutil.Discard, req.Body)
+	}
 }
 
 func (ct *connTester) Start() {
@@ -90,7 +96,12 @@ func (ct *connTester) Start() {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
 			}
-			if err != nil && err != io.EOF {
+			switch {
+			case err == nil:
+			case err == io.EOF:
+			case err == ErrServerClosed:
+			case err == io.ErrClosedPipe:
+			default:
 				assert.NoError(ct.t, err)
 			}
 		}
@@ -169,29 +180,37 @@ func newConnTester(t *testing.T) (ct *connTester) {
 	return
 }
 
-func (ct *connTester) InjectRequest(r *http.Request) {
+func (ct *connTester) InjectRequestNoErrors(r *http.Request) {
+	requestErr, responseErr := ct.InjectRequest(r)
+	if responseErr == io.EOF {
+		responseErr = nil
+	}
+	assert.NoError(ct.t, requestErr)
+	assert.NoError(ct.t, responseErr)
+}
+
+func (ct *connTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
 	w := httptest.NewRecorder()
-	var requestErr error
-	var responseErr error
 	var wg sync.WaitGroup
 	e := ct.conn.NewExchangeWait(connTimeout)
-	defer e.Release()
+	defer e.Close()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		requestErr = e.WriteRequest(r)
+		e.Close()
 	}()
 	responseErr = e.ProxyResponse(w)
 	wg.Wait()
-	assert.NoError(ct.t, requestErr)
-	assert.NoError(ct.t, responseErr)
+	return
 }
 
 func (ct *connTester) FillExchanges() (gotten int) {
 	for {
 		if e := ct.conn.NewExchange(); e != nil {
 			gotten++
-			defer e.Release()
+			e.OnRecycle(ct.conn.ExchangeRelease)
+			defer e.Close()
 		} else {
 			return
 		}
@@ -202,7 +221,8 @@ func Test_Conn_String(t *testing.T) {
 	defer leaktest.Check(t)()
 	ct := newConnTester(t)
 	defer ct.Close()
-	assert.Equal(t, "[Conn]", ct.conn.String())
+	expected := fmt.Sprintf("[Conn %v]", ct.conn.identity)
+	assert.Equal(t, expected, ct.conn.String())
 	assert.Equal(t, int(MaxExchangeID)+1, len(ct.conn.exchangeLookup))
 	assert.Equal(t, int(MaxExchangeID), cap(ct.conn.exchanges))
 }
@@ -218,13 +238,13 @@ func Test_Conn_exchanges_exhausted(t *testing.T) {
 			if firstExchange == nil {
 				firstExchange = e
 			}
-			defer e.Release()
+			defer e.Close()
 		} else {
 			break
 		}
 	}
 	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond))
-	firstExchange.Release()
+	firstExchange.Close()
 	assert.NotNil(t, ct.conn.NewExchangeWait(time.Millisecond))
 }
 
@@ -233,7 +253,7 @@ func Test_Conn_ReleaseExchange(t *testing.T) {
 	defer ct.Close()
 	e := ct.conn.NewExchange()
 	assert.NotNil(t, e)
-	e.Release()
+	e.Close()
 }
 
 func Test_Conn_exchange_overflow(t *testing.T) {
@@ -243,21 +263,22 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID), gotten)
 	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
 	e := NewExchange(ct.conn, 1)
-	assert.Panics(t, func() { e.Release() })
+	e.OnRecycle(ct.conn.ExchangeRelease)
+	assert.Panics(t, func() { e.Close() })
 }
 
 func Test_Conn_empty_request_response(t *testing.T) {
 	defer leaktest.Check(t)()
 	ct := newConnTester(t)
 	defer ct.Close()
-	ct.InjectRequest(httptest.NewRequest("GET", "/", nil))
+	ct.InjectRequestNoErrors(httptest.NewRequest("GET", "/", nil))
 }
 
 func Test_Conn_big_request_response(t *testing.T) {
 	defer leaktest.Check(t)()
 	ct := newConnTester(t)
 	defer ct.Close()
-	ct.InjectRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
+	ct.InjectRequestNoErrors(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
 }
 
 func Test_Conn_conncontrol_ping_pong(t *testing.T) {
@@ -370,5 +391,5 @@ func Test_Conn_stolen_exchange(t *testing.T) {
 	e := ct.conn.NewExchange()
 	assert.NotNil(t, e)
 	ct.Close()
-	e.Release()
+	e.Close()
 }

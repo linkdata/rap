@@ -149,6 +149,11 @@ func (fh FrameHeader) HasPayload() bool {
 	return (fh[2] & byte(FrameFlagHead|FrameFlagBody)) != 0
 }
 
+// IsAck returns true if the frame has neither final, header nor body flags set.
+func (fh FrameHeader) IsAck() bool {
+	return (fh[2] & byte(FrameFlagFinal|FrameFlagHead|FrameFlagBody)) == 0
+}
+
 // PayloadSize returns the number of payload bytes for a frame.
 // If you have ensured HasPayload() returns true, use SizeValue() directly.
 // This is valid for both ConnControl frames and data frames.

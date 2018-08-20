@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fortytw2/leaktest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,10 +51,10 @@ func Test_Client_connect_and_close(t *testing.T) {
 	e1, err := c.NewExchangeMayDial()
 	assert.NoError(t, err)
 	assert.NotNil(t, e1)
-	defer e1.Release()
+	defer e1.Close()
 	e2 := c.NewExchange()
 	assert.NotNil(t, e2)
-	defer e2.Release()
+	defer e2.Close()
 	if e1 != nil && e2 != nil {
 		assert.Equal(t, e1.conn, e2.conn)
 	}
@@ -88,9 +89,10 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
 	secondConn := c.getConn()
-	e.Release()
+	e.Close()
 
 	if secondConn != nil {
+		assert.NotEqual(t, firstConn.identity, secondConn.identity)
 		assert.NotEqual(t, len(firstConn.exchanges), len(secondConn.exchanges))
 		assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
 		assert.Equal(t, 1, len(secondConn.exchanges))
@@ -101,7 +103,7 @@ releaseOldConn:
 	for {
 		select {
 		case e = <-grabbed:
-			e.Release()
+			e.Close()
 			assert.NotNil(t, e)
 			assert.Equal(t, firstConn, e.conn)
 		default:
@@ -119,11 +121,12 @@ releaseOldConn:
 
 	assert.Equal(t, int(MaxExchangeID)*2, len(grabbed))
 	for len(grabbed) > 0 {
-		(<-grabbed).Release()
+		(<-grabbed).Close()
 	}
 }
 
 func Test_Client_ServeHTTP(t *testing.T) {
+	defer leaktest.Check(t)()
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
@@ -164,7 +167,9 @@ func Test_Client_ServeHTTP_overflow_headers(t *testing.T) {
 	assert.NoError(t, c.Close())
 }
 
-func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
+/*func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
+	defer leaktest.Check(t)()
+
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
@@ -178,13 +183,42 @@ func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
 	assert.True(t, st.haveServed())
 	assert.Equal(t, 500, rr.Code)
 	assert.NoError(t, c.Close())
-}
+}*/
 
 func Test_Client_ServeHTTP_no_answer(t *testing.T) {
+	defer leaktest.Check(t)()
+
 	c := NewClient(noSrvAddr)
 	c.DialTimeout = time.Millisecond * 10
 	rr := httptest.NewRecorder()
 	c.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
 	assert.Equal(t, http.StatusGatewayTimeout, rr.Code)
 	assert.NoError(t, c.Close())
+}
+
+func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
+	defer leaktest.Check(t)()
+
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	defer assert.NoError(t, c.Close())
+
+	ts := httptest.NewServer(c)
+	defer ts.Close()
+
+	/*
+		wsu := strings.Replace(ts.URL, "http", "ws", 1)
+
+		wsc, resp, err := websocket.DefaultDialer.Dial(wsu+"/ws", nil)
+		if wsc != nil {
+			defer wsc.Close()
+		}
+			assert.NotNil(t, wsc)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+
+			assert.True(t, st.haveServed())
+			assert.NoError(t, c.Close())
+	*/
 }

@@ -248,8 +248,15 @@ func Test_Server_serve_errors(t *testing.T) {
 	r := httptest.NewRequest("KILL", "/", nil)
 	assert.Panics(t, func() { c.ServeHTTP(rr, r) })
 	assert.True(t, st.haveServed())
-	se := st.srv.ServeErrors()
-	assert.NotNil(t, se)
-	assert.NotZero(t, len(se))
-	assert.Error(t, c.Close())
+	// wait for ServerErrors to be populated
+	for attempt := 0; attempt < 1000; attempt++ {
+		time.Sleep(time.Millisecond)
+		se := st.srv.ServeErrors()
+		assert.NotNil(t, se)
+		if len(se) > 0 {
+			assert.NoError(t, c.Close())
+			return
+		}
+	}
+	assert.Fail(t, "failed to get server errors")
 }

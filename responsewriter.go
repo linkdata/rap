@@ -75,7 +75,7 @@ func (rw *ResponseWriter) Flush() {
 		if !rw.wroteHeader {
 			rw.WriteHeader(200)
 		}
-		rw.Exchange.WriteFinal()
+		rw.Exchange.Close()
 		rw.Flushed = true
 	}
 }

@@ -61,12 +61,15 @@ func (fd *FrameData) ClearID(id ExchangeID) {
 
 func (fd FrameData) String() string {
 	var contents string
-	if len(fd) > 32 {
-		contents = hex.EncodeToString(fd[FrameHeaderSize:32]) + "..."
-	} else {
-		contents = hex.EncodeToString(fd[FrameHeaderSize:])
+	if fd != nil {
+		if len(fd) > 32 {
+			contents = hex.EncodeToString(fd[FrameHeaderSize:32]) + "..."
+		} else {
+			contents = hex.EncodeToString(fd[FrameHeaderSize:])
+		}
+		return fmt.Sprintf("[FrameData %v %v]", fd.Header(), contents)
 	}
-	return fmt.Sprintf("[FrameData %v %v]", fd.Header(), contents)
+	return "[FrameData nil]"
 }
 
 // Header returns the FrameHeader part of a FrameData.
@@ -97,6 +100,11 @@ func (fd FrameData) Available() int {
 // current frame, including the header size.
 func (fd FrameData) Buffered() int {
 	return len(fd)
+}
+
+// IsAck returns true if this FrameData is an ACK frame
+func (fd FrameData) IsAck() bool {
+	return fd != nil && fd.Header().IsAck()
 }
 
 // Write implements io.Writer for FrameData, and is used to write body data.

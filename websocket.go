@@ -13,7 +13,7 @@ func (e *Exchange) proxyWebsocketWrites(buf *bufio.ReadWriter) {
 }
 
 func (e *Exchange) proxyWebsocketReads(done chan struct{}, buf *bufio.ReadWriter) {
-	for !e.hasReceivedFinal {
+	for !e.hasReceivedFinal() {
 		if err := e.readFrame(); err != nil {
 			log.Fatal(err.Error())
 			return
