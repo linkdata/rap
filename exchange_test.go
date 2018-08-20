@@ -504,13 +504,12 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 	assert.Zero(t, len(et.Exchange.fdw))
 	assert.False(t, et.Exchange.hasSentFinal())
 
-	et.Exchange.Close()
 	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
 	assert.NotZero(t, m)
 	assert.NoError(t, err)
+	et.Exchange.Close()
 	n, err = et.Exchange.ReadFrom(&buf)
 	assert.Error(t, io.ErrClosedPipe, err)
-	assert.Equal(t, int64(FrameMaxSize*2+1), n)
 }
 
 func Test_Exchange_WriteTo(t *testing.T) {
