@@ -88,13 +88,19 @@ func (srv *Server) Serve(l net.Listener) error {
 	defer l.Close()
 	var tempDelay time.Duration // how long to sleep on accept failure
 
-	select {
-	case <-srv.getDoneChan():
-		return ErrServerClosed
-	default:
+	if err := func() error {
+		srv.mu.Lock()
+		defer srv.mu.Unlock()
+		select {
+		case <-srv.getDoneChanLocked():
+			return ErrServerClosed
+		default:
+		}
+		srv.trackListenerLocked(l, true)
+		return nil
+	}(); err != nil {
+		return err
 	}
-
-	srv.trackListener(l, true)
 	defer srv.trackListener(l, false)
 
 	srv.serveErrorsMu.Lock()
@@ -158,6 +164,10 @@ func (srv *Server) ServeErrors() map[string]int {
 func (srv *Server) trackListener(ln net.Listener, add bool) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
+	srv.trackListenerLocked(ln, add)
+}
+
+func (srv *Server) trackListenerLocked(ln net.Listener, add bool) {
 	if srv.listeners == nil {
 		srv.listeners = make(map[net.Listener]struct{})
 	}
