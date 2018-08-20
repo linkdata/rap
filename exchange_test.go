@@ -740,6 +740,19 @@ func Test_Exchange_flowcontrol_errors(t *testing.T) {
 	}
 }
 
+func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+	et.finFn = func(e *Exchange) {}
+	et.Exchange.started()
+	et.Exchange.Close()
+	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetDeadline(time.Now()))
+	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetReadDeadline(time.Now()))
+	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetWriteDeadline(time.Now()))
+	close(et.Exchange.remoteClosed)
+	et.Exchange.recycle()
+}
+
 func makeConnPipe() (e1, e2 net.Conn, stop func(), err error) {
 	return makeExchangePipe()
 }
