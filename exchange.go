@@ -137,7 +137,6 @@ type Exchange struct {
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
 	didStart      int32              // nonzero if the exchange has sent or received the first frame
-	didReceive    int32              // nonzero if the exchange has received the first frame
 	didSendFinal  int32              // nonzero if we have sent our final frame
 	didRecycle    int32              // nonzero if recycling in progress
 	readDeadline  exchangeDeadline
@@ -150,14 +149,6 @@ func (e *Exchange) hasStarted() bool {
 
 func (e *Exchange) started() {
 	atomic.StoreInt32(&e.didStart, 1)
-}
-
-func (e *Exchange) hasReceived() bool {
-	return atomic.LoadInt32(&e.didReceive) != 0
-}
-
-func (e *Exchange) received() {
-	atomic.StoreInt32(&e.didReceive, 1)
 }
 
 func (e *Exchange) hasReceivedFinal() bool {
@@ -637,7 +628,6 @@ func (e *Exchange) recycle() {
 		}
 		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
 		atomic.StoreInt32(&e.didStart, 0)
-		atomic.StoreInt32(&e.didReceive, 0)
 		atomic.StoreInt32(&e.didSendFinal, 0)
 		if e.onRecycle != nil {
 			e.onRecycle(e)
@@ -805,7 +795,6 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 	if !e.fdr.Header().HasHead() {
 		return ErrMissingFrameHead
 	}
-	e.received()
 	switch e.fp.ReadRecordType() {
 	case RecordTypeHTTPRequest:
 		req, err := e.fp.ReadRequest()
