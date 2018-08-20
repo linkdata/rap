@@ -35,7 +35,7 @@ type MakePipe func() (c1, c2 net.Conn, stop func(), err error)
 // false negatives. Thus, some issues may only be detected when the test is
 // run multiple times. For maximal effectiveness, run the tests under the
 // race detector.
-func TestConn(t *testing.T, mp MakePipe) {
+func testConn(t *testing.T, mp MakePipe) {
 	timeoutWrapper(t, mp, testBasicIOMini)    // OK
 	timeoutWrapper(t, mp, testBasicIOSmall)   // OK
 	timeoutWrapper(t, mp, testBasicIOMedium)  // OK

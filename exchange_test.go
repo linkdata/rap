@@ -827,7 +827,7 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 func Test_Exchange_transparency(t *testing.T) {
 	defer leaktest.Check(t)()
 
-	TestConn(t, func() (c1, c2 net.Conn, stop func(), err error) {
+	testConn(t, func() (c1, c2 net.Conn, stop func(), err error) {
 		c1, c2 = net.Pipe()
 		stop = func() {
 			c1.Close()
@@ -835,5 +835,5 @@ func Test_Exchange_transparency(t *testing.T) {
 		}
 		return
 	})
-	TestConn(t, makeConnPipe)
+	testConn(t, makeConnPipe)
 }
