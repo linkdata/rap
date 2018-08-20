@@ -263,8 +263,6 @@ func (e *Exchange) readFrame() (err error) {
 		// make sure to return anything still in the input queue
 		select {
 		case e.fdr = <-e.readCh:
-		case <-e.readDeadline.wait():
-			err = timeoutError{}
 		default:
 			err = io.EOF
 		}
