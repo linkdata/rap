@@ -29,6 +29,8 @@ func Test_FramePool_FrameDataRecycleID(t *testing.T) {
 	assert.Equal(t, ExchangeID(1), fd1.Header().ExchangeID())
 	assert.Equal(t, ExchangeID(1), fd2.Header().ExchangeID())
 	FrameDataFree(fd1)
+	fd3 := FrameDataRecycleID(nil, ExchangeID(1))
+	assert.Equal(t, ExchangeID(1), fd3.Header().ExchangeID())
 }
 
 func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
