@@ -39,6 +39,8 @@ func Test_FrameData_String(t *testing.T) {
 	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (16)] 0b48656c6c6f20776f726c64]", fd.String())
 	fd.WriteString("the data is greater than 32 length")
 	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (51)] 0b48656c6c6f20776f726c6422746865206461746120697320677265...]", fd.String())
+	fd = nil
+	assert.Equal(t, "[FrameData nil]", fd.String())
 }
 
 type shortWriter struct {
