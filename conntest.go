@@ -36,18 +36,18 @@ type MakePipe func() (c1, c2 net.Conn, stop func(), err error)
 // run multiple times. For maximal effectiveness, run the tests under the
 // race detector.
 func TestConn(t *testing.T, mp MakePipe) {
-	timeoutWrapper(t, mp, testBasicIOMini)   // OK
-	timeoutWrapper(t, mp, testBasicIOSmall)  // OK
-	timeoutWrapper(t, mp, testBasicIOMedium) // OK
-	timeoutWrapper(t, mp, testBasicIOLarge)  // OK
-	timeoutWrapper(t, mp, testPingPong)      // OK
-	timeoutWrapper(t, mp, testRacyRead)      // OK
-	timeoutWrapper(t, mp, testRacyWrite)     // OK
-	timeoutWrapper(t, mp, testReadTimeout)   // OK
-	timeoutWrapper(t, mp, testWriteTimeout)  // OK
-	timeoutWrapper(t, mp, testPastTimeout)   // OK
+	timeoutWrapper(t, mp, testBasicIOMini)    // OK
+	timeoutWrapper(t, mp, testBasicIOSmall)   // OK
+	timeoutWrapper(t, mp, testBasicIOMedium)  // OK
+	timeoutWrapper(t, mp, testBasicIOLarge)   // OK
+	timeoutWrapper(t, mp, testPingPong)       // OK
+	timeoutWrapper(t, mp, testRacyRead)       // OK
+	timeoutWrapper(t, mp, testRacyWrite)      // OK
+	timeoutWrapper(t, mp, testReadTimeout)    // OK
+	timeoutWrapper(t, mp, testWriteTimeout)   // OK
+	timeoutWrapper(t, mp, testPastTimeout)    // OK
+	timeoutWrapper(t, mp, testPresentTimeout) // maybe broken on travis
 	if _, isTravis := os.LookupEnv("TRAVIS"); !isTravis {
-		timeoutWrapper(t, mp, testPresentTimeout) // OK
 	}
 	timeoutWrapper(t, mp, testFutureTimeout)     // OK
 	timeoutWrapper(t, mp, testCloseTimeout)      // OK
@@ -63,15 +63,13 @@ func timeoutWrapper(t *testing.T, mp MakePipe, f connTesterFn) {
 	}
 	var once sync.Once
 	defer once.Do(func() { stop() })
-	/*
-		timer := time.AfterFunc(time.Second*10, func() {
-			once.Do(func() {
-				t.Error("test timed out; terminating pipe")
-				stop()
-			})
+	timer := time.AfterFunc(time.Second*10, func() {
+		once.Do(func() {
+			t.Error("test timed out; terminating pipe")
+			stop()
 		})
-		defer timer.Stop()
-	*/
+	})
+	defer timer.Stop()
 	f(t, c1, c2)
 }
 
