@@ -43,15 +43,15 @@ func TestConn(t *testing.T, mp MakePipe) {
 	timeoutWrapper(t, mp, testPingPong)      // OK
 	timeoutWrapper(t, mp, testRacyRead)      // OK
 	timeoutWrapper(t, mp, testRacyWrite)     // OK
+	timeoutWrapper(t, mp, testReadTimeout)   // OK
+	timeoutWrapper(t, mp, testWriteTimeout)  // OK
 	if _, isTravis := os.LookupEnv("TRAVIS"); !isTravis {
-		timeoutWrapper(t, mp, testReadTimeout)       // OK
-		timeoutWrapper(t, mp, testWriteTimeout)      // OK
-		timeoutWrapper(t, mp, testPastTimeout)       // OK
-		timeoutWrapper(t, mp, testPresentTimeout)    // OK
-		timeoutWrapper(t, mp, testFutureTimeout)     // OK
-		timeoutWrapper(t, mp, testCloseTimeout)      // OK
-		timeoutWrapper(t, mp, testConcurrentMethods) // OK
+		timeoutWrapper(t, mp, testPastTimeout)    // OK
+		timeoutWrapper(t, mp, testPresentTimeout) // OK
+		timeoutWrapper(t, mp, testFutureTimeout)  // OK
 	}
+	timeoutWrapper(t, mp, testCloseTimeout)      // OK
+	timeoutWrapper(t, mp, testConcurrentMethods) // OK
 }
 
 type connTesterFn func(t *testing.T, c1, c2 net.Conn)
