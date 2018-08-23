@@ -391,7 +391,7 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	defer et.Close()
 
 	// HasBody is true after writing
-	et.Exchange.WriteByte(0x01)
+	assert.NoError(t, et.Exchange.WriteByte(0x01))
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
 
@@ -400,10 +400,16 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	assert.Equal(t, FrameMaxSize, et.Exchange.Buffered())
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 
+	// Write one more should flush and start a new body
+	assert.NoError(t, et.Exchange.WriteByte(0x01))
+	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
+	assert.True(t, et.Exchange.fdw.Header().HasBody())
+
 	// write final frame
 	et.Exchange.writeFinal()
 
-	// Write one more should flush, should fail since final is sent
+	// Flushing should fail since final is sent
+	et.Exchange.write(make([]byte, et.Exchange.Available()))
 	err := et.Exchange.WriteByte(0x01)
 	assert.Equal(t, io.ErrClosedPipe, err)
 }
