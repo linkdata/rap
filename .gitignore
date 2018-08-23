@@ -34,3 +34,7 @@ coverage.txt
 build/
 obj/
 bin/
+
+config/
+reports/
+*.py
