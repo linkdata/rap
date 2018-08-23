@@ -917,3 +917,15 @@ func Test_Exchange_recycle_with_only_local_closed_panics(t *testing.T) {
 
 	close(et.Exchange.remoteClosed)
 }
+
+func Test_Exchange_manually_sending_final_frame_panics(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+
+	et.Exchange.WriteByte(0)
+	et.Exchange.fdw.Header().SetFinal()
+
+	assert.Panics(t, func() {
+		et.Exchange.Flush()
+	})
+}

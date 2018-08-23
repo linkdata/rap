@@ -539,6 +539,10 @@ func (e *Exchange) flush() (err error) {
 		return timeoutError{}
 	}
 
+	if e.fdw.Header().IsFinal() {
+		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", e.fdw))
+	}
+
 	if len(e.fdw) > FrameMaxSize {
 		FrameDataFree(e.fdw)
 		e.fdw = nil
@@ -556,13 +560,7 @@ func (e *Exchange) flush() (err error) {
 		atomic.AddInt32(&e.sendWindow, -1)
 	}
 
-	if !e.fdw.Header().IsFinal() || e.sendingFinal() {
-		err = e.conn.ExchangeWrite(e.fdw)
-	} else {
-		// attempt to send multiple final frames
-		FrameDataFree(e.fdw)
-		err = io.ErrClosedPipe
-	}
+	err = e.conn.ExchangeWrite(e.fdw)
 	e.fdw = nil
 
 	return
