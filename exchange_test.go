@@ -904,3 +904,16 @@ func Test_Exchange_multiple_final_frames_panics(t *testing.T) {
 		et.Exchange.SubmitFrame(fd)
 	})
 }
+
+func Test_Exchange_recycle_with_only_local_closed_panics(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+
+	close(et.Exchange.localClosed)
+
+	assert.Panics(t, func() {
+		et.Exchange.recycle()
+	})
+
+	close(et.Exchange.remoteClosed)
+}
