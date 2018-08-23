@@ -803,12 +803,6 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 	return
 }
 
-// Network implements net.Addr.Network() for an Exchange.
-// It returns the string "rap"
-func (e *Exchange) Network() string {
-	return "rap"
-}
-
 // Hijack lets the caller take over the connection.
 // After a call to Hijack the HTTP server library
 // will not do anything else with the connection.
@@ -818,8 +812,8 @@ func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 type exchangeAddr struct{}
 
-func (exchangeAddr) Network() string { return "exchange" }
-func (exchangeAddr) String() string  { return "exchange" }
+func (exchangeAddr) Network() string { return "rap" }
+func (exchangeAddr) String() string  { return "rap" }
 
 // LocalAddr returns the local network address stub.
 func (e *Exchange) LocalAddr() net.Addr {

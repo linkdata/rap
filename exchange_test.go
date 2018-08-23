@@ -726,6 +726,8 @@ func Test_Exchange_Serve(t *testing.T) {
 
 func Test_Exchange_flowcontrol_errors(t *testing.T) {
 	// flow control timeout
+	defer leaktest.Check(t)()
+
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.ackFn = func(e *Exchange) {
@@ -797,6 +799,8 @@ func Test_Exchange_makeConnPipe(t *testing.T) {
 }
 
 func Test_Exchange_flowcontrol_halts(t *testing.T) {
+	defer leaktest.Check(t)()
+
 	c1, c2, stop, err := makeExchangePipe()
 	defer stop()
 	assert.NoError(t, err)
@@ -849,4 +853,19 @@ func Test_Exchange_transparency(t *testing.T) {
 		return
 	})
 	testConn(t, makeConnPipe)
+}
+
+func Test_Exchange_Addr_interface(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+
+	la := et.Exchange.LocalAddr()
+	assert.NotNil(t, la)
+	assert.Equal(t, "rap", la.Network())
+	assert.Equal(t, "rap", la.String())
+
+	ra := et.Exchange.RemoteAddr()
+	assert.NotNil(t, ra)
+	assert.Equal(t, "rap", ra.Network())
+	assert.Equal(t, "rap", ra.String())
 }
