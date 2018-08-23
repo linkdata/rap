@@ -869,3 +869,32 @@ func Test_Exchange_Addr_interface(t *testing.T) {
 	assert.Equal(t, "rap", ra.Network())
 	assert.Equal(t, "rap", ra.String())
 }
+
+func Test_Exchange_final_frame_with_body_panics(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+
+	fd := NewFrameDataID(MaxExchangeID)
+	fd.WriteByte(0)
+	fd.Header().SetBody()
+	fd.Header().SetFinal()
+
+	assert.Panics(t, func() {
+		et.Exchange.SubmitFrame(fd)
+	})
+}
+
+func Test_Exchange_multiple_final_frames_panics(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+
+	fd := NewFrameDataID(MaxExchangeID)
+	fd.Header().SetFinal()
+	assert.NoError(t, et.Exchange.SubmitFrame(fd))
+
+	fd = NewFrameDataID(MaxExchangeID)
+	fd.Header().SetFinal()
+	assert.Panics(t, func() {
+		et.Exchange.SubmitFrame(fd)
+	})
+}

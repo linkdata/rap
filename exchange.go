@@ -199,27 +199,7 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	// log.Print("SubmitFrame() ", e, fd)
 	if fd == nil || fd.Header().IsFinal() {
 		// final frame
-		if fd != nil {
-			if fd.Header().HasPayload() {
-				panic(fmt.Sprint("final frame has payload: ", fd))
-			}
-			FrameDataFree(fd)
-		}
-		e.cmu.Lock()
-		select {
-		case <-e.remoteClosed:
-			if fd != nil {
-				panic("received multiple final frames")
-			}
-		default:
-			close(e.remoteClosed)
-		}
-		select {
-		case <-e.localClosed:
-			e.recycle()
-		default:
-		}
-		e.cmu.Unlock()
+		e.recievedFinal(fd)
 	} else if fd.IsAck() {
 		// ack frame
 		FrameDataFree(fd)
@@ -238,6 +218,30 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	}
 
 	return
+}
+
+func (e *Exchange) recievedFinal(fd FrameData) {
+	e.cmu.Lock()
+	defer e.cmu.Unlock()
+	if fd != nil {
+		if fd.Header().HasPayload() {
+			panic(fmt.Sprint("final frame has payload: ", fd))
+		}
+		FrameDataFree(fd)
+	}
+	select {
+	case <-e.remoteClosed:
+		if fd != nil {
+			panic("received multiple final frames")
+		}
+	default:
+		close(e.remoteClosed)
+	}
+	select {
+	case <-e.localClosed:
+		e.recycle()
+	default:
+	}
 }
 
 // readFrame reads data frames from the read channel.
