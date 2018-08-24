@@ -115,13 +115,14 @@ func (fp *FrameParser) ProxyBody(w io.Writer) (err error) {
 // ReadRequest reads a request structure from a FrameReader and returns a http.Request.
 func (fp *FrameParser) ReadRequest() (req *http.Request, err error) {
 	methodString, _ := fp.ReadString()
+	schemeString, _ := fp.ReadString()
 	urlString, _ := fp.ReadString()
 
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return
 	}
-	u.Scheme = "http"
+	u.Scheme = schemeString
 
 	req = &http.Request{
 		Method:     methodString,
@@ -181,7 +182,8 @@ func (fp *FrameParser) ReadRequest() (req *http.Request, err error) {
 }
 
 // ProxyResponse reads a RAP response record and writes it to a http.ResponseWriter
-func (fp *FrameParser) ProxyResponse(w http.ResponseWriter) {
+// Returns the status code of the response.
+func (fp *FrameParser) ProxyResponse(w http.ResponseWriter) int {
 	header := w.Header()
 	statusCode := fp.ReadLen()
 	hasCL := false
@@ -212,5 +214,5 @@ func (fp *FrameParser) ProxyResponse(w http.ResponseWriter) {
 	}
 
 	w.WriteHeader(statusCode)
-	return
+	return statusCode
 }

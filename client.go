@@ -2,8 +2,11 @@ package rap
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -160,44 +163,63 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer e.Close()
 
-	/*
-		isWebsocketRequest := false
-
-		// Detect and handle WebSocket requests.
-		if len(r.Header["Upgrade"]) > 0 &&
-			len(r.Header["Connection"]) > 0 &&
-			r.ProtoAtLeast(1, 1) &&
-			r.Method == "GET" &&
-			strings.ToLower(r.Header["Upgrade"][0]) == "websocket" &&
-			strings.ToLower(r.Header["Connection"][0]) == "upgrade" {
-			isWebsocketRequest = true
-
-			hj, ok := w.(http.Hijacker)
-			if !ok {
-				panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
-			}
-			rwc, buf, err := hj.Hijack()
-			if err != nil {
-				panic(err.Error())
-			}
-			defer rwc.Close()
-			br := buf.Reader
-			if br.Buffered() > 0 {
-				panic("rap.Client.ServeHTTP(): websocket client sent data before handshake was complete")
-			}
-			e.initiateWebsocket(rwc, buf, r)
-		}
-	*/
-
 	var requestErr error
 	var responseErr error
 
-	if r.ContentLength == 0 {
-		// we can run this without a separate goroutine as request has no body.
-		if requestErr = e.WriteRequest(r); requestErr == nil {
-			responseErr = e.ProxyResponse(w)
+	log.Printf("rap.Client.ServeHTTP(): %+v\n", r)
+
+	isUpgrade := false
+	if vals, ok := r.Header["Connection"]; ok {
+		for _, val := range vals {
+			if strings.ToLower(val) == "upgrade" {
+				isUpgrade = true
+				break
+			}
 		}
-	} else {
+	}
+
+	var statusCode int
+
+	//if r.ContentLength == 0 && !isUpgrade {
+	// we can run this without a separate goroutine as request has no body
+	// and no Connection: upgrade header
+	if requestErr = e.WriteRequest(r); requestErr == nil {
+		if statusCode, responseErr = e.ProxyResponse(w); responseErr == nil {
+			// write the response body
+			if isUpgrade && statusCode == 101 {
+				// hijack
+				log.Print("client start hijack ", e)
+
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
+				}
+				rwc, buf, err := hj.Hijack()
+				if err != nil {
+					panic(err)
+				}
+				defer rwc.Close()
+				br := buf.Reader
+				if br.Buffered() > 0 {
+					panic("rap.Client.ServeHTTP(): websocket client sent data before handshake was complete")
+				}
+				wg := sync.WaitGroup{}
+				wg.Add(1)
+				go func() { io.Copy(rwc, e); wg.Done() }()
+				io.Copy(e, rwc)
+				wg.Wait()
+				log.Print("client ends hijack ", e)
+			} else {
+				_, responseErr = e.WriteTo(w)
+			}
+		} else {
+			log.Print("ProxyResponse failed ", responseErr, e)
+		}
+		if isUpgrade && responseErr == io.EOF {
+			// responseErr = nil
+		}
+	}
+	/*} else {
 		// we allow a response to send before request has finished sending,
 		// useful when the upstream does stream processing (such as echoing).
 		var wg sync.WaitGroup
@@ -208,9 +230,9 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				e.Close()
 			}
 		}()
-		responseErr = e.ProxyResponse(w)
+		statusCode, responseErr = e.ProxyResponse(w)
 		wg.Wait()
-	}
+	}*/
 
 	if responseErr == nil && requestErr == nil {
 		return
@@ -223,5 +245,6 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if responseErr != nil {
 		errorText += " responseErr=" + responseErr.Error()
 	}
+	errorText += " " + e.String()
 	panic(errorText)
 }

@@ -200,7 +200,7 @@ func (ct *connTester) InjectRequest(r *http.Request) (requestErr, responseErr er
 		requestErr = e.WriteRequest(r)
 		e.Close()
 	}()
-	responseErr = e.ProxyResponse(w)
+	_, responseErr = e.ProxyResponse(w)
 	wg.Wait()
 	return
 }

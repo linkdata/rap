@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -137,6 +138,7 @@ type Exchange struct {
 	didStart      int32              // nonzero if the exchange has sent or received the first frame
 	didSendFinal  int32              // nonzero if we have sent our final frame
 	didRecycle    int32              // nonzero if recycling in progress
+	isHijacked    bool               // true if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
 }
@@ -276,12 +278,13 @@ func (e *Exchange) readFrame() (err error) {
 		e.fp = NewFrameParser(e.fdr)
 		e.writeAckFrame()
 	} else {
-		e.handleReadError()
+		// e.handleReadError()
 	}
 
 	return
 }
 
+/*
 func (e *Exchange) handleReadError() {
 	// make sure we send ACK's as needed and consume them
 	for {
@@ -296,6 +299,7 @@ func (e *Exchange) handleReadError() {
 		}
 	}
 }
+*/
 
 func (e *Exchange) writeAckFrame() {
 	e.writeAckFrameUsing(FrameDataAlloc())
@@ -392,10 +396,26 @@ func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 	return
 }
 
+func (e *Exchange) readFrom(r io.Reader) (n int64, err error) {
+	for err == nil {
+		var m int64
+		m, err = e.readFromHelperLocked(r)
+		n += m
+	}
+	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
+	if err == io.EOF {
+		err = nil
+	}
+	return
+}
+
 func (e *Exchange) readFromHelper(r io.Reader) (n int64, err error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
+	return e.readFromHelperLocked(r)
+}
 
+func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 	var count int
 	if err = e.writeStart(); err == nil {
 		maxCount := e.fdw.Available()
@@ -524,10 +544,14 @@ func (e *Exchange) Flush() (err error) {
 }
 
 func (e *Exchange) flush() (err error) {
-	if e.fdw == nil {
-		return
+	if fd := e.fdw; fd != nil {
+		e.fdw = nil
+		err = e.writeFrame(fd)
 	}
+	return
+}
 
+func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	switch {
 	case e.hasSentFinal():
 		return io.ErrClosedPipe
@@ -539,29 +563,29 @@ func (e *Exchange) flush() (err error) {
 		return timeoutError{}
 	}
 
-	if e.fdw.Header().IsFinal() {
-		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", e.fdw))
+	if fd.Header().IsFinal() {
+		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", fd))
 	}
 
-	if len(e.fdw) > FrameMaxSize {
-		FrameDataFree(e.fdw)
-		e.fdw = nil
+	if len(fd) > FrameMaxSize {
+		FrameDataFree(fd)
 		return ErrFrameTooBig
 	}
 
 	e.started()
 
-	if e.fdw.Header().HasPayload() {
+	if fd.Header().HasPayload() {
 		// make sure window allows us to send
-		e.fdw.Header().SetSizeValue(len(e.fdw) - FrameHeaderSize)
+		fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
 		if err = e.waitForSendWindowSize(1); err != nil {
 			return err
 		}
-		atomic.AddInt32(&e.sendWindow, -1)
+		if atomic.AddInt32(&e.sendWindow, -1) < 0 {
+			panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
+		}
 	}
 
-	err = e.conn.ExchangeWrite(e.fdw)
-	e.fdw = nil
+	err = e.conn.ExchangeWrite(fd)
 
 	return
 }
@@ -592,6 +616,13 @@ func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
 	return nil
 }
 
+func (e *Exchange) getConn() *Conn {
+	if c, ok := e.conn.(*Conn); ok {
+		return c
+	}
+	return nil
+}
+
 // Recycle restores an Exchange to it's initial state and calls the onRecycle handler.
 // Either both localClosed and remoteClosed channels must be closed, or the Exchange
 // must be unused.
@@ -601,6 +632,8 @@ func (e *Exchange) recycle() {
 		defer e.wmu.Unlock()
 		e.rmu.Lock()
 		defer e.rmu.Unlock()
+
+		log.Print("  RC ", e.getConn(), e)
 
 		if isClosedChan(e.localClosed) && isClosedChan(e.remoteClosed) {
 		drain:
@@ -616,11 +649,16 @@ func (e *Exchange) recycle() {
 			e.localClosed = make(chan struct{})
 			e.remoteClosed = make(chan struct{})
 		} else {
-			panic("Recycle() requires both local and remote channels closed")
+			panic("recycle() requires both local and remote channels closed")
 		}
 		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
 		atomic.StoreInt32(&e.didStart, 0)
 		atomic.StoreInt32(&e.didSendFinal, 0)
+		e.isHijacked = false
+		e.fdw = nil
+		e.fdr = nil
+		e.fp = nil
+
 		if e.onRecycle != nil {
 			e.onRecycle(e)
 		}
@@ -640,7 +678,9 @@ func (e *Exchange) writeFinal() bool {
 }
 
 func (e *Exchange) consumeAck() {
-	atomic.AddInt32(&e.sendWindow, 1)
+	if atomic.AddInt32(&e.sendWindow, 1) > int32(SendWindowSize) {
+		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", e.getSendWindow(), int32(SendWindowSize), e))
+	}
 }
 
 // Close unblocks all blocked calls to Read and Write, sends the final frame and
@@ -649,6 +689,9 @@ func (e *Exchange) consumeAck() {
 func (e *Exchange) Close() (err error) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
+
+	log.Print("  CL ", e.getConn(), e)
+	// debug.PrintStack()
 
 	select {
 	case <-e.localClosed:
@@ -684,13 +727,12 @@ func (e *Exchange) OnRecycle(onRecycle func(*Exchange)) {
 	e.onRecycle = onRecycle
 }
 
-// WriteRequest writes a http.Request to the exchange, including it's Body and
-// a final frame.
+// WriteRequest writes a http.Request to the exchange, including it's Body.
 func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 	if err = e.WriteStart(); err == nil {
 		if err = e.fdw.WriteRequest(r); err == nil {
 			if r.ContentLength > 0 {
-				io.CopyN(e, r.Body, r.ContentLength)
+				_, err = io.CopyN(e, r.Body, r.ContentLength)
 			} else {
 				_, err = e.ReadFrom(r.Body)
 			}
@@ -702,39 +744,43 @@ func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 	return
 }
 
-// ProxyResponse reads a HTTP response and it's body from the Exchange data
+// ProxyResponse reads a HTTP response but not it's body from the Exchange data
 // and writes it to the given http.ResponseWriter.
-func (e *Exchange) ProxyResponse(w http.ResponseWriter) (err error) {
+func (e *Exchange) ProxyResponse(w http.ResponseWriter) (statusCode int, err error) {
+	e.rmu.Lock()
+	defer e.rmu.Unlock()
+
 	if err = e.loadFrameReader(); err != nil {
-		return err
+		return 0, err
 	}
 
-	if !e.fdr.Header().HasHead() {
-		return ErrMissingFrameHead
+	if e.fdr.Header().HasHead() {
+		switch e.fp.ReadRecordType() {
+		case RecordTypeHTTPResponse:
+			statusCode = e.fp.ProxyResponse(w)
+		case RecordTypeHijacked:
+			statusCode = 101
+		default:
+			return 0, ErrUnhandledRecordType
+		}
 	}
-
-	if e.fp.ReadRecordType() != RecordTypeHTTPResponse {
-		return ErrUnhandledRecordType
-	}
-
-	e.fp.ProxyResponse(w)
-
-	_, err = e.WriteTo(w)
 
 	return
 }
 
 // WriteResponse writes a http.Response to the exchange.
 func (e *Exchange) WriteResponse(r *http.Response) (err error) {
-	if err = e.WriteResponseData(r.StatusCode, r.ContentLength, r.Header); err == nil {
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	if err = e.writeResponseData(r.StatusCode, r.ContentLength, r.Header); err == nil {
 		if err == nil && r.Body != nil {
 			if r.ContentLength > 0 {
-				io.CopyN(e, r.Body, r.ContentLength)
+				_, err = io.CopyN(e, r.Body, r.ContentLength)
 			} else {
-				_, err = e.ReadFrom(r.Body)
+				_, err = e.readFrom(r.Body)
 			}
 		}
-		if flushErr := e.Flush(); err == nil {
+		if flushErr := e.flush(); err == nil {
 			err = flushErr
 		}
 	}
@@ -778,29 +824,39 @@ func (e *Exchange) RepeatServeHTTP(h http.Handler) (err error) {
 	return
 }
 
+func (e *Exchange) closeIfNotHijacked() {
+	if !e.isHijacked {
+		e.Close()
+	}
+}
+
 // ServeHTTP waits for a start frame and then invokes the given http.Handler.
 func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
-	defer e.Close()
+	defer e.closeIfNotHijacked()
 	if err = e.LoadFrameReader(); err != nil {
 		return
 	}
 	if !e.fdr.Header().HasHead() {
 		return ErrMissingFrameHead
 	}
-	switch e.fp.ReadRecordType() {
+	switch rt := e.fp.ReadRecordType(); rt {
 	case RecordTypeHTTPRequest:
 		req, err := e.fp.ReadRequest()
 		if err != nil {
 			return err
 		}
+		log.Printf("rap.Exchange.ServeHTTP(): %+v\n", req)
 		req.Body = e
 		h.ServeHTTP(&ResponseWriter{Exchange: e}, req)
 		// if the handler left things in the buffer, flush it
 		if flushErr := e.Flush(); err == nil {
 			err = flushErr
 		}
+	case RecordTypeHijacked:
+		e.isHijacked = true
 	default:
-		return ErrUnhandledRecordType
+		panic(fmt.Sprint("unhandled record type ", rt))
+		// return ErrUnhandledRecordType
 	}
 	return
 }
@@ -809,7 +865,13 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 // After a call to Hijack the HTTP server library
 // will not do anything else with the connection.
 func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return e, bufio.NewReadWriter(bufio.NewReader(e), bufio.NewWriter(e)), nil
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	e.isHijacked = true
+	fd := NewFrameDataID(e.ID)
+	fd.WriteRecordType(RecordTypeHijacked)
+	fd.Header().SetHead()
+	return e, bufio.NewReadWriter(bufio.NewReader(e), bufio.NewWriter(e)), e.writeFrame(fd)
 }
 
 type exchangeAddr struct{}

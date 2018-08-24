@@ -266,6 +266,7 @@ func (fd *FrameData) WriteRequest(r *http.Request) error {
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	fd.WriteString(r.Method)
+	fd.WriteString(r.URL.Scheme)
 
 	np := path.Clean(strings.Replace(r.URL.Path, "\\", "/", -1))
 	if np != "/" && r.URL.Path[len(r.URL.Path)-1] == '/' {
@@ -314,7 +315,7 @@ func (fd *FrameData) WriteRequest(r *http.Request) error {
 	} else {
 		fd.WriteString(host)
 	}
-	if haveContentLengthHeader || contentLength > 0 {
+	if haveContentLengthHeader || contentLength >= 0 {
 		fd.WriteInt64(contentLength)
 	} else {
 		fd.WriteInt64(-1)

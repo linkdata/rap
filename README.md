@@ -71,6 +71,7 @@ Set one or more route lookups for a connection. Once set, a route lookup value m
 
 Sent from the gateway to start a new HTTP exchange. The record structure contains enough information to transparently carry a HTTP/1.1 request. Since the gateway must validate incoming requests and format them into request records, the upstream server receiving them may rely on the structure being correct.
 * `string` HTTP method, e.g. `GET`.
+* `string` HTTP scheme, e.g. `http`.
 * `route` The route information or URI path.
 * `kvv` URI query component. Both keys and values must be URI-encoded. An empty `kvv` implies no query portion was present. This means the protocol cannot distinguish `/some/path` from `/some/path?`.
 * `kvv` HTTP request headers. Keys must be in `Canonical-Format`. Values must comply with RFC 2616 section 4.2. Note that the `Host` and `Content-Length` headers are provided separately at the end, and must not appear here.
@@ -92,6 +93,10 @@ This record has the same definition as the *HTTP response* record, and is parsed
 ### Service resume record (0x06)
 
 Sent to resume service again after a *service pause* record.
+
+### Hijacked record (0x07)
+
+Sent when an exchange has been hijacked and will now act as a dumb data pipe. For example, by a HTTP `Connection: Upgrade` request such as a WebSockets upgrade request.
 
 ### User defined record (0x80)
 
