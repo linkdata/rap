@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -197,7 +196,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		id := fd.Header().ExchangeID()
 		e := c.getExchangeForID(id)
-		log.Print("READ ", c, fd, " sendW=", e.getSendWindow())
+		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow())
 
 		e.SubmitFrame(fd)
 	}
@@ -266,7 +265,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow())
+			// log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow())
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)

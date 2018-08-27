@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -423,8 +422,6 @@ func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 			e.fdw.Header().SetBody()
 			n += int64(count)
 			e.fdw = e.fdw[:len(e.fdw)+count]
-		}
-		if count == maxCount || err != nil {
 			if flushErr := e.flush(); flushErr != nil {
 				if err == nil {
 					err = flushErr
@@ -633,7 +630,7 @@ func (e *Exchange) recycle() {
 		e.rmu.Lock()
 		defer e.rmu.Unlock()
 
-		log.Print("  RC ", e.getConn(), e)
+		// log.Print("  RC ", e.getConn(), e)
 
 		if isClosedChan(e.localClosed) && isClosedChan(e.remoteClosed) {
 		drain:
@@ -690,7 +687,7 @@ func (e *Exchange) Close() (err error) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 
-	log.Print("  CL ", e.getConn(), e)
+	// log.Print("  CL ", e.getConn(), e)
 	// debug.PrintStack()
 
 	select {
@@ -845,7 +842,7 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 		if err != nil {
 			return err
 		}
-		log.Printf("rap.Exchange.ServeHTTP(): %+v\n", req)
+		// log.Printf("rap.Exchange.ServeHTTP(): %+v\n", req)
 		req.Body = e
 		h.ServeHTTP(&ResponseWriter{Exchange: e}, req)
 		// if the handler left things in the buffer, flush it

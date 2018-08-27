@@ -3,7 +3,6 @@ package rap
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -166,7 +165,7 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var requestErr error
 	var responseErr error
 
-	log.Printf("rap.Client.ServeHTTP(): %+v\n", r)
+	// log.Printf("rap.Client.ServeHTTP(): %+v\n", r)
 
 	isUpgrade := false
 	if vals, ok := r.Header["Connection"]; ok {
@@ -188,8 +187,6 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// write the response body
 			if isUpgrade && statusCode == 101 {
 				// hijack
-				log.Print("client start hijack ", e)
-
 				hj, ok := w.(http.Hijacker)
 				if !ok {
 					panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
@@ -205,18 +202,16 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				wg := sync.WaitGroup{}
 				wg.Add(1)
-				go func() { io.Copy(rwc, e); wg.Done() }()
-				io.Copy(e, rwc)
+				go func() {
+					_, responseErr = io.Copy(rwc, e)
+					rwc.Close()
+					wg.Done()
+				}()
+				_, requestErr = io.Copy(e, rwc)
 				wg.Wait()
-				log.Print("client ends hijack ", e)
 			} else {
 				_, responseErr = e.WriteTo(w)
 			}
-		} else {
-			log.Print("ProxyResponse failed ", responseErr, e)
-		}
-		if isUpgrade && responseErr == io.EOF {
-			// responseErr = nil
 		}
 	}
 	/*} else {

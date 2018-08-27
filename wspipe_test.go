@@ -15,7 +15,7 @@ type wsPipe struct {
 	c       *Client
 }
 
-func Test_WsPipe(t *testing.T) {
+func test_WsPipe(t *testing.T) {
 	// external client -> http.Server -> rap.Client -> rap.Server -> httputil.ReverseProxy -> external server
 
 	pprofsync.Do(func() {
