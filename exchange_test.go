@@ -382,8 +382,7 @@ func Test_Exchange_StartAndRelease_illegal_record_type(t *testing.T) {
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeUserFirst - 1)
 	et.SubmitFrame(fd)
-	err := et.Exchange.ServeHTTP(et)
-	assert.Equal(t, ErrUnhandledRecordType, err)
+	assert.Panics(t, func() { et.Exchange.ServeHTTP(et) })
 	assert.True(t, et.Released())
 }
 
