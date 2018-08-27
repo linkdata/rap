@@ -3,10 +3,7 @@ package rap
 import (
 	"log"
 	"net/http"
-	"net/url"
 	"testing"
-
-	"github.com/koding/websocketproxy"
 )
 
 type wsPipe struct {
@@ -15,8 +12,8 @@ type wsPipe struct {
 	c       *Client
 }
 
-func test_WsPipe(t *testing.T) {
-	// external client -> http.Server -> rap.Client -> rap.Server -> httputil.ReverseProxy -> external server
+func disabledTestWsPipe(t *testing.T) {
+	// external client -> http.Server -> rap.Client -> rap.Server -> gorilla.
 
 	pprofsync.Do(func() {
 		go func() {
@@ -24,18 +21,19 @@ func test_WsPipe(t *testing.T) {
 		}()
 	})
 
-	rpURL, err := url.Parse("ws://127.0.0.1:9001/")
-	if err != nil {
-		panic(err)
-	}
-
-	proxy := websocketproxy.NewProxy(rpURL)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", serveHome)
+	mux.HandleFunc("/c", echoCopyWriterOnly)
+	mux.HandleFunc("/f", echoCopyFull)
+	mux.HandleFunc("/r", echoReadAllWriter)
+	mux.HandleFunc("/m", echoReadAllWriteMessage)
+	mux.HandleFunc("/p", echoReadAllWritePreparedMessage)
 
 	p := &wsPipe{
 		srvAddr: "127.0.0.1:10111",
 		s: &Server{
 			Addr:    srvAddr,
-			Handler: proxy,
+			Handler: mux,
 		},
 	}
 
@@ -43,8 +41,7 @@ func test_WsPipe(t *testing.T) {
 	go func() {
 		if ln, err := p.s.Listen(p.srvAddr); err == nil {
 			err = p.s.Serve(ln)
-		}
-		if err != nil {
+		} else {
 			panic(err)
 		}
 	}()

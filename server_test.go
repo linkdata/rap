@@ -3,7 +3,6 @@ package rap
 import (
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/fortytw2/leaktest"
-	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -117,8 +115,6 @@ func (st *srvTester) WaitForServed() bool {
 	return false
 }
 
-var upgrader = websocket.Upgrader{} // use default options
-
 func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	atomic.AddInt64(&st.serveCount, 1)
 	switch req.Method {
@@ -128,32 +124,10 @@ func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case "GET":
 		switch req.RequestURI {
 		case "/ws":
-			st.handleWebsocket(w, req)
 			return
 		}
 	}
 	w.WriteHeader(200)
-}
-
-func (st *srvTester) handleWebsocket(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-	defer c.Close()
-	for {
-		mt, message, err := c.ReadMessage()
-		if err != nil {
-			log.Println("read:", err)
-			break
-		}
-		log.Printf("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
-			log.Println("write:", err)
-			break
-		}
-	}
 }
 
 func (st *srvTester) Close() {
