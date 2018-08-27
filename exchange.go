@@ -137,7 +137,7 @@ type Exchange struct {
 	didStart      int32              // nonzero if the exchange has sent or received the first frame
 	didSendFinal  int32              // nonzero if we have sent our final frame
 	didRecycle    int32              // nonzero if recycling in progress
-	isHijacked    bool               // true if Hijack() was called
+	didHijack     int32              // nonzero if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
 }
@@ -148,6 +148,14 @@ func (e *Exchange) hasStarted() bool {
 
 func (e *Exchange) started() {
 	atomic.StoreInt32(&e.didStart, 1)
+}
+
+func (e *Exchange) isHijacked() bool {
+	return atomic.LoadInt32(&e.didHijack) != 0
+}
+
+func (e *Exchange) hijacked() {
+	atomic.StoreInt32(&e.didHijack, 1)
 }
 
 func (e *Exchange) hasReceivedFinal() bool {
@@ -422,10 +430,10 @@ func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 			e.fdw.Header().SetBody()
 			n += int64(count)
 			e.fdw = e.fdw[:len(e.fdw)+count]
-			if flushErr := e.flush(); flushErr != nil {
-				if err == nil {
-					err = flushErr
-				}
+		}
+		if flushErr := e.flush(); flushErr != nil {
+			if err == nil {
+				err = flushErr
 			}
 		}
 	}
@@ -651,7 +659,7 @@ func (e *Exchange) recycle() {
 		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
 		atomic.StoreInt32(&e.didStart, 0)
 		atomic.StoreInt32(&e.didSendFinal, 0)
-		e.isHijacked = false
+		atomic.StoreInt32(&e.didHijack, 0)
 		e.fdw = nil
 		e.fdr = nil
 		e.fp = nil
@@ -822,7 +830,7 @@ func (e *Exchange) RepeatServeHTTP(h http.Handler) (err error) {
 }
 
 func (e *Exchange) closeIfNotHijacked() {
-	if !e.isHijacked {
+	if !e.isHijacked() {
 		e.Close()
 	}
 }
@@ -850,7 +858,7 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 			err = flushErr
 		}
 	case RecordTypeHijacked:
-		e.isHijacked = true
+		e.hijacked()
 	default:
 		panic(fmt.Sprint("unhandled record type ", rt))
 		// return ErrUnhandledRecordType
@@ -864,7 +872,7 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
-	e.isHijacked = true
+	e.hijacked()
 	fd := NewFrameDataID(e.ID)
 	fd.WriteRecordType(RecordTypeHijacked)
 	fd.Header().SetHead()

@@ -203,11 +203,11 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				wg := sync.WaitGroup{}
 				wg.Add(1)
 				go func() {
-					_, responseErr = io.Copy(rwc, e)
+					io.Copy(rwc, e)
 					rwc.Close()
 					wg.Done()
 				}()
-				_, requestErr = io.Copy(e, rwc)
+				io.Copy(e, rwc)
 				wg.Wait()
 			} else {
 				_, responseErr = e.WriteTo(w)
