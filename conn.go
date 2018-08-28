@@ -196,7 +196,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		id := fd.Header().ExchangeID()
 		e := c.getExchangeForID(id)
-		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow())
+		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow(), "+", len(e.ackCh))
 
 		e.SubmitFrame(fd)
 	}
@@ -265,7 +265,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow())
+			// log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow(), "+", len(c.getExchangeForID(fd.Header().ExchangeID()).ackCh))
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)

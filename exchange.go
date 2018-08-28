@@ -33,10 +33,6 @@ var (
 type ExchangeConnection interface {
 	// ExchangeWrite allows an Exchange to write a FrameData
 	ExchangeWrite(fd FrameData) error
-	// ExchangeRelease returns the Exchange to the Conn, allowing it to
-	// be re-used for other requests.
-	// ExchangeRelease(*Exchange)
-
 	// ExchangeAbortChannel returns the channel that is closed when owner is closing
 	ExchangeAbortChannel() <-chan struct{}
 }
@@ -284,37 +280,13 @@ func (e *Exchange) readFrame() (err error) {
 	if err == nil {
 		e.fp = NewFrameParser(e.fdr)
 		e.writeAckFrame()
-	} else {
-		// e.handleReadError()
 	}
 
 	return
 }
 
-/*
-func (e *Exchange) handleReadError() {
-	// make sure we send ACK's as needed and consume them
-	for {
-		select {
-		case fd := <-e.readCh:
-			FrameDataFree(fd)
-			e.writeAckFrame()
-		case <-e.ackCh:
-			e.consumeAck()
-		default:
-			return
-		}
-	}
-}
-*/
-
 func (e *Exchange) writeAckFrame() {
-	e.writeAckFrameUsing(FrameDataAlloc())
-}
-
-func (e *Exchange) writeAckFrameUsing(fd FrameData) {
-	fd.ClearID(e.ID)
-	e.conn.ExchangeWrite(fd)
+	e.conn.ExchangeWrite(FrameDataAllocID(e.ID))
 }
 
 // LoadFrameReader ensures the frame reader has payload data or an error.
@@ -430,10 +402,10 @@ func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 			e.fdw.Header().SetBody()
 			n += int64(count)
 			e.fdw = e.fdw[:len(e.fdw)+count]
-		}
-		if flushErr := e.flush(); flushErr != nil {
-			if err == nil {
-				err = flushErr
+			if flushErr := e.flush(); flushErr != nil {
+				if err == nil {
+					err = flushErr
+				}
 			}
 		}
 	}
@@ -577,17 +549,23 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		return ErrFrameTooBig
 	}
 
+	if !fd.Header().HasPayload() {
+		if len(fd) > FrameHeaderSize {
+			panic(fmt.Sprint("missing payload flag: ", e.getConn(), e, fd))
+		}
+		// empty blank frame
+		return
+	}
+
 	e.started()
 
-	if fd.Header().HasPayload() {
-		// make sure window allows us to send
-		fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
-		if err = e.waitForSendWindowSize(1); err != nil {
-			return err
-		}
-		if atomic.AddInt32(&e.sendWindow, -1) < 0 {
-			panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
-		}
+	// make sure window allows us to send
+	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
+	if err = e.waitForSendWindowSize(1); err != nil {
+		return err
+	}
+	if atomic.AddInt32(&e.sendWindow, -1) < 0 {
+		panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
 	}
 
 	err = e.conn.ExchangeWrite(fd)
@@ -696,7 +674,6 @@ func (e *Exchange) Close() (err error) {
 	defer e.cmu.Unlock()
 
 	// log.Print("  CL ", e.getConn(), e)
-	// debug.PrintStack()
 
 	select {
 	case <-e.localClosed:

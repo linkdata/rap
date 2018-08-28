@@ -1,8 +1,3 @@
-// Package wstest provides a NewDialer function to test just the
-// `http.Handler` that upgrades the connection to a websocket session.
-// It runs the handler function in a goroutine without listening on
-// any port. The returned `websocket.Dialer` then can be used to dial
-// and communicate with the given handler.
 package rap
 
 import (
@@ -10,11 +5,86 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/gorilla/websocket"
 )
+
+func Test_Websocket_Simple(t *testing.T) {
+	pipedAutobahnServer(t, func(addr string) {
+		// Connect to the server
+		u := "ws://" + addr + "/c"
+		ws, _, err := websocket.DefaultDialer.Dial(u, nil)
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		defer ws.Close()
+
+		// Send message to server, read response and check to see if it's what we expect.
+		for i := 0; i < 10; i++ {
+			if err := ws.WriteMessage(websocket.TextMessage, []byte("hello")); err != nil {
+				t.Fatalf("%v", err)
+			}
+			_, p, err := ws.ReadMessage()
+			if err != nil {
+				t.Fatalf("%v", err)
+			}
+			if string(p) != "hello" {
+				t.Fatalf("bad message")
+			}
+		}
+	})
+}
+
+func pipedAutobahnServer(t *testing.T, worker func(string)) {
+	// external client -> http.Server -> rap.Client -> rap.Server -> gorilla.
+
+	pprofsync.Do(func() {
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", serveHome)
+	mux.HandleFunc("/c", echoCopyWriterOnly)
+	mux.HandleFunc("/f", echoCopyFull)
+	mux.HandleFunc("/r", echoReadAllWriter)
+	mux.HandleFunc("/m", echoReadAllWriteMessage)
+	mux.HandleFunc("/p", echoReadAllWritePreparedMessage)
+
+	s := &Server{
+		Addr:    srvAddr,
+		Handler: mux,
+	}
+	defer s.Close()
+
+	ln, err := s.Listen(srvAddr)
+	assert.NoError(t, err)
+	go s.Serve(ln)
+
+	c := NewClient(ln.Addr().String())
+	defer c.Close()
+
+	wsSrvAddr := "127.0.0.1:9002"
+
+	hs := &http.Server{
+		Addr:    wsSrvAddr,
+		Handler: c,
+	}
+	defer hs.Close()
+
+	if worker != nil {
+		go hs.ListenAndServe()
+		worker(wsSrvAddr)
+	} else {
+		assert.NoError(t, hs.ListenAndServe())
+	}
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:    4096,
