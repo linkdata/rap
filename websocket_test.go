@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -64,25 +65,26 @@ func pipedAutobahnServer(t *testing.T, worker func(string)) {
 	defer s.Close()
 
 	ln, err := s.Listen(srvAddr)
+	defer ln.Close()
 	assert.NoError(t, err)
 	go s.Serve(ln)
 
 	c := NewClient(ln.Addr().String())
 	defer c.Close()
 
-	wsSrvAddr := "127.0.0.1:9002"
-
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	defer ln2.Close()
 	hs := &http.Server{
-		Addr:    wsSrvAddr,
+		Addr:    ln2.Addr().String(),
 		Handler: c,
 	}
 	defer hs.Close()
 
 	if worker != nil {
-		go hs.ListenAndServe()
-		worker(wsSrvAddr)
+		go hs.Serve(ln2)
+		worker(ln2.Addr().String())
 	} else {
-		assert.NoError(t, hs.ListenAndServe())
+		assert.NoError(t, hs.Serve(ln2))
 	}
 }
 
