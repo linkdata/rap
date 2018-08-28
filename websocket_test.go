@@ -41,6 +41,10 @@ func Test_Websocket_Simple(t *testing.T) {
 	})
 }
 
+func testAutobahn(t *testing.T) {
+	pipedAutobahnServer(t, nil)
+}
+
 func pipedAutobahnServer(t *testing.T, worker func(string)) {
 	// external client -> http.Server -> rap.Client -> rap.Server -> gorilla.
 
@@ -84,6 +88,7 @@ func pipedAutobahnServer(t *testing.T, worker func(string)) {
 		go hs.Serve(ln2)
 		worker(ln2.Addr().String())
 	} else {
+		log.Print("listening on ", ln2.Addr().String())
 		assert.NoError(t, hs.Serve(ln2))
 	}
 }
