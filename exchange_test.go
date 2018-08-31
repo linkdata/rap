@@ -275,7 +275,7 @@ func (fw *failWriter) failError() (err error) {
 
 func Test_Exchange_String(t *testing.T) {
 	e := NewExchange(&exchangeTester{}, 0x1)
-	assert.Equal(t, "[Exchange [ExchangeID 0001] sendW=8 started=false sentC=false recvC=false len(ackCh)=0]", e.String())
+	assert.Equal(t, "[Exchange [ExchangeID 0001] sendW=8 sentC=false recvC=false len(ackCh)=0]", e.String())
 }
 
 func Test_Exchange_Release(t *testing.T) {
@@ -554,7 +554,7 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	et.finFn = func(e *Exchange) {} // ignore the final frame from Close()
-	et.Exchange.started()           // fake start
+	// et.Exchange.started()           // fake start
 	assert.NoError(t, et.Exchange.Close())
 	assert.True(t, et.Exchange.hasLocalClosed())
 	assert.False(t, et.Exchange.hasReceivedFinal())
@@ -756,7 +756,7 @@ func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.finFn = func(e *Exchange) {}
-	et.Exchange.started()
+	// et.Exchange.started()
 	et.Exchange.Close()
 	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetDeadline(time.Now()))
 	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetReadDeadline(time.Now()))

@@ -130,20 +130,11 @@ type Exchange struct {
 	rmu           sync.Mutex         // guards fdr
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
-	didStart      int32              // nonzero if the exchange has sent or received the first frame
 	didSendFinal  int32              // nonzero if we have sent our final frame
 	didRecycle    int32              // nonzero if recycling in progress
 	didHijack     int32              // nonzero if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
-}
-
-func (e *Exchange) hasStarted() bool {
-	return atomic.LoadInt32(&e.didStart) != 0
-}
-
-func (e *Exchange) started() {
-	atomic.StoreInt32(&e.didStart, 1)
 }
 
 func (e *Exchange) isHijacked() bool {
@@ -175,8 +166,8 @@ func (e *Exchange) hasLocalClosed() bool {
 }
 
 func (e *Exchange) String() string {
-	return fmt.Sprintf("[Exchange %v sendW=%v started=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.ID, e.getSendWindow(), e.hasStarted(), e.hasSentFinal(), e.hasReceivedFinal(), len(e.ackCh))
+	return fmt.Sprintf("[Exchange %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
+		e.ID, e.getSendWindow(), e.hasSentFinal(), e.hasReceivedFinal(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
@@ -297,7 +288,6 @@ func (e *Exchange) LoadFrameReader() (err error) {
 }
 
 func (e *Exchange) loadFrameReader() (err error) {
-	e.started()
 	for len(e.fp) == 0 && err == nil {
 		err = e.readFrame()
 		// log.Print("Exchange.loadFrameReader(): ", e.ID, " readFrame() len(fr)=", len(e.fp), " err=", err, "  ", e)
@@ -323,7 +313,6 @@ func (e *Exchange) writeStart() error {
 	case isClosedChan(e.writeDeadline.wait()):
 		return timeoutError{}
 	}
-	e.started()
 	if e.fdw == nil {
 		// log.Print("Exchange.writeStart() (new fd)", e)
 		e.fdw = FrameDataAllocID(e.ID)
@@ -557,8 +546,6 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		return
 	}
 
-	e.started()
-
 	// make sure window allows us to send
 	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
 	if err = e.waitForSendWindowSize(1); err != nil {
@@ -635,7 +622,6 @@ func (e *Exchange) recycle() {
 			panic("recycle() requires both local and remote channels closed")
 		}
 		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
-		atomic.StoreInt32(&e.didStart, 0)
 		atomic.StoreInt32(&e.didSendFinal, 0)
 		atomic.StoreInt32(&e.didHijack, 0)
 		e.fdw = nil
@@ -681,20 +667,14 @@ func (e *Exchange) Close() (err error) {
 		return io.ErrClosedPipe
 	default:
 		close(e.localClosed)
-		if e.hasStarted() {
-			e.writeFinal()
-		}
+		e.writeFinal()
 	}
 
 	select {
 	case <-e.remoteClosed:
 		e.recycle()
 	default:
-		if !e.hasStarted() {
-			// unused, recycle immediately
-			close(e.remoteClosed)
-			e.recycle()
-		}
+		// will be recycled when remote is closed
 	}
 
 	return nil

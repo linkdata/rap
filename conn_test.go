@@ -261,9 +261,19 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 	defer ct.Close()
 	gotten := ct.FillExchanges()
 	assert.Equal(t, int(MaxExchangeID), gotten)
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for len(ct.conn.exchanges) != int(MaxExchangeID) {
+		select {
+		case <-timer.C:
+			assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
+		default:
+		}
+	}
 	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
 	e := NewExchange(ct.conn, 1)
 	e.OnRecycle(ct.conn.ExchangeRelease)
+	close(e.remoteClosed)
 	assert.Panics(t, func() { e.Close() })
 }
 
