@@ -130,7 +130,6 @@ type Exchange struct {
 	rmu           sync.Mutex         // guards fdr
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
-	didSendFinal  int32              // nonzero if we have sent our final frame
 	didRecycle    int32              // nonzero if recycling in progress
 	didHijack     int32              // nonzero if Hijack() was called
 	readDeadline  exchangeDeadline
@@ -149,14 +148,6 @@ func (e *Exchange) hasReceivedFinal() bool {
 	return isClosedChan(e.remoteClosed)
 }
 
-func (e *Exchange) hasSentFinal() bool {
-	return atomic.LoadInt32(&e.didSendFinal) != 0
-}
-
-func (e *Exchange) sendingFinal() bool {
-	return atomic.CompareAndSwapInt32(&e.didSendFinal, 0, 1)
-}
-
 func (e *Exchange) recycling() bool {
 	return atomic.CompareAndSwapInt32(&e.didRecycle, 0, 1)
 }
@@ -167,7 +158,7 @@ func (e *Exchange) hasLocalClosed() bool {
 
 func (e *Exchange) String() string {
 	return fmt.Sprintf("[Exchange %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.ID, e.getSendWindow(), e.hasSentFinal(), e.hasReceivedFinal(), len(e.ackCh))
+		e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasReceivedFinal(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
@@ -304,8 +295,6 @@ func (e *Exchange) WriteStart() error {
 
 func (e *Exchange) writeStart() error {
 	switch {
-	case e.hasSentFinal():
-		return io.ErrClosedPipe
 	case e.hasReceivedFinal():
 		return io.ErrClosedPipe
 	case e.hasLocalClosed():
@@ -519,8 +508,6 @@ func (e *Exchange) flush() (err error) {
 
 func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	switch {
-	case e.hasSentFinal():
-		return io.ErrClosedPipe
 	case e.hasLocalClosed():
 		return io.ErrClosedPipe
 	case e.hasReceivedFinal():
@@ -622,7 +609,6 @@ func (e *Exchange) recycle() {
 			panic("recycle() requires both local and remote channels closed")
 		}
 		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
-		atomic.StoreInt32(&e.didSendFinal, 0)
 		atomic.StoreInt32(&e.didHijack, 0)
 		e.fdw = nil
 		e.fdr = nil
@@ -635,15 +621,11 @@ func (e *Exchange) recycle() {
 	}
 }
 
-func (e *Exchange) writeFinal() bool {
-	if e.sendingFinal() {
-		if fd := FrameDataAllocID(e.ID); fd != nil {
-			fd.Header().SetFinal()
-			e.conn.ExchangeWrite(fd)
-			return true
-		}
+func (e *Exchange) writeFinal() {
+	if fd := FrameDataAllocID(e.ID); fd != nil {
+		fd.Header().SetFinal()
+		e.conn.ExchangeWrite(fd)
 	}
-	return false
 }
 
 func (e *Exchange) consumeAck() {

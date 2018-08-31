@@ -508,7 +508,7 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 
 	assert.NoError(t, et.Exchange.Flush())
 	assert.Zero(t, len(et.Exchange.fdw))
-	assert.False(t, et.Exchange.hasSentFinal())
+	assert.False(t, et.Exchange.hasLocalClosed())
 
 	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
 	assert.NotZero(t, m)
@@ -548,7 +548,7 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
-	assert.False(t, et.Exchange.hasSentFinal())
+	assert.False(t, et.Exchange.hasLocalClosed())
 	assert.NoError(t, err)
 
 	et = newExchangeTester(t)
@@ -569,7 +569,7 @@ func Test_Exchange_WriteResponse(t *testing.T) {
 	rr.WriteString("Meh")
 	rr.WriteHeader(200)
 	err := et.Exchange.WriteResponse(rr.Result())
-	assert.False(t, et.Exchange.hasSentFinal())
+	assert.False(t, et.Exchange.hasLocalClosed())
 	assert.NoError(t, err)
 }
 
