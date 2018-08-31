@@ -368,7 +368,6 @@ func Test_Conn_ServeHTTP_write_error(t *testing.T) {
 
 func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
-	defer ct.Close()
 	ct.a.WriteCloser = &failWriter{
 		failOnClose: true,
 		WriteCloser: ct.a.WriteCloser,
@@ -377,6 +376,7 @@ func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
 	ct.expectConnError = reflect.TypeOf(errFailWriter)
 	ct.Start()
 	ct.conn.Ping()
+	ct.Close()
 }
 
 /*

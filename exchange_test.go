@@ -391,7 +391,7 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	defer et.Close()
 
 	// HasBody is true after writing
-	assert.NoError(t, et.Exchange.WriteByte(0x01))
+	assert.NoError(t, et.Exchange.writeByte(0x01))
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
 
@@ -401,12 +401,12 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 
 	// Write one more should flush and start a new body
-	assert.NoError(t, et.Exchange.WriteByte(0x01))
+	assert.NoError(t, et.Exchange.writeByte(0x01))
 	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 
 	// write final frame
-	et.Exchange.writeFinal()
+	et.Exchange.Close()
 
 	// Flushing should fail since final is sent
 	et.Exchange.write(make([]byte, et.Exchange.Available()))
@@ -424,7 +424,7 @@ func Test_Exchange_Write(t *testing.T) {
 	assert.Equal(t, FrameMaxPayloadSize, et.Exchange.Available())
 
 	// HasBody is true after writing
-	et.Exchange.WriteByte(0x01)
+	et.Exchange.writeByte(0x01)
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
 
@@ -926,7 +926,7 @@ func Test_Exchange_manually_sending_final_frame_panics(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
-	et.Exchange.WriteByte(0)
+	et.Exchange.writeByte(0)
 	et.Exchange.fdw.Header().SetFinal()
 
 	assert.Panics(t, func() {

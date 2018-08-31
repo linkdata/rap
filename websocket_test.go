@@ -39,6 +39,7 @@ func Test_Websocket_Simple(t *testing.T) {
 				t.Fatalf("bad message")
 			}
 		}
+		ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	})
 }
 
@@ -83,9 +84,10 @@ func pipedAutobahnServer(t *testing.T, worker func(string)) {
 
 	ln2, err := net.Listen("tcp", "127.0.0.1:0")
 	defer ln2.Close()
+
 	hs := &http.Server{
 		Addr:    ln2.Addr().String(),
-		Handler: c,
+		Handler: mux, // c
 	}
 	defer hs.Close()
 
@@ -119,7 +121,9 @@ func echoCopy(w http.ResponseWriter, r *http.Request, writerOnly bool) {
 		mt, r, err := conn.NextReader()
 		if err != nil {
 			if err != io.EOF {
-				log.Println("NextReader:", err)
+				if !websocket.IsCloseError(err, 1000) {
+					log.Println("NextReader:", err, websocket.IsCloseError(err), websocket.IsUnexpectedCloseError(err))
+				}
 			}
 			return
 		}

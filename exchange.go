@@ -231,22 +231,24 @@ func (e *Exchange) readFrame() (err error) {
 
 	select {
 	case e.fdr = <-e.readCh:
-	case <-e.readDeadline.wait():
-		err = timeoutError{}
-	case <-e.conn.ExchangeAbortChannel():
-		err = ErrServerClosed
-	case <-e.localClosed:
-		err = io.EOF
-	case <-e.remoteClosed:
-		// make sure to return anything still in the input queue
+	default:
+	}
+
+	if e.fdr == nil {
 		select {
 		case e.fdr = <-e.readCh:
-		default:
+		case <-e.readDeadline.wait():
+			err = timeoutError{}
+		case <-e.conn.ExchangeAbortChannel():
+			err = io.EOF //ErrServerClosed
+		case <-e.localClosed:
+			err = io.EOF
+		case <-e.remoteClosed:
 			err = io.EOF
 		}
 	}
 
-	if err == nil {
+	if e.fdr != nil {
 		e.fp = NewFrameParser(e.fdr)
 		e.writeAckFrame()
 	}
@@ -383,6 +385,7 @@ func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 func (e *Exchange) Write(p []byte) (n int, err error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
+	// log.Print("Exchange.Write() len(p)=", len(p), " avail=", e.Available())
 	if n, err = e.write(p); err == nil {
 		if err = e.flush(); err != nil {
 			n = 0
@@ -397,7 +400,6 @@ func (e *Exchange) write(p []byte) (n int, err error) {
 	for err == nil && len(p) > e.fdw.Available() {
 		var m int
 		if m = e.fdw.Available(); m > 0 {
-			// log.Print("Exchange.Write() len(p)=", len(p), " avail=", e.Available(), " m=", m)
 			e.fdw.Header().SetBody()
 			e.fdw = append(e.fdw, p[:m]...)
 			p = p[m:]
@@ -452,7 +454,10 @@ func (e *Exchange) writeToHelper(w io.Writer) (n int64, err error) {
 func (e *Exchange) WriteByte(c byte) (err error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
-	return e.writeByte(c)
+	if err = e.writeByte(c); err == nil {
+		err = e.flush()
+	}
+	return
 }
 
 func (e *Exchange) writeByte(c byte) (err error) {
@@ -551,7 +556,7 @@ func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
 		case <-e.remoteClosed:
 			return io.ErrClosedPipe
 		case <-e.conn.ExchangeAbortChannel():
-			return ErrServerClosed
+			return io.ErrClosedPipe
 		case <-e.writeDeadline.wait():
 			return timeoutError{}
 		}
@@ -606,6 +611,9 @@ func (e *Exchange) recycle() {
 }
 
 func (e *Exchange) writeFinal() {
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	e.flush()
 	if fd := FrameDataAllocID(e.ID); fd != nil {
 		fd.Header().SetFinal()
 		e.conn.ExchangeWrite(fd)
