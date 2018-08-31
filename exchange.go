@@ -130,17 +130,9 @@ type Exchange struct {
 	rmu           sync.Mutex         // guards fdr
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
-	didHijack     int32              // nonzero if Hijack() was called
+	isHijacked    bool               // true if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
-}
-
-func (e *Exchange) isHijacked() bool {
-	return atomic.LoadInt32(&e.didHijack) != 0
-}
-
-func (e *Exchange) hijacked() {
-	atomic.StoreInt32(&e.didHijack, 1)
 }
 
 func (e *Exchange) hasRemoteClosed() bool {
@@ -603,7 +595,7 @@ func (e *Exchange) recycle() {
 		panic("recycle() requires both local and remote channels closed")
 	}
 	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
-	atomic.StoreInt32(&e.didHijack, 0)
+	e.isHijacked = false
 	e.fdw = nil
 	e.fdr = nil
 	e.fp = nil
@@ -630,6 +622,10 @@ func (e *Exchange) consumeAck() {
 // discards any pending data in the receive queue.
 // If the remote is closed, it recycles the Exchange.
 func (e *Exchange) Close() (err error) {
+	return e.close(false)
+}
+
+func (e *Exchange) close(notIfHijacked bool) (err error) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 
@@ -640,6 +636,9 @@ func (e *Exchange) Close() (err error) {
 		// already closed
 		return io.ErrClosedPipe
 	default:
+		if notIfHijacked && e.isHijacked {
+			return nil
+		}
 		close(e.localClosed)
 		e.writeFinal()
 	}
@@ -760,15 +759,9 @@ func (e *Exchange) RepeatServeHTTP(h http.Handler) (err error) {
 	return
 }
 
-func (e *Exchange) closeIfNotHijacked() {
-	if !e.isHijacked() {
-		e.Close()
-	}
-}
-
 // ServeHTTP waits for a start frame and then invokes the given http.Handler.
 func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
-	defer e.closeIfNotHijacked()
+	defer e.close(true)
 	if err = e.LoadFrameReader(); err != nil {
 		return
 	}
@@ -789,10 +782,9 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 			err = flushErr
 		}
 	case RecordTypeHijacked:
-		e.hijacked()
+		e.isHijacked = true
 	default:
 		panic(fmt.Sprint("unhandled record type ", rt))
-		// return ErrUnhandledRecordType
 	}
 	return
 }
@@ -803,7 +795,7 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
-	e.hijacked()
+	e.isHijacked = true
 	fd := NewFrameDataID(e.ID)
 	fd.WriteRecordType(RecordTypeHijacked)
 	fd.Header().SetHead()
