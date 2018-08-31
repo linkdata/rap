@@ -130,7 +130,6 @@ type Exchange struct {
 	rmu           sync.Mutex         // guards fdr
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
-	didRecycle    int32              // nonzero if recycling in progress
 	didHijack     int32              // nonzero if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
@@ -146,10 +145,6 @@ func (e *Exchange) hijacked() {
 
 func (e *Exchange) hasRemoteClosed() bool {
 	return isClosedChan(e.remoteClosed)
-}
-
-func (e *Exchange) recycling() bool {
-	return atomic.CompareAndSwapInt32(&e.didRecycle, 0, 1)
 }
 
 func (e *Exchange) hasLocalClosed() bool {
@@ -584,40 +579,37 @@ func (e *Exchange) getConn() *Conn {
 // Either both localClosed and remoteClosed channels must be closed, or the Exchange
 // must be unused.
 func (e *Exchange) recycle() {
-	if e.recycling() {
-		e.wmu.Lock()
-		defer e.wmu.Unlock()
-		e.rmu.Lock()
-		defer e.rmu.Unlock()
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	e.rmu.Lock()
+	defer e.rmu.Unlock()
 
-		// log.Print("  RC ", e.getConn(), e)
+	// log.Print("  RC ", e.getConn(), e)
 
-		if isClosedChan(e.localClosed) && isClosedChan(e.remoteClosed) {
-		drain:
-			for {
-				select {
-				case <-e.ackCh:
-				case fd := <-e.readCh:
-					FrameDataFree(fd)
-				default:
-					break drain
-				}
+	if isClosedChan(e.localClosed) && isClosedChan(e.remoteClosed) {
+	drain:
+		for {
+			select {
+			case <-e.ackCh:
+			case fd := <-e.readCh:
+				FrameDataFree(fd)
+			default:
+				break drain
 			}
-			e.localClosed = make(chan struct{})
-			e.remoteClosed = make(chan struct{})
-		} else {
-			panic("recycle() requires both local and remote channels closed")
 		}
-		atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
-		atomic.StoreInt32(&e.didHijack, 0)
-		e.fdw = nil
-		e.fdr = nil
-		e.fp = nil
+		e.localClosed = make(chan struct{})
+		e.remoteClosed = make(chan struct{})
+	} else {
+		panic("recycle() requires both local and remote channels closed")
+	}
+	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
+	atomic.StoreInt32(&e.didHijack, 0)
+	e.fdw = nil
+	e.fdr = nil
+	e.fp = nil
 
-		if e.onRecycle != nil {
-			e.onRecycle(e)
-		}
-		atomic.StoreInt32(&e.didRecycle, 0)
+	if e.onRecycle != nil {
+		e.onRecycle(e)
 	}
 }
 

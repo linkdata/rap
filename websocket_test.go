@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -45,14 +46,18 @@ func testAutobahn(t *testing.T) {
 	pipedAutobahnServer(t, nil)
 }
 
+var pprofsync sync.Once
+
 func pipedAutobahnServer(t *testing.T, worker func(string)) {
 	// external client -> http.Server -> rap.Client -> rap.Server -> gorilla.
 
-	pprofsync.Do(func() {
-		go func() {
-			log.Println(http.ListenAndServe("localhost:6060", nil))
-		}()
-	})
+	/*
+		pprofsync.Do(func() {
+			go func() {
+				log.Println(http.ListenAndServe("localhost:6060", nil))
+			}()
+		})
+	*/
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", serveHome)
