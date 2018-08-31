@@ -121,7 +121,7 @@ type Exchange struct {
 	onRecycle     func(*Exchange)    // function to call when Exchange is recycled
 	ackCh         chan struct{}      // ack's from peer go in this
 	readCh        chan FrameData     // data frames from peer go in this
-	cmu           sync.Mutex         // guards localClosed
+	cmu           sync.Mutex         // guards localClosed and remoteClosed
 	localClosed   chan struct{}      // closed when Close() has been called
 	remoteClosed  chan struct{}      // closed when final frame has been received
 	sendWindow    int32              // number of frames still allowed to be in flight
