@@ -243,9 +243,11 @@ func Test_Conn_exchanges_exhausted(t *testing.T) {
 			break
 		}
 	}
-	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond))
+	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond*10))
 	firstExchange.Close()
-	assert.NotNil(t, ct.conn.NewExchangeWait(time.Millisecond))
+	e2 := ct.conn.NewExchangeWait(time.Millisecond * 10)
+	assert.NotNil(t, e2)
+	e2.Close()
 }
 
 func Test_Conn_ReleaseExchange(t *testing.T) {
