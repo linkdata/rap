@@ -87,7 +87,7 @@ func pipedAutobahnServer(t *testing.T, worker func(string)) {
 
 	hs := &http.Server{
 		Addr:    ln2.Addr().String(),
-		Handler: mux, // c
+		Handler: c,
 	}
 	defer hs.Close()
 
