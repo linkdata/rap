@@ -144,7 +144,7 @@ func (e *Exchange) hijacked() {
 	atomic.StoreInt32(&e.didHijack, 1)
 }
 
-func (e *Exchange) hasReceivedFinal() bool {
+func (e *Exchange) hasRemoteClosed() bool {
 	return isClosedChan(e.remoteClosed)
 }
 
@@ -158,7 +158,7 @@ func (e *Exchange) hasLocalClosed() bool {
 
 func (e *Exchange) String() string {
 	return fmt.Sprintf("[Exchange %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasReceivedFinal(), len(e.ackCh))
+		e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
@@ -295,7 +295,7 @@ func (e *Exchange) WriteStart() error {
 
 func (e *Exchange) writeStart() error {
 	switch {
-	case e.hasReceivedFinal():
+	case e.hasRemoteClosed():
 		return io.ErrClosedPipe
 	case e.hasLocalClosed():
 		return io.ErrClosedPipe
@@ -510,7 +510,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	switch {
 	case e.hasLocalClosed():
 		return io.ErrClosedPipe
-	case e.hasReceivedFinal():
+	case e.hasRemoteClosed():
 		return io.ErrClosedPipe
 	case isClosedChan(e.writeDeadline.wait()):
 		return timeoutError{}

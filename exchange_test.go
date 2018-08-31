@@ -557,7 +557,7 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	// et.Exchange.started()           // fake start
 	assert.NoError(t, et.Exchange.Close())
 	assert.True(t, et.Exchange.hasLocalClosed())
-	assert.False(t, et.Exchange.hasReceivedFinal())
+	assert.False(t, et.Exchange.hasRemoteClosed())
 	err = et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", nil))
 	assert.Equal(t, io.ErrClosedPipe, err)
 }
@@ -639,7 +639,7 @@ func Test_Exchange_ProxyResponse_transparency(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = et2.Exchange.WriteTo(rr2)
 	assert.Error(t, io.EOF, err)
-	assert.True(t, et2.Exchange.hasReceivedFinal())
+	assert.True(t, et2.Exchange.hasRemoteClosed())
 	assert.Equal(t, int(3), rr.Body.Len())
 	assert.Equal(t, int(3), rr2.Body.Len())
 	assert.Equal(t, rr.Body.String(), rr2.Body.String())
@@ -672,7 +672,7 @@ func Test_Exchange_ProxyResponse_read_eof(t *testing.T) {
 	et.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
-	assert.True(t, et.Exchange.hasReceivedFinal())
+	assert.True(t, et.Exchange.hasRemoteClosed())
 	assert.Equal(t, io.EOF, err)
 }
 
@@ -704,7 +704,7 @@ func Test_Exchange_ProxyResponse_wrong_record_type(t *testing.T) {
 	et.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
-	assert.True(t, et.Exchange.hasReceivedFinal())
+	assert.True(t, et.Exchange.hasRemoteClosed())
 	assert.Equal(t, ErrUnhandledRecordType, err)
 }
 
