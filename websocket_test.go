@@ -11,8 +11,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/gorilla/websocket"
 )
 
@@ -76,7 +74,9 @@ func pipedAutobahnServer(t *testing.T, worker func(string)) {
 
 	ln, err := s.Listen(srvAddr)
 	defer ln.Close()
-	assert.NoError(t, err)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	go s.Serve(ln)
 
 	c := NewClient(ln.Addr().String())
@@ -96,7 +96,10 @@ func pipedAutobahnServer(t *testing.T, worker func(string)) {
 		worker(ln2.Addr().String())
 	} else {
 		log.Print("listening on ", ln2.Addr().String())
-		assert.NoError(t, hs.Serve(ln2))
+		err = hs.Serve(ln2)
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
 }
 
