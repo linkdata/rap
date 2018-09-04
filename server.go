@@ -130,11 +130,6 @@ func (srv *Server) Serve(l net.Listener) error {
 			return e
 		}
 		tempDelay = 0
-		// Servers are more concerned about throughput than
-		// latency so we turn off TCP's NODELAY option.
-		if tcpconn, ok := rwc.(*net.TCPConn); ok {
-			tcpconn.SetNoDelay(false)
-		}
 		srv.getConnLimiter() <- struct{}{}
 		go func(rwc io.ReadWriteCloser) {
 			conn := NewConn(rwc)
