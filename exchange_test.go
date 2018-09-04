@@ -460,6 +460,7 @@ func Test_Exchange_Flush(t *testing.T) {
 	// Overflow the frame and flush should error
 	et.Exchange.writeStart()
 	et.Exchange.fdw = append(et.Exchange.fdw, make([]byte, FrameMaxPayloadSize+1)...)
+	et.Exchange.fdw.Header().SetBody()
 	assert.Equal(t, FrameMaxSize+1, len(et.Exchange.fdw))
 	err = et.Exchange.Flush()
 	assert.Equal(t, ErrFrameTooBig, err)
@@ -587,6 +588,7 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 	defer et.Close()
 	et.Exchange.writeStart()
 	et.Exchange.fdw.Write(make([]byte, FrameMaxSize+1))
+	et.Exchange.fdw.Header().SetBody()
 	err = et.Exchange.Flush()
 	assert.Equal(t, ErrFrameTooBig, err)
 	err = et.Exchange.Close()
