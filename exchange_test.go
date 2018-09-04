@@ -406,12 +406,15 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
 
 	// write final frame
+	et.finFn = func(e *Exchange) {}
 	et.Exchange.Close()
 
 	// Flushing should fail since final is sent
 	et.Exchange.write(make([]byte, et.Exchange.Available()))
 	err := et.Exchange.WriteByte(0x01)
 	assert.Equal(t, io.ErrClosedPipe, err)
+	close(et.Exchange.remoteClosed)
+	et.Exchange.recycle()
 }
 
 func Test_Exchange_Write(t *testing.T) {
