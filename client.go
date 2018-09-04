@@ -233,7 +233,7 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	errorText := "rap.Client.ServeHTTP():"
+	errorText := "rap.Client.ServeHTTP(): uri=" + r.RequestURI
 	if requestErr != nil {
 		errorText += " requestErr=" + requestErr.Error()
 	}
