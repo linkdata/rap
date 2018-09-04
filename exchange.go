@@ -517,7 +517,6 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
 
 	// Consume ACKs and check for close conditions
-	writeDeadLineCh := e.writeDeadline.wait()
 	for {
 		select {
 		case <-e.ackCh:
@@ -528,7 +527,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 			return io.ErrClosedPipe
 		case <-e.conn.ExchangeAbortChannel():
 			return io.ErrClosedPipe
-		case <-writeDeadLineCh:
+		case <-e.writeDeadline.wait():
 			return timeoutError{}
 		default:
 			// if the send window allows, go ahead and send it
@@ -548,7 +547,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 				return io.ErrClosedPipe
 			case <-e.conn.ExchangeAbortChannel():
 				return io.ErrClosedPipe
-			case <-writeDeadLineCh:
+			case <-e.writeDeadline.wait():
 				return timeoutError{}
 			}
 		}
@@ -598,6 +597,8 @@ func (e *Exchange) recycle() {
 	e.fdw = nil
 	e.fdr = nil
 	e.fp = nil
+	e.writeDeadline.set(time.Time{})
+	e.readDeadline.set(time.Time{})
 
 	if e.onRecycle != nil {
 		e.onRecycle(e)
