@@ -280,19 +280,20 @@ func (e *Exchange) WriteStart() error {
 }
 
 func (e *Exchange) writeStart() error {
-	switch {
-	case e.hasRemoteClosed():
+	select {
+	case <-e.remoteClosed:
 		return io.ErrClosedPipe
-	case e.hasLocalClosed():
+	case <-e.localClosed:
 		return io.ErrClosedPipe
-	case isClosedChan(e.writeDeadline.wait()):
+	case <-e.writeDeadline.wait():
 		return timeoutError{}
+	default:
+		if e.fdw == nil {
+			// log.Print("Exchange.writeStart() (new fd)", e)
+			e.fdw = FrameDataAllocID(e.ID)
+		}
+		return nil
 	}
-	if e.fdw == nil {
-		// log.Print("Exchange.writeStart() (new fd)", e)
-		e.fdw = FrameDataAllocID(e.ID)
-	}
-	return nil
 }
 
 // Available returns number of free bytes in the current frame.
@@ -496,13 +497,14 @@ func (e *Exchange) flush() (err error) {
 }
 
 func (e *Exchange) writeFrame(fd FrameData) (err error) {
-	switch {
-	case e.hasLocalClosed():
+	select {
+	case <-e.localClosed:
 		return io.ErrClosedPipe
-	case e.hasRemoteClosed():
+	case <-e.remoteClosed:
 		return io.ErrClosedPipe
-	case isClosedChan(e.writeDeadline.wait()):
+	case <-e.writeDeadline.wait():
 		return timeoutError{}
+	default:
 	}
 
 	if fd.Header().IsFinal() {
