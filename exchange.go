@@ -497,23 +497,8 @@ func (e *Exchange) flush() (err error) {
 }
 
 func (e *Exchange) writeFrame(fd FrameData) (err error) {
-	select {
-	case <-e.localClosed:
-		return io.ErrClosedPipe
-	case <-e.remoteClosed:
-		return io.ErrClosedPipe
-	case <-e.writeDeadline.wait():
-		return timeoutError{}
-	default:
-	}
-
 	if fd.Header().IsFinal() {
-		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", fd))
-	}
-
-	if len(fd) > FrameMaxSize {
-		FrameDataFree(fd)
-		return ErrFrameTooBig
+		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", e.getConn(), e, fd))
 	}
 
 	if !fd.Header().HasPayload() {
@@ -524,29 +509,15 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		return
 	}
 
-	// make sure window allows us to send
+	if len(fd) > FrameMaxSize {
+		FrameDataFree(fd)
+		return ErrFrameTooBig
+	}
+
 	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
-	if err = e.waitForSendWindowSize(1); err != nil {
-		return err
-	}
-	if atomic.AddInt32(&e.sendWindow, -1) < 0 {
-		panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
-	}
 
-	err = e.conn.ExchangeWrite(fd)
-
-	return
-}
-
-func (e *Exchange) getSendWindow() int {
-	return int(atomic.LoadInt32(&e.sendWindow))
-}
-
-func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
-	// timer := time.NewTimer(e.conn.ExchangeTimeout())
-	// defer timer.Stop()
-
-	for e.getSendWindow() < minimumRequiredWindowSize {
+	// Consume ACKs and check for close conditions
+	for {
 		select {
 		case <-e.ackCh:
 			e.consumeAck()
@@ -558,10 +529,33 @@ func (e *Exchange) waitForSendWindowSize(minimumRequiredWindowSize int) error {
 			return io.ErrClosedPipe
 		case <-e.writeDeadline.wait():
 			return timeoutError{}
+		default:
+			// if the send window allows, go ahead and send it
+			if e.getSendWindow() > 0 {
+				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
+					panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
+				}
+				return e.conn.ExchangeWrite(fd)
+			}
+			// SendWindow is empty, so do a blocking wait for an ACK
+			select {
+			case <-e.ackCh:
+				e.consumeAck()
+			case <-e.localClosed:
+				return io.ErrClosedPipe
+			case <-e.remoteClosed:
+				return io.ErrClosedPipe
+			case <-e.conn.ExchangeAbortChannel():
+				return io.ErrClosedPipe
+			case <-e.writeDeadline.wait():
+				return timeoutError{}
+			}
 		}
 	}
+}
 
-	return nil
+func (e *Exchange) getSendWindow() int {
+	return int(atomic.LoadInt32(&e.sendWindow))
 }
 
 func (e *Exchange) getConn() *Conn {
