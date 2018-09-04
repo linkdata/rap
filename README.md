@@ -10,7 +10,7 @@ Parsing HTTP and correctly implementing all the features of a HTTP server uses u
 
 Traditional web applications simply accept this as an unavoidable fact and focus on finding ways to add more servers. But that brings it's own set of problems and isn't a viable solution for a CPU-bound server where scaling out isn't an option.
 
-In some architectures it may not be possible to decouple the application code that processes HTTP requests from the database that holds the data. So everything that runs on the same machine must be as efficient as possble. Unfortunately, even the most efficient web servers today use far too much CPU.
+In some architectures it may not be possible to decouple the application code that processes HTTP requests from the database that holds the data. So everything that runs on the same machine must be as efficient as possible. Unfortunately, even the most efficient web servers today use far too much CPU.
 
 This project aims to move the web server to other machine(s) and to simplify the request-response scheme to support only what we need while making sure that receiving and routing the incoming requests use as few resources as possible. Where HTTP tries to be very generic in it's design, RAP focuses on handling large amounts of small request-reply exchanges.
 
