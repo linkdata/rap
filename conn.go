@@ -65,8 +65,6 @@ type Conn struct {
 	exchanges          chan *Exchange
 	exchangeLookup     []*Exchange
 	exchangeLastID     int32
-	readErrCh          chan error
-	writeErrCh         chan error
 	mu                 sync.Mutex
 	doneChan           chan struct{}
 	lastPingSent       int64 // Unix nanoseconds
@@ -92,8 +90,6 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		writeCh:         make(chan FrameData),
 		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
-		readErrCh:       make(chan error),
-		writeErrCh:      make(chan error),
 		doneChan:        make(chan struct{}),
 		identity:        atomic.AddInt64(&identityCounter, 1),
 	}
@@ -294,40 +290,26 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 	c.Handler = h
 
+	errCh := make(chan error, 2)
+	defer close(errCh)
+
 	go func() {
 		_, err := c.ReadFrom(bufio.NewReaderSize(c.ReadWriteCloser, 64*1024))
-		c.readErrCh <- err
-		close(c.readErrCh)
+		errCh <- err
 	}()
 	go func() {
 		_, err := c.WriteTo(bufio.NewWriterSize(c.ReadWriteCloser, 64*1024))
-		c.writeErrCh <- err
-		close(c.writeErrCh)
+		errCh <- err
 	}()
 
-	var readErr error
-	var writeErr error
-	select {
-	case readErr = <-c.readErrCh:
-		err = readErr
-	case writeErr = <-c.writeErrCh:
-		err = writeErr
-	}
+	err = <-errCh
 
 	if closeErr := c.Close(); closeErr != nil && (err == nil || err == io.EOF) {
 		err = closeErr
 	}
 
-	if readErr == nil {
-		if readErr = <-c.readErrCh; err == nil {
-			err = readErr
-		}
-	}
-
-	if writeErr == nil {
-		if writeErr = <-c.writeErrCh; err == nil {
-			err = writeErr
-		}
+	if otherErr := <-errCh; otherErr != nil && err == nil {
+		err = otherErr
 	}
 
 	return err
