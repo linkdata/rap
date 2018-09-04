@@ -386,6 +386,17 @@ func Test_Exchange_StartAndRelease_illegal_record_type(t *testing.T) {
 	assert.True(t, et.Released())
 }
 
+func Test_Exchange_StartAndRelease_missing_body_bit_panics(t *testing.T) {
+	et := newExchangeTester(t)
+	defer et.Close()
+	et.Exchange.writeStart()
+	et.Exchange.fdw.Write(make([]byte, 1))
+	assert.Panics(t, func() { et.Exchange.Flush() })
+	err := et.Exchange.Close()
+	assert.NoError(t, err)
+	assert.True(t, et.Released())
+}
+
 func Test_Exchange_WriteByte(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
@@ -558,7 +569,6 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	et = newExchangeTester(t)
 	defer et.Close()
 	et.finFn = func(e *Exchange) {} // ignore the final frame from Close()
-	// et.Exchange.started()           // fake start
 	assert.NoError(t, et.Exchange.Close())
 	assert.True(t, et.Exchange.hasLocalClosed())
 	assert.False(t, et.Exchange.hasRemoteClosed())
