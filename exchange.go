@@ -232,9 +232,6 @@ func (e *Exchange) readFrame() (err error) {
 	select {
 	case e.fdr = <-e.readCh:
 	default:
-	}
-
-	if e.fdr == nil {
 		select {
 		case e.fdr = <-e.readCh:
 		case <-e.readDeadline.wait():
