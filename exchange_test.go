@@ -866,10 +866,10 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// should fail with closed pipe
+	// should fail with EOF indicating remote closed
 	n, err = c2.Write([]byte{1})
 	assert.Equal(t, 0, n)
-	assert.Equal(t, io.ErrClosedPipe, err)
+	assert.Equal(t, io.EOF, err)
 
 	assert.NoError(t, c2.Close())
 }

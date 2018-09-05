@@ -242,9 +242,9 @@ func (e *Exchange) readFrame() (err error) {
 	case <-e.readDeadline.wait():
 		err = timeoutError{}
 	case <-e.conn.ExchangeAbortChannel():
-		err = io.EOF //ErrServerClosed
+		err = ErrServerClosed
 	case <-e.localClosed:
-		err = io.EOF
+		err = io.ErrClosedPipe
 	}
 
 	return
@@ -278,7 +278,7 @@ func (e *Exchange) WriteStart() error {
 
 func (e *Exchange) writeStart() error {
 	if e.hasRemoteClosed() {
-		return io.ErrClosedPipe
+		return io.EOF
 	}
 	select {
 	case <-e.localClosed:
@@ -522,12 +522,12 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		case <-e.localClosed:
 			err = io.ErrClosedPipe
 		case <-e.conn.ExchangeAbortChannel():
-			err = io.ErrClosedPipe
+			err = ErrServerClosed
 		case <-e.writeDeadline.wait():
 			err = timeoutError{}
 		default:
 			if e.hasRemoteClosed() {
-				err = io.ErrClosedPipe
+				err = io.EOF
 			} else if e.getSendWindow() > 0 {
 				// if the send window allows, go ahead and send it
 				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
@@ -542,7 +542,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 				case <-e.localClosed:
 					err = io.ErrClosedPipe
 				case <-e.conn.ExchangeAbortChannel():
-					err = io.ErrClosedPipe
+					err = ErrServerClosed
 				case <-e.writeDeadline.wait():
 					err = timeoutError{}
 				}
