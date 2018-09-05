@@ -24,8 +24,8 @@ func Test_FramePool_FrameDataAllocID(t *testing.T) {
 
 func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
 	// make sure the frameDataPool is full
-	for i := len(frameDataPool); i <= cap(frameDataPool); i++ {
-		FrameDataFree(NewFrameDataID(ExchangeID(i) % MaxExchangeID))
+	for len(frameDataPool) < cap(frameDataPool) {
+		FrameDataFree(NewFrameData())
 	}
 	assert.Equal(t, cap(frameDataPool), len(frameDataPool))
 	fd1 := FrameDataAlloc()
