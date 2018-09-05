@@ -355,20 +355,18 @@ func (c *Conn) Close() (err error) {
 			if e != nil {
 				c.exchangeLookup[i] = nil
 				eerr := e.Close()
-				if err == nil {
-					switch {
-					case eerr == ErrServerClosed:
-					case eerr == io.ErrClosedPipe:
-					case eerr == io.EOF:
-					default:
-						err = eerr
-					}
+				if err == nil && !isClosedError(eerr) {
+					err = eerr
 				}
 			}
 		}
 	}
 
 	return
+}
+
+func isClosedError(err error) bool {
+	return err == ErrServerClosed || err == io.ErrClosedPipe || err == io.EOF
 }
 
 // NewExchangeWait returns the next available Exchange, or nil if timed out.
