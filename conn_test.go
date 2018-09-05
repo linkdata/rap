@@ -275,7 +275,7 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
 	e := NewExchange(ct.conn, 1)
 	e.OnRecycle(ct.conn.ExchangeRelease)
-	close(e.remoteClosed)
+	assert.True(t, e.remoteClosing())
 	assert.Panics(t, func() { e.Close() })
 }
 
