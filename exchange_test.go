@@ -765,6 +765,9 @@ func Test_Exchange_flowcontrol_errors(t *testing.T) {
 	if ok {
 		assert.True(t, nerr.Timeout())
 	}
+	assert.Zero(t, len(et.Exchange.ackCh))
+	assert.Zero(t, et.Exchange.sendWindow)
+	et.Exchange.sendWindow = int32(SendWindowSize)
 }
 
 func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
@@ -857,6 +860,8 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 
 	// closing C1 discards all the pending data
 	assert.NoError(t, c1.Close())
+
+	<-c2.remoteClosed
 
 	// should fail with closed pipe
 	n, err = c2.Write([]byte{1})
