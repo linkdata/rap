@@ -107,27 +107,28 @@ func connControlPingHandler(c *Conn, fd FrameData) (err error) {
 }
 
 func connControlPongHandler(c *Conn, fd FrameData) (err error) {
+	defer FrameDataFree(fd)
 	var now = time.Now().UnixNano()
 	atomic.StoreInt64(&c.lastPongRcvd, now)
 	if fd.Header().HasPayload() {
 		fp := NewFrameParser(fd)
 		atomic.StoreInt64(&c.latency, now-fp.ReadInt64())
 	}
-	FrameDataFree(fd)
 	return
 }
 
 func connControlPanicHandler(c *Conn, fd FrameData) error {
+	defer FrameDataFree(fd)
 	var msg string
 	if fd.Header().HasPayload() {
 		fp := NewFrameParser(fd)
 		msg, _ = fp.ReadString()
 	}
-	FrameDataFree(fd)
 	return &PanicError{msg: msg}
 }
 
 func connControlReservedHandler(c *Conn, fd FrameData) error {
+	defer FrameDataFree(fd)
 	return &ProtocolError{msg: fmt.Sprintf("unknown conn control frame %v", fd.Header())}
 }
 
@@ -141,6 +142,7 @@ func (c *Conn) Ping() {
 	select {
 	case c.writeCh <- fd:
 	case <-c.doneChan:
+		FrameDataFree(fd)
 	}
 }
 
