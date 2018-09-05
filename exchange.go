@@ -584,18 +584,12 @@ func (e *Exchange) recycle() {
 		panic("recycle() requires both local and remote channels closed")
 	}
 
-drain:
-	for {
-		select {
-		case <-e.ackCh:
-		case fd := <-e.readCh:
-			if fd == nil {
-				break drain
-			}
-			FrameDataFree(fd)
-		default:
-			break drain
-		}
+	// drain ack and read channels
+	for len(e.ackCh) > 0 {
+		<-e.ackCh
+	}
+	for len(e.readCh) > 0 {
+		FrameDataFree(<-e.readCh)
 	}
 
 	e.readCh = make(chan FrameData, MaxSendWindowSize)
