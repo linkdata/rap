@@ -22,34 +22,20 @@ func Test_FramePool_FrameDataAllocID(t *testing.T) {
 	FrameDataFree(fd2)
 }
 
-func Test_FramePool_FrameDataRecycleID(t *testing.T) {
-	fd1 := FrameDataAllocID(MaxExchangeID)
-	assert.Equal(t, MaxExchangeID, fd1.Header().ExchangeID())
-	fd2 := FrameDataRecycleID(fd1, ExchangeID(1))
-	assert.Equal(t, ExchangeID(1), fd1.Header().ExchangeID())
-	assert.Equal(t, ExchangeID(1), fd2.Header().ExchangeID())
-	FrameDataFree(fd1)
-	fd3 := FrameDataRecycleID(nil, ExchangeID(1))
-	assert.Equal(t, ExchangeID(1), fd3.Header().ExchangeID())
-}
-
 func Test_FramePool_FrameDataFree_Overflow(t *testing.T) {
-	if RaceEnabled() {
-		t.Skip("skipping since -race is enabled")
-		return
+	// make sure the frameDataPool is full
+	for len(frameDataPool) < cap(frameDataPool) {
+		FrameDataFree(NewFrameData())
 	}
-	oldSize := len(frameDataPool)
-	var idLimit = int(MaxExchangeID)
-	if idLimit > 0x10 {
-		idLimit = 0x10
-	}
-	frameDataPool = make(chan FrameData, idLimit)
+	assert.Equal(t, cap(frameDataPool), len(frameDataPool))
 	fd1 := FrameDataAlloc()
 	assert.NotNil(t, fd1)
-	for i := 0; i <= idLimit; i++ {
-		FrameDataFree(NewFrameDataID(ExchangeID(i & 0xFFF)))
-	}
-	fd2 := FrameDataAlloc()
+	assert.Equal(t, cap(frameDataPool)-1, len(frameDataPool))
+	FrameDataFree(fd1)
+	assert.Equal(t, cap(frameDataPool), len(frameDataPool))
+	fd2 := NewFrameData()
 	assert.NotNil(t, fd2)
-	frameDataPool = make(chan FrameData, oldSize)
+	assert.Equal(t, cap(frameDataPool), len(frameDataPool))
+	FrameDataFree(fd2)
+	assert.Equal(t, cap(frameDataPool), len(frameDataPool))
 }

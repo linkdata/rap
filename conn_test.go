@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,7 +81,11 @@ type connTester struct {
 func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
 	if req.Body != nil {
-		io.Copy(ioutil.Discard, req.Body)
+		if req.ContentLength > 0 {
+			io.CopyN(ioutil.Discard, req.Body, req.ContentLength)
+		} else if req.ContentLength == -1 {
+			io.Copy(ioutil.Discard, req.Body)
+		}
 	}
 }
 
@@ -191,17 +194,10 @@ func (ct *connTester) InjectRequestNoErrors(r *http.Request) {
 
 func (ct *connTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
 	w := httptest.NewRecorder()
-	var wg sync.WaitGroup
 	e := ct.conn.NewExchangeWait(connTimeout)
 	defer e.Close()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		requestErr = e.WriteRequest(r)
-		e.Close()
-	}()
+	requestErr = e.WriteRequest(r)
 	_, responseErr = e.ProxyResponse(w)
-	wg.Wait()
 	return
 }
 
@@ -275,7 +271,7 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
 	e := NewExchange(ct.conn, 1)
 	e.OnRecycle(ct.conn.ExchangeRelease)
-	close(e.remoteClosed)
+	assert.True(t, e.remoteClosing())
 	assert.Panics(t, func() { e.Close() })
 }
 

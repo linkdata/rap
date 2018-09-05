@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -118,16 +119,22 @@ func testBasicIO(t *testing.T, c1, c2 net.Conn, wantLength int) {
 
 	if got := <-dataCh; !bytes.Equal(got, want) {
 		t.Errorf("transmitted data differs")
-		wantN := 32
+		wantN := 16
+		tailWant := ""
 		if len(want) < wantN {
 			wantN = len(want)
+		} else {
+			tailWant = fmt.Sprintf("...%s", hex.EncodeToString(want[len(want)-8:]))
 		}
-		gotN := 32
+		gotN := 16
+		tailGot := ""
 		if len(got) < gotN {
 			gotN = len(got)
+		} else {
+			tailGot = fmt.Sprintf("...%s", hex.EncodeToString(got[len(got)-8:]))
 		}
-		t.Errorf("want [%d] %s", len(want), hex.EncodeToString(want[:wantN]))
-		t.Errorf(" got [%d] %s", len(got), hex.EncodeToString(got[:gotN]))
+		t.Errorf("want [%d] %s%s", len(want), hex.EncodeToString(want[:wantN]), tailWant)
+		t.Errorf(" got [%d] %s%s", len(got), hex.EncodeToString(got[:gotN]), tailGot)
 	}
 }
 

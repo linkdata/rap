@@ -424,7 +424,7 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	et.Exchange.write(make([]byte, et.Exchange.Available()))
 	err := et.Exchange.WriteByte(0x01)
 	assert.Equal(t, io.ErrClosedPipe, err)
-	close(et.Exchange.remoteClosed)
+	assert.True(t, et.Exchange.remoteClosing())
 	et.Exchange.recycle()
 }
 
@@ -765,6 +765,9 @@ func Test_Exchange_flowcontrol_errors(t *testing.T) {
 	if ok {
 		assert.True(t, nerr.Timeout())
 	}
+	assert.Zero(t, len(et.Exchange.ackCh))
+	assert.Zero(t, et.Exchange.sendWindow)
+	et.Exchange.sendWindow = int32(SendWindowSize)
 }
 
 func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
@@ -776,7 +779,7 @@ func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
 	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetDeadline(time.Now()))
 	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetReadDeadline(time.Now()))
 	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetWriteDeadline(time.Now()))
-	close(et.Exchange.remoteClosed)
+	assert.True(t, et.Exchange.remoteClosing())
 	et.Exchange.recycle()
 }
 
@@ -858,10 +861,15 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 	// closing C1 discards all the pending data
 	assert.NoError(t, c1.Close())
 
-	// should fail with closed pipe
+	// wait for remote to be closed
+	for !c2.hasRemoteClosed() {
+		time.Sleep(time.Millisecond)
+	}
+
+	// should fail with EOF indicating remote closed
 	n, err = c2.Write([]byte{1})
 	assert.Equal(t, 0, n)
-	assert.Equal(t, io.ErrClosedPipe, err)
+	assert.Equal(t, io.EOF, err)
 
 	assert.NoError(t, c2.Close())
 }
@@ -934,7 +942,7 @@ func Test_Exchange_recycle_with_only_local_closed_panics(t *testing.T) {
 		et.Exchange.recycle()
 	})
 
-	close(et.Exchange.remoteClosed)
+	assert.True(t, et.Exchange.remoteClosing())
 }
 
 func Test_Exchange_manually_sending_final_frame_panics(t *testing.T) {

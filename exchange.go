@@ -123,7 +123,7 @@ type Exchange struct {
 	readCh        chan FrameData     // data frames from peer go in this
 	cmu           sync.Mutex         // guards localClosed and remoteClosed
 	localClosed   chan struct{}      // closed when Close() has been called
-	remoteClosed  chan struct{}      // closed when final frame has been received
+	remoteClosed  int32              // nonzero if remote has sent it's final frame
 	sendWindow    int32              // number of frames still allowed to be in flight
 	wmu           sync.Mutex         // guards fdw
 	fdw           FrameData          // FrameData being written to, nil after final frame sent
@@ -136,7 +136,15 @@ type Exchange struct {
 }
 
 func (e *Exchange) hasRemoteClosed() bool {
-	return isClosedChan(e.remoteClosed)
+	return atomic.LoadInt32(&e.remoteClosed) != 0 // isClosedChan(e.remoteClosed)
+}
+
+func (e *Exchange) remoteClosing() bool {
+	if atomic.CompareAndSwapInt32(&e.remoteClosed, 0, 1) {
+		close(e.readCh)
+		return true
+	}
+	return false
 }
 
 func (e *Exchange) hasLocalClosed() bool {
@@ -157,7 +165,6 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 		ackCh:         make(chan struct{}, MaxSendWindowSize),
 		readCh:        make(chan FrameData, MaxSendWindowSize),
 		localClosed:   make(chan struct{}),
-		remoteClosed:  make(chan struct{}),
 		readDeadline:  makeExchangeDeadline(),
 		writeDeadline: makeExchangeDeadline(),
 	}
@@ -180,7 +187,7 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		select {
 		case e.ackCh <- struct{}{}:
 		default:
-			panic(fmt.Sprint("ACK would block: ", fd))
+			panic(fmt.Sprint("ACK would block"))
 		}
 	} else {
 		// data frame
@@ -203,13 +210,8 @@ func (e *Exchange) recievedFinal(fd FrameData) {
 		}
 		FrameDataFree(fd)
 	}
-	select {
-	case <-e.remoteClosed:
-		if fd != nil {
-			panic("received multiple final frames")
-		}
-	default:
-		close(e.remoteClosed)
+	if !e.remoteClosing() {
+		panic("received multiple final frames")
 	}
 	select {
 	case <-e.localClosed:
@@ -231,23 +233,18 @@ func (e *Exchange) readFrame() (err error) {
 
 	select {
 	case e.fdr = <-e.readCh:
-	default:
-		select {
-		case e.fdr = <-e.readCh:
-		case <-e.readDeadline.wait():
-			err = timeoutError{}
-		case <-e.conn.ExchangeAbortChannel():
-			err = io.EOF //ErrServerClosed
-		case <-e.localClosed:
-			err = io.EOF
-		case <-e.remoteClosed:
+		if e.fdr != nil {
+			e.fp = NewFrameParser(e.fdr)
+			e.writeAckFrame()
+		} else {
 			err = io.EOF
 		}
-	}
-
-	if e.fdr != nil {
-		e.fp = NewFrameParser(e.fdr)
-		e.writeAckFrame()
+	case <-e.readDeadline.wait():
+		err = timeoutError{}
+	case <-e.conn.ExchangeAbortChannel():
+		err = ErrServerClosed
+	case <-e.localClosed:
+		err = io.ErrClosedPipe
 	}
 
 	return
@@ -280,9 +277,10 @@ func (e *Exchange) WriteStart() error {
 }
 
 func (e *Exchange) writeStart() error {
+	if e.hasRemoteClosed() {
+		return io.EOF
+	}
 	select {
-	case <-e.remoteClosed:
-		return io.ErrClosedPipe
 	case <-e.localClosed:
 		return io.ErrClosedPipe
 	case <-e.writeDeadline.wait():
@@ -506,52 +504,54 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 			panic(fmt.Sprint("missing payload flag: ", e.getConn(), e, fd))
 		}
 		// empty blank frame
+		FrameDataFree(fd)
 		return
 	}
 
 	if len(fd) > FrameMaxSize {
-		FrameDataFree(fd)
 		return ErrFrameTooBig
 	}
 
 	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
 
 	// Consume ACKs and check for close conditions
-	for {
+	for err == nil {
 		select {
 		case <-e.ackCh:
 			e.consumeAck()
 		case <-e.localClosed:
-			return io.ErrClosedPipe
-		case <-e.remoteClosed:
-			return io.ErrClosedPipe
+			err = io.ErrClosedPipe
 		case <-e.conn.ExchangeAbortChannel():
-			return io.ErrClosedPipe
+			err = ErrServerClosed
 		case <-e.writeDeadline.wait():
-			return timeoutError{}
+			err = timeoutError{}
 		default:
-			// if the send window allows, go ahead and send it
-			if e.getSendWindow() > 0 {
+			if e.hasRemoteClosed() {
+				err = io.EOF
+			} else if e.getSendWindow() > 0 {
+				// if the send window allows, go ahead and send it
 				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
 					panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
 				}
 				return e.conn.ExchangeWrite(fd)
-			}
-			// SendWindow is empty, so do a blocking wait for an ACK
-			select {
-			case <-e.ackCh:
-				e.consumeAck()
-			case <-e.localClosed:
-				return io.ErrClosedPipe
-			case <-e.remoteClosed:
-				return io.ErrClosedPipe
-			case <-e.conn.ExchangeAbortChannel():
-				return io.ErrClosedPipe
-			case <-e.writeDeadline.wait():
-				return timeoutError{}
+			} else {
+				// SendWindow is empty, so do a blocking wait for an ACK
+				select {
+				case <-e.ackCh:
+					e.consumeAck()
+				case <-e.localClosed:
+					err = io.ErrClosedPipe
+				case <-e.conn.ExchangeAbortChannel():
+					err = ErrServerClosed
+				case <-e.writeDeadline.wait():
+					err = timeoutError{}
+				}
 			}
 		}
 	}
+
+	FrameDataFree(fd)
+	return
 }
 
 func (e *Exchange) getSendWindow() int {
@@ -576,22 +576,25 @@ func (e *Exchange) recycle() {
 
 	// log.Print("  RC ", e.getConn(), e)
 
-	if isClosedChan(e.localClosed) && isClosedChan(e.remoteClosed) {
-	drain:
-		for {
-			select {
-			case <-e.ackCh:
-			case fd := <-e.readCh:
-				FrameDataFree(fd)
-			default:
-				break drain
-			}
-		}
-		e.localClosed = make(chan struct{})
-		e.remoteClosed = make(chan struct{})
-	} else {
+	if len(e.fdw) > 0 {
+		panic("still data left in fdw")
+	}
+
+	if !e.hasLocalClosed() || !e.hasRemoteClosed() {
 		panic("recycle() requires both local and remote channels closed")
 	}
+
+	// drain ack and read channels
+	for len(e.ackCh) > 0 {
+		<-e.ackCh
+	}
+	for len(e.readCh) > 0 {
+		FrameDataFree(<-e.readCh)
+	}
+
+	e.readCh = make(chan FrameData, MaxSendWindowSize)
+	e.localClosed = make(chan struct{})
+	atomic.StoreInt32(&e.remoteClosed, 0)
 	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
 	e.isHijacked = false
 	e.fdw = nil
@@ -646,11 +649,8 @@ func (e *Exchange) close(notIfHijacked bool) (err error) {
 		e.writeFinal()
 	}
 
-	select {
-	case <-e.remoteClosed:
-		e.recycle()
-	default:
-		// will be recycled when remote is closed
+	if e.hasRemoteClosed() {
+		e.recycle() // otherwise will be recycled when remote is closed
 	}
 
 	return nil
