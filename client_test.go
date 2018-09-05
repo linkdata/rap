@@ -128,12 +128,6 @@ releaseOldConn:
 		}
 		e = c.NewExchange()
 	}
-	/*
-		for e != nil {
-			grabbed <- e
-			e = c.NewExchange()
-		}
-	*/
 
 	assert.Equal(t, int(MaxExchangeID)*2, len(grabbed))
 	for len(grabbed) > 0 {
@@ -165,6 +159,20 @@ func Test_Client_ServeHTTP_with_body(t *testing.T) {
 	assert.NoError(t, c.Close())
 }
 
+func Test_Client_ServeHTTP_aborted_by_server(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	rr := httptest.NewRecorder()
+	blob := make([]byte, FrameMaxSize*(SendWindowSize*2))
+	req := httptest.NewRequest("ABORTBODY", "/abortme", ioutil.NopCloser(bytes.NewBuffer(blob)))
+	req.ContentLength = int64(len(blob))
+	c.ServeHTTP(rr, req)
+	assert.True(t, st.haveServed())
+	assert.Equal(t, 400, rr.Result().StatusCode)
+	assert.NoError(t, c.Close())
+}
+
 func Test_Client_ServeHTTP_overflow_headers(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
@@ -182,24 +190,6 @@ func Test_Client_ServeHTTP_overflow_headers(t *testing.T) {
 	assert.Zero(t, len(se))
 	assert.NoError(t, c.Close())
 }
-
-/*func Test_Client_ServeHTTP_websocket_missing_hijack(t *testing.T) {
-	defer leaktest.Check(t)()
-
-	st := newSrvTester(t)
-	defer st.Close()
-	c := NewClient(st.srv.Addr)
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/ws", nil)
-	req.Header.Add("Upgrade", "websocket")
-	req.Header.Add("Connection", "upgrade")
-	req.Header.Add("Sec-Websocket-Version", "13")
-	req.Header.Add("Sec-WebSocket-Key", "13")
-	c.ServeHTTP(rr, req)
-	assert.True(t, st.haveServed())
-	assert.Equal(t, 500, rr.Code)
-	assert.NoError(t, c.Close())
-}*/
 
 func Test_Client_ServeHTTP_no_answer(t *testing.T) {
 	defer leaktest.Check(t)()
@@ -222,19 +212,4 @@ func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
 
 	ts := httptest.NewServer(c)
 	defer ts.Close()
-
-	/*
-		wsu := strings.Replace(ts.URL, "http", "ws", 1)
-
-		wsc, resp, err := websocket.DefaultDialer.Dial(wsu+"/ws", nil)
-		if wsc != nil {
-			defer wsc.Close()
-		}
-			assert.NotNil(t, wsc)
-			assert.NoError(t, err)
-			assert.NotNil(t, resp)
-
-			assert.True(t, st.haveServed())
-			assert.NoError(t, c.Close())
-	*/
 }

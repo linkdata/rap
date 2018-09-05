@@ -3,6 +3,7 @@ package rap
 import (
 	"errors"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +127,14 @@ func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		case "/ws":
 			return
 		}
+	case "ABORTBODY":
+		if req.Body != nil {
+			wanted := req.ContentLength / 2
+			n, err := io.CopyN(ioutil.Discard, req.Body, wanted)
+			assert.NoError(st.t, err)
+			assert.Equal(st.t, wanted, n)
+		}
+		w.WriteHeader(400)
 	}
 	w.WriteHeader(200)
 }

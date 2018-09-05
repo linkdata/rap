@@ -179,11 +179,19 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var statusCode int
 
-	//if r.ContentLength == 0 && !isUpgrade {
-	// we can run this without a separate goroutine as request has no body
-	// and no Connection: upgrade header
-	if requestErr = e.WriteRequest(r); requestErr == nil {
+	requestErr = e.WriteRequest(r)
+
+	// request write may have been interrupted by server, for example
+	// by sending a 4xx in repsonse to a too-long request or a timeout
+	requestInterrupted := requestErr == io.EOF || requestErr == io.ErrClosedPipe
+
+	if requestErr == nil || requestInterrupted {
 		if statusCode, responseErr = e.ProxyResponse(w); responseErr == nil {
+			if requestInterrupted {
+				// suppress the request error in favor of the response data
+				requestErr = nil
+			}
+
 			// write the response body
 			if isUpgrade && statusCode == 101 {
 				// hijack
@@ -214,20 +222,6 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	/*} else {
-		// we allow a response to send before request has finished sending,
-		// useful when the upstream does stream processing (such as echoing).
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if requestErr = e.WriteRequest(r); requestErr != nil {
-				e.Close()
-			}
-		}()
-		statusCode, responseErr = e.ProxyResponse(w)
-		wg.Wait()
-	}*/
 
 	if responseErr == nil && requestErr == nil {
 		return
