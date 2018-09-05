@@ -180,7 +180,7 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		select {
 		case e.ackCh <- struct{}{}:
 		default:
-			panic(fmt.Sprint("ACK would block: ", fd))
+			panic(fmt.Sprint("ACK would block"))
 		}
 	} else {
 		// data frame
@@ -506,29 +506,29 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 			panic(fmt.Sprint("missing payload flag: ", e.getConn(), e, fd))
 		}
 		// empty blank frame
+		FrameDataFree(fd)
 		return
 	}
 
 	if len(fd) > FrameMaxSize {
-		FrameDataFree(fd)
 		return ErrFrameTooBig
 	}
 
 	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
 
 	// Consume ACKs and check for close conditions
-	for {
+	for err == nil {
 		select {
 		case <-e.ackCh:
 			e.consumeAck()
 		case <-e.localClosed:
-			return io.ErrClosedPipe
+			err = io.ErrClosedPipe
 		case <-e.remoteClosed:
-			return io.ErrClosedPipe
+			err = io.ErrClosedPipe
 		case <-e.conn.ExchangeAbortChannel():
-			return io.ErrClosedPipe
+			err = io.ErrClosedPipe
 		case <-e.writeDeadline.wait():
-			return timeoutError{}
+			err = timeoutError{}
 		default:
 			// if the send window allows, go ahead and send it
 			if e.getSendWindow() > 0 {
@@ -542,16 +542,19 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 			case <-e.ackCh:
 				e.consumeAck()
 			case <-e.localClosed:
-				return io.ErrClosedPipe
+				err = io.ErrClosedPipe
 			case <-e.remoteClosed:
-				return io.ErrClosedPipe
+				err = io.ErrClosedPipe
 			case <-e.conn.ExchangeAbortChannel():
-				return io.ErrClosedPipe
+				err = io.ErrClosedPipe
 			case <-e.writeDeadline.wait():
-				return timeoutError{}
+				err = timeoutError{}
 			}
 		}
 	}
+
+	FrameDataFree(fd)
+	return
 }
 
 func (e *Exchange) getSendWindow() int {
@@ -576,22 +579,28 @@ func (e *Exchange) recycle() {
 
 	// log.Print("  RC ", e.getConn(), e)
 
-	if isClosedChan(e.localClosed) && isClosedChan(e.remoteClosed) {
-	drain:
-		for {
-			select {
-			case <-e.ackCh:
-			case fd := <-e.readCh:
-				FrameDataFree(fd)
-			default:
-				break drain
-			}
-		}
-		e.localClosed = make(chan struct{})
-		e.remoteClosed = make(chan struct{})
-	} else {
+	if len(e.fdw) > 0 {
+		panic("still data left in fdw")
+	}
+
+	if !isClosedChan(e.localClosed) || !isClosedChan(e.remoteClosed) {
 		panic("recycle() requires both local and remote channels closed")
 	}
+
+drain:
+	for {
+		select {
+		case <-e.ackCh:
+		case fd := <-e.readCh:
+			FrameDataFree(fd)
+		default:
+			break drain
+		}
+	}
+
+	e.localClosed = make(chan struct{})
+	e.remoteClosed = make(chan struct{})
+
 	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
 	e.isHijacked = false
 	e.fdw = nil
