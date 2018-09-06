@@ -756,8 +756,10 @@ func Test_Exchange_flowcontrol_errors(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.ackFn = func(e *Exchange) {
+		if e.getSendWindow() == 0 {
+			e.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
+		}
 	}
-	et.Exchange.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
 	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, FrameMaxPayloadSize*(MaxSendWindowSize+1)))))
 	assert.Error(t, err)
 	nerr, ok := err.(net.Error)
@@ -766,7 +768,7 @@ func Test_Exchange_flowcontrol_errors(t *testing.T) {
 		assert.True(t, nerr.Timeout())
 	}
 	assert.Zero(t, len(et.Exchange.ackCh))
-	assert.Zero(t, et.Exchange.sendWindow)
+	assert.Zero(t, et.Exchange.getSendWindow())
 	et.Exchange.sendWindow = int32(SendWindowSize)
 }
 
