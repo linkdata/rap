@@ -42,8 +42,8 @@ func NewFrameData() FrameData {
 
 // NewFrameDataID allocates a new FrameData with a header and ExchangeID set.
 func NewFrameDataID(exchangeID ExchangeID) (fd FrameData) {
-	fd = FrameData(make([]byte, FrameHeaderSize, FrameMaxSize))
-	FrameHeader(fd).ClearID(exchangeID)
+	fd = NewFrameData()
+	fd.WriteHeader(exchangeID)
 	return
 }
 
