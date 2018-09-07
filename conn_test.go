@@ -220,7 +220,9 @@ func (ct *connTester) FillExchanges() (gotten int) {
 }
 
 func Test_Conn_String(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	ct := newConnTester(t)
 	defer ct.Close()
 	expected := fmt.Sprintf("[Conn %v]", ct.conn.identity)
@@ -282,14 +284,18 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 }
 
 func Test_Conn_empty_request_response(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	ct := newConnTester(t)
 	defer ct.Close()
 	ct.InjectRequestNoErrors(httptest.NewRequest("GET", "/", nil))
 }
 
 func Test_Conn_big_request_response(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	ct := newConnTester(t)
 	defer ct.Close()
 	ct.InjectRequestNoErrors(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))

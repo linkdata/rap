@@ -136,7 +136,9 @@ releaseOldConn:
 }
 
 func Test_Client_ServeHTTP(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
@@ -192,8 +194,9 @@ func Test_Client_ServeHTTP_overflow_headers(t *testing.T) {
 }
 
 func Test_Client_ServeHTTP_no_answer(t *testing.T) {
-	defer leaktest.Check(t)()
-
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	c := NewClient(noSrvAddr)
 	c.DialTimeout = time.Millisecond * 10
 	rr := httptest.NewRecorder()
@@ -203,8 +206,9 @@ func Test_Client_ServeHTTP_no_answer(t *testing.T) {
 }
 
 func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
-	defer leaktest.Check(t)()
-
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)

@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const leaktestEnabled = true
+
 type exchangeTester struct {
 	t           *testing.T
 	wg          sync.WaitGroup
@@ -618,7 +620,9 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 }
 
 func Test_Exchange_ProxyResponse_transparency(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 
 	// Make a frame for testing with
 	et := newExchangeTester(t)
@@ -750,8 +754,9 @@ func Test_Exchange_Serve(t *testing.T) {
 }
 
 func Test_Exchange_flowcontrol_errors(t *testing.T) {
-	// flow control timeout
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 
 	et := newExchangeTester(t)
 	defer et.Close()
@@ -829,7 +834,9 @@ func Test_Exchange_makeConnPipe(t *testing.T) {
 }
 
 func Test_Exchange_flowcontrol_halts(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 
 	c1, c2, stop, err := makeExchangePipe()
 	defer stop()
@@ -877,7 +884,9 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 }
 
 func Test_Exchange_transparency(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 
 	testConn(t, func() (c1, c2 net.Conn, stop func(), err error) {
 		c1, c2 = net.Pipe()

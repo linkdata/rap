@@ -154,14 +154,18 @@ func (st *srvTester) Close() {
 }
 
 func Test_Server_simple(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	st := newSrvTester(t)
 	assert.Equal(t, st.srv.DefaultListenAddr(), st.srv.getListenAddr(""))
 	st.Close()
 }
 
 func Test_Server_ListenAndServe(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	srv := &Server{Addr: "127.0.0.1:"}
 	go func() {
 		err := srv.ListenAndServe()
@@ -214,7 +218,9 @@ func Test_Server_Close_listener_error(t *testing.T) {
 }
 
 func Test_Server_support_functions(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	st := newSrvTester(t)
 	defer st.Close()
 	em := st.srv.ServeErrors()
@@ -230,7 +236,9 @@ func Test_Server_support_functions(t *testing.T) {
 }
 
 func Test_Server_serve_errors(t *testing.T) {
-	defer leaktest.Check(t)()
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
