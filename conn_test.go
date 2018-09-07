@@ -122,7 +122,7 @@ func (ct *connTester) Start() {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
 			}
-			if err != nil && err != io.EOF {
+			if err != nil && !isClosedError(err) {
 				assert.NoError(ct.t, err)
 			}
 		}
