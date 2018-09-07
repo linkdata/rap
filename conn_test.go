@@ -93,7 +93,7 @@ func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (ct *connTester) Start() {
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(1)
 	go func(ct *connTester) {
 		wg.Done()
 		err := ct.server.ServeHTTP(ct)
@@ -118,6 +118,9 @@ func (ct *connTester) Start() {
 		}
 		close(ct.serverDone)
 	}(ct)
+	wg.Wait()
+
+	wg.Add(1)
 	go func(ct *connTester) {
 		wg.Done()
 		err := ct.conn.ServeHTTP(nil)
