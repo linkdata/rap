@@ -2,13 +2,14 @@ package rap
 
 import (
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 var (

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/pkg/errors"
 )
 
 // Client connects to a RAP server, maintaining one or more Conns.
@@ -183,7 +185,7 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// request write may have been interrupted by server, for example
 	// by sending a 4xx in repsonse to a too-long request or a timeout
-	requestInterrupted := requestErr == io.EOF || requestErr == io.ErrClosedPipe
+	requestInterrupted := isClosedError(errors.Cause(requestErr))
 
 	if requestErr == nil || requestInterrupted {
 		if statusCode, responseErr = e.ProxyResponse(w); responseErr == nil {
@@ -227,13 +229,5 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	errorText := "rap.Client.ServeHTTP(): uri=" + r.RequestURI
-	if requestErr != nil {
-		errorText += " requestErr=" + requestErr.Error()
-	}
-	if responseErr != nil {
-		errorText += " responseErr=" + responseErr.Error()
-	}
-	errorText += " " + e.String()
-	panic(errorText)
+	panic(fmt.Sprintf("rap.Client.ServeHTTP(): uri=\"%s\"\nrequest error: %+v\nresponse error: %+v\nexchange: %+v\n", r.RequestURI, requestErr, responseErr, e))
 }

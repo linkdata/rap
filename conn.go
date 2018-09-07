@@ -2,13 +2,14 @@ package rap
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // StatsCollector is the interface required to collect statistics
@@ -306,7 +307,7 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 
 	err = <-errCh
 
-	if closeErr := c.Close(); closeErr != nil && (err == nil || err == io.EOF) {
+	if closeErr := c.Close(); closeErr != nil && (err == nil || errors.Cause(err) == io.EOF) {
 		err = closeErr
 	}
 
@@ -366,7 +367,15 @@ func (c *Conn) Close() (err error) {
 }
 
 func isClosedError(err error) bool {
-	return err == ErrServerClosed || err == io.ErrClosedPipe || err == io.EOF
+	switch errors.Cause(err) {
+	case ErrServerClosed:
+		return true
+	case io.ErrClosedPipe:
+		return true
+	case io.EOF:
+		return true
+	}
+	return false
 }
 
 // NewExchangeWait returns the next available Exchange, or nil if timed out.

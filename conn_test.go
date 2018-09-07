@@ -17,6 +17,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/fortytw2/leaktest"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -98,20 +99,20 @@ func (ct *connTester) Start() {
 		wg.Done()
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
-			if ct.expectServerError != reflect.TypeOf(err) {
+			if ct.expectServerError.Name() != reflect.TypeOf(errors.Cause(err)).Name() {
 				log.Print("expected error of type ", ct.expectServerError.Name(), " got ", err)
 			}
-			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
+			assert.Equal(ct.t, ct.expectServerError.Name(), reflect.TypeOf(errors.Cause(err)).Name())
 			assert.NotNil(ct.t, err)
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
 			}
-			switch {
-			case err == nil:
-			case err == io.EOF:
-			case err == ErrServerClosed:
-			case err == io.ErrClosedPipe:
+			switch errors.Cause(err) {
+			case nil:
+			case io.EOF:
+			case ErrServerClosed:
+			case io.ErrClosedPipe:
 			default:
 				assert.NoError(ct.t, err)
 			}
@@ -126,10 +127,10 @@ func (ct *connTester) Start() {
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.NotNil(ct.t, err)
-			if ct.expectConnError != reflect.TypeOf(err) {
+			if ct.expectConnError.Name() != reflect.TypeOf(errors.Cause(err)).Name() {
 				assert.Nil(ct.t, err)
 			}
-			assert.Equal(ct.t, ct.expectConnError, reflect.TypeOf(err))
+			assert.Equal(ct.t, ct.expectConnError.Name(), reflect.TypeOf(errors.Cause(err)).Name())
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
@@ -198,7 +199,7 @@ func newConnTester(t *testing.T) (ct *connTester) {
 
 func (ct *connTester) InjectRequestNoErrors(r *http.Request) {
 	requestErr, responseErr := ct.InjectRequest(r)
-	if responseErr == io.EOF {
+	if errors.Cause(responseErr) == io.EOF {
 		responseErr = nil
 	}
 	assert.NoError(ct.t, requestErr)
@@ -393,22 +394,6 @@ func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
 	ct.conn.Ping()
 	ct.Close()
 }
-
-/*
-func Test_Conn_ServeHTTP_write_close_late_error(t *testing.T) {
-	ct := newConnTesterNotStarted(t)
-	defer ct.Close()
-	ct.a.WriteCloser = &failWriter{
-		failOnClose: true,
-		WriteCloser: ct.a.WriteCloser,
-	}
-	ct.expectServerError = reflect.TypeOf(io.EOF)
-	ct.expectConnError = reflect.TypeOf(errFailWriter)
-	ct.expectConnCloseError = reflect.TypeOf(errFailWriter)
-	ct.Start()
-	ct.conn.writeErrCh <- nil
-}
-*/
 
 func Test_Conn_stolen_exchange(t *testing.T) {
 	ct := newConnTester(t)

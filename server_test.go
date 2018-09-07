@@ -1,7 +1,6 @@
 package rap
 
 import (
-	"errors"
 	"io"
 	"io/ioutil"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fortytw2/leaktest"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 

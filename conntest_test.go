@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 var (
@@ -150,7 +152,7 @@ func testPingPong(t *testing.T, c1, c2 net.Conn) {
 		var prev uint64
 		for {
 			if _, err := io.ReadFull(c, buf); err != nil {
-				if err == io.EOF {
+				if errors.Cause(err) == io.EOF {
 					break
 				}
 				t.Errorf("unexpected Read error: %v", err)

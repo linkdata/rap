@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fortytw2/leaktest"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -295,7 +296,7 @@ func Test_Exchange_StartAndRelease_eof_before_starting(t *testing.T) {
 	defer et.Close()
 	et.SendFinal()
 	err := et.Exchange.ServeHTTP(et)
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.True(t, et.Released())
 }
 
@@ -309,7 +310,7 @@ func Test_Exchange_StartAndRelease_empty_frame(t *testing.T) {
 	et.SubmitFrame(fd)
 	et.SendFinal()
 	err := et.Exchange.ServeHTTP(et)
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.True(t, et.Released())
 }
 
@@ -325,7 +326,7 @@ func Test_Exchange_StartAndRelease_two_empty_frames(t *testing.T) {
 	et.SubmitFrame(fd)
 	et.SendFinal()
 	err := et.Exchange.ServeHTTP(et)
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.True(t, et.Released())
 }
 
@@ -495,7 +496,7 @@ func Test_Exchange_Read(t *testing.T) {
 	assert.Equal(t, byte(0xc4), p1[0])
 	// Read again, expecting EOF
 	n, err = et.Exchange.Read(p1)
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.Zero(t, n)
 }
 
@@ -505,7 +506,7 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 
 	// Reading from nil
 	n, err := et.Exchange.ReadFrom(nil)
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.Zero(t, n)
 
 	// Read one byte
@@ -613,7 +614,8 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 	assert.NoError(t, et.Exchange.WriteByte(0x02))
 	assert.NoError(t, et.Exchange.Flush())
 	et.SendFinal()
-	assert.Equal(t, io.EOF, et.Exchange.loadFrameReader())
+	err = et.Exchange.loadFrameReader()
+	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.Zero(t, len(et.Exchange.readCh))
 	assert.NoError(t, et.Exchange.Close())
 	assert.True(t, et.Released())
@@ -657,7 +659,7 @@ func Test_Exchange_ProxyResponse_transparency(t *testing.T) {
 	_, err = et2.Exchange.ProxyResponse(rr2)
 	assert.NoError(t, err)
 	_, err = et2.Exchange.WriteTo(rr2)
-	assert.Error(t, io.EOF, err)
+	assert.Error(t, io.EOF, errors.Cause(err))
 	assert.True(t, et2.Exchange.hasRemoteClosed())
 	assert.Equal(t, int(3), rr.Body.Len())
 	assert.Equal(t, int(3), rr2.Body.Len())
@@ -692,7 +694,7 @@ func Test_Exchange_ProxyResponse_read_eof(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
 	assert.True(t, et.Exchange.hasRemoteClosed())
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 }
 
 /*
@@ -878,7 +880,7 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 	// should fail with EOF indicating remote closed
 	n, err = c2.Write([]byte{1})
 	assert.Equal(t, 0, n)
-	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, io.EOF, errors.Cause(err))
 
 	assert.NoError(t, c2.Close())
 }

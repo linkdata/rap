@@ -1,7 +1,6 @@
 package rap
 
 import (
-	"errors"
 	"io"
 	"log"
 	"net"
@@ -12,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
+	"github.com/pkg/errors"
 )
 
 func Test_Websocket_Simple(t *testing.T) {
@@ -123,7 +123,7 @@ func echoCopy(w http.ResponseWriter, r *http.Request, writerOnly bool) {
 	for {
 		mt, r, err := conn.NextReader()
 		if err != nil {
-			if err != io.EOF {
+			if errors.Cause(err) != io.EOF {
 				if !websocket.IsCloseError(err, 1000) {
 					log.Println("NextReader:", err)
 				}
@@ -183,7 +183,7 @@ func echoReadAll(w http.ResponseWriter, r *http.Request, writeMessage, writePrep
 	for {
 		mt, b, err := conn.ReadMessage()
 		if err != nil {
-			if err != io.EOF {
+			if errors.Cause(err) != io.EOF {
 				if !websocket.IsCloseError(err, 1000) {
 					log.Println("NextReader:", err)
 				}
@@ -278,7 +278,7 @@ func (r *validator) Read(p []byte) (int, error) {
 	}
 	r.state = state
 	r.x = x
-	if state == utf8Reject || (err == io.EOF && state != utf8Accept) {
+	if state == utf8Reject || (errors.Cause(err) == io.EOF && state != utf8Accept) {
 		return n, errInvalidUTF8
 	}
 	return n, err

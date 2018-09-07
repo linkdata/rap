@@ -1,13 +1,14 @@
 package rap
 
 import (
-	"errors"
 	"io"
 	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // ErrServerClosed is returned by the Server's Serve method after a call to Close.
