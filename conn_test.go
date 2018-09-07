@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,7 +91,10 @@ func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (ct *connTester) Start() {
+	wg := sync.WaitGroup{}
+	wg.Add(2)
 	go func(ct *connTester) {
+		wg.Done()
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
 			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
@@ -111,6 +115,7 @@ func (ct *connTester) Start() {
 		close(ct.serverDone)
 	}(ct)
 	go func(ct *connTester) {
+		wg.Done()
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.NotNil(ct.t, err)
@@ -128,6 +133,7 @@ func (ct *connTester) Start() {
 		}
 		close(ct.connDone)
 	}(ct)
+	wg.Wait()
 }
 
 func (ct *connTester) Close() {
