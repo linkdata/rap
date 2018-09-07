@@ -34,9 +34,9 @@ func Test_FrameParser_Read(t *testing.T) {
 func Test_FrameParser_ReadRequest_IllegalURL(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
-	fd.WriteStringNull()  // method
-	fd.WriteStringNull()  // scheme
-	fd.WriteString(":a:") // illegal url
+	fd.WriteStringNull() // method
+	fd.WriteStringNull() // scheme
+	fd.WriteRoute(":a:") // illegal url
 	fp := NewFrameParser(fd)
 	req, err := fp.ReadRequest()
 	assert.Nil(t, req)

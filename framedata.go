@@ -20,6 +20,8 @@ var (
 	ErrFrameTooBig = errors.New("rap: frame too big")
 	// ErrFrameTooSmall means a frame size value is smaller than allowed
 	ErrFrameTooSmall = errors.New("rap: frame too small")
+	// ErrInvalidRouteIndex means a route index is less than one or larger than allowed
+	ErrInvalidRouteIndex = errors.New("rap: invalid route index")
 )
 
 // FrameDataReader is the interface that wraps the ReadFrameData() method.
@@ -171,8 +173,7 @@ func (fd *FrameData) WriteString(s string) (err error) {
 		return
 	}
 	// TODO implement string lookup
-	err = fd.WriteLen(len(s))
-	if err == nil {
+	if err = fd.WriteLen(len(s)); err == nil {
 		*fd = append(*fd, s...)
 	}
 	return
@@ -183,6 +184,28 @@ func (fd *FrameData) WriteString(s string) (err error) {
 // string.
 func (fd *FrameData) WriteStringNull() {
 	*fd = append(*fd, byte(0), byte(0))
+	return
+}
+
+// WriteRoute writes an unregistered route to a FrameData.
+func (fd *FrameData) WriteRoute(s string) (err error) {
+	fd.WriteLen(0)
+	return fd.WriteString(s)
+}
+
+// WriteRegisteredRoute writes a registered route to a FrameData.
+func (fd *FrameData) WriteRegisteredRoute(idx int, vals []string) (err error) {
+	if idx < 1 {
+		return ErrInvalidRouteIndex
+	}
+	if err = fd.WriteLen(idx); err != nil {
+		return
+	}
+	for _, s := range vals {
+		if err = fd.WriteString(s); err != nil {
+			return
+		}
+	}
 	return
 }
 
@@ -272,7 +295,7 @@ func (fd *FrameData) WriteRequest(r *http.Request) error {
 	if np != "/" && r.URL.Path[len(r.URL.Path)-1] == '/' {
 		np += "/"
 	}
-	fd.WriteString(np)
+	fd.WriteRoute(np)
 
 	qv := r.URL.Query()
 	for k, vv := range qv {

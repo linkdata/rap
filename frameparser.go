@@ -101,6 +101,16 @@ func (fp *FrameParser) ReadString() (s string, isNull bool) {
 	return
 }
 
+// ReadRoute reads a RAP route value.
+func (fp *FrameParser) ReadRoute() (s string, isNull bool) {
+	routeIndex := fp.ReadLen()
+	if routeIndex == 0 {
+		return fp.ReadString()
+	}
+	// TODO: registered routes support
+	panic("routes not implemented")
+}
+
 var zeroHeaderValue = []string{"0"}
 
 // ProxyBody sends the remaining data from the FrameReader to a io.Writer
@@ -116,7 +126,7 @@ func (fp *FrameParser) ProxyBody(w io.Writer) (err error) {
 func (fp *FrameParser) ReadRequest() (req *http.Request, err error) {
 	methodString, _ := fp.ReadString()
 	schemeString, _ := fp.ReadString()
-	urlString, _ := fp.ReadString()
+	urlString, _ := fp.ReadRoute()
 
 	u, err := url.Parse(urlString)
 	if err != nil {

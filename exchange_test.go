@@ -349,9 +349,9 @@ func Test_Exchange_StartAndRelease_invalid_url_in_request_record(t *testing.T) {
 	fd.WriteHeader(MaxExchangeID)
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
-	fd.WriteStringNull()  // method
-	fd.WriteStringNull()  // scheme
-	fd.WriteString(":a:") // illegal url
+	fd.WriteStringNull() // method
+	fd.WriteStringNull() // scheme
+	fd.WriteRoute(":a:") // illegal url
 	et.SubmitFrame(fd)
 	err := et.Exchange.ServeHTTP(et)
 	assert.Error(t, err)

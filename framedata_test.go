@@ -43,6 +43,23 @@ func Test_FrameData_String(t *testing.T) {
 	assert.Equal(t, "[FrameData nil]", fd.String())
 }
 
+func Test_FrameData_WriteRoute(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0)
+	assert.NoError(t, fd.WriteRoute("/"))
+	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (7)] 00012f]", fd.String())
+}
+
+func Test_FrameData_WriteRegisteredRoute(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0)
+	assert.NoError(t, fd.WriteRegisteredRoute(1, []string{"foo", "bar"}))
+	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (13)] 0103666f6f03626172]", fd.String())
+	assert.Equal(t, ErrInvalidRouteIndex, fd.WriteRegisteredRoute(0, []string{}))
+}
+
+// WriteRegisteredRoute
+
 type shortWriter struct {
 	w io.Writer
 	n int64
