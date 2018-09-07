@@ -2,7 +2,6 @@ package rap
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // ExchangeID identifies a in-progress request/response.
@@ -237,7 +238,7 @@ func (e *Exchange) readFrame() (err error) {
 			e.fp = NewFrameParser(e.fdr)
 			e.writeAckFrame()
 		} else {
-			err = io.EOF
+			err = errors.WithStack(io.EOF)
 		}
 	case <-e.readDeadline.wait():
 		err = timeoutError{}
@@ -278,7 +279,7 @@ func (e *Exchange) WriteStart() error {
 
 func (e *Exchange) writeStart() error {
 	if e.hasRemoteClosed() {
-		return io.EOF
+		return errors.WithStack(io.EOF)
 	}
 	select {
 	case <-e.localClosed:
@@ -324,7 +325,7 @@ func (e *Exchange) read(p []byte) (n int, err error) {
 // Used when copying data from a HTTP body to a RAP connection.
 func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 	if r == nil {
-		return 0, io.EOF
+		return 0, errors.WithStack(io.EOF)
 	}
 	for err == nil {
 		var m int64
@@ -332,7 +333,7 @@ func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 		n += m
 	}
 	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
-	if err == io.EOF {
+	if errors.Cause(err) == io.EOF {
 		err = nil
 	}
 	return
@@ -345,7 +346,7 @@ func (e *Exchange) readFrom(r io.Reader) (n int64, err error) {
 		n += m
 	}
 	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
-	if err == io.EOF {
+	if errors.Cause(err) == io.EOF {
 		err = nil
 	}
 	return
@@ -422,7 +423,7 @@ func (e *Exchange) WriteTo(w io.Writer) (n int64, err error) {
 		m, err = e.writeToHelper(w)
 		n += m
 	}
-	if err == io.EOF {
+	if errors.Cause(err) == io.EOF {
 		err = nil
 	}
 	return
@@ -527,7 +528,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 			err = timeoutError{}
 		default:
 			if e.hasRemoteClosed() {
-				err = io.EOF
+				err = errors.WithStack(io.EOF)
 			} else if e.getSendWindow() > 0 {
 				// if the send window allows, go ahead and send it
 				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
