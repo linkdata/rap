@@ -21,6 +21,7 @@ class record {
     tag_http_response = tag('\x04'),
     tag_service_pause = tag('\x05'),
     tag_service_resume = tag('\x06'),
+    tag_hijacked = tag('\x07'),
     tag_user_first = tag('\x80'),
     tag_invalid = tag(0)
   } tags;
