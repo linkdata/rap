@@ -17,6 +17,7 @@ class request : public record {
   request(reader &r)
       : record(r.frame()),
         method_(r.read_text()),
+        scheme_(r.read_text()),
         path_(r.read_text()),
         query_(r),
         headers_(r),
@@ -29,6 +30,7 @@ class request : public record {
   }
 
   text method() const { return method_; }
+  text scheme() const { return scheme_; }
   text path() const { return path_; }
   const rap::query &query() const { return query_; }
   const rap::headers &headers() const { return headers_; }
@@ -41,6 +43,8 @@ class request : public record {
     assert(content_length() >= -1);
     method().render(out);
     out += ' ';
+    scheme().render(out);
+    out += ':';
     path().render(out);
     query().render(out);
     out += '\n';
@@ -63,6 +67,7 @@ class request : public record {
 
  private:
   text method_;
+  text scheme_;
   text path_;
   rap::query query_;
   rap::headers headers_;
