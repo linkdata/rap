@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -97,6 +98,9 @@ func (ct *connTester) Start() {
 		wg.Done()
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
+			if ct.expectServerError != reflect.TypeOf(err) {
+				log.Print("expected error of type ", ct.expectServerError.Name(), " got ", err)
+			}
 			assert.Equal(ct.t, ct.expectServerError, reflect.TypeOf(err))
 			assert.NotNil(ct.t, err)
 		} else {
