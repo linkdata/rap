@@ -39,24 +39,27 @@ type exchangeTesterWriter struct {
 	lastWritten FrameData
 	closeCh     chan struct{}
 	writeClosed int32
+	timeoutErr  error
 }
 
 func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 	etw := &exchangeTesterWriter{
-		et:      et,
-		writeCh: make(chan FrameData),
-		closeCh: make(chan struct{}),
+		et:         et,
+		writeCh:    make(chan FrameData),
+		closeCh:    make(chan struct{}),
+		timeoutErr: errors.New("newExchangeTesterWriter timeout"),
 	}
 
 	go func() {
 		timeout := time.NewTimer(time.Second * 10)
+		defer timeout.Stop()
 		for {
 			var fd FrameData
 			select {
 			case fd = <-etw.writeCh:
-			case <-etw.closeCh:
 			case <-timeout.C:
-				assert.Fail(etw.et.t, "newExchangeTesterWriter timeout waiting for data")
+				log.Printf("%+v", etw.timeoutErr)
+				assert.Fail(etw.et.t, "timeout")
 			}
 			if fd == nil {
 				break
@@ -80,7 +83,7 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 				}
 			}
 		}
-		etw.Close()
+		close(etw.closeCh)
 	}()
 
 	return etw
@@ -101,12 +104,17 @@ func (etw *exchangeTesterWriter) CloseWrite() {
 }
 
 func (etw *exchangeTesterWriter) Close() {
+	etw.CloseWrite()
+}
+
+func (etw *exchangeTesterWriter) WaitForClose() {
+	timer := time.NewTimer(time.Second * 10)
+	defer timer.Stop()
 	select {
 	case <-etw.closeCh:
-	default:
-		close(etw.closeCh)
+	case <-timer.C:
+		assert.Fail(etw.et.t, "exchangeTesterWriter timeout waiting for close")
 	}
-	etw.CloseWrite()
 }
 
 func (etw *exchangeTesterWriter) ExchangeWrite(fd FrameData) error {
@@ -231,7 +239,8 @@ func (et *exchangeTester) ExchangeAbortChannel() <-chan struct{} {
 func (et *exchangeTester) Close() {
 	et.Exchange.Close()
 	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
-		etw.Close()
+		etw.CloseWrite()
+		etw.WaitForClose()
 	}
 }
 
@@ -786,6 +795,7 @@ func Test_Exchange_Stop(t *testing.T) {
 
 func Test_Exchange_Serve(t *testing.T) {
 	et := newExchangeTester(t)
+	defer et.Close()
 	go et.Exchange.ServeHTTP(et)
 	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
 	et.SendFinal()
