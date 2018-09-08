@@ -114,7 +114,7 @@ releaseOldConn:
 	// Grab all available exchanges, should be two conn's worth available eventually
 	e = c.NewExchange()
 	assert.NotNil(t, e)
-	timer := time.NewTimer(time.Second)
+	timer := time.NewTimer(time.Minute)
 	defer timer.Stop()
 	for len(grabbed) < int(MaxExchangeID)*2 {
 		if e != nil {
