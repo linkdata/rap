@@ -104,7 +104,8 @@ func (ct *connTester) Start() {
 			assert.NotNil(ct.t, err)
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
-				panic(fmt.Sprintf("ct.server.ServeHTTP(ct) premature exit: %v\n", err))
+				log.Println("ct.server.ServeHTTP(ct) premature exit")
+				assert.NoError(ct.t, err)
 			}
 			switch errors.Cause(err) {
 			case nil:
@@ -131,7 +132,8 @@ func (ct *connTester) Start() {
 			assert.Equal(ct.t, ct.expectConnError.Name(), reflect.TypeOf(errors.Cause(err)).Name())
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
-				panic(fmt.Sprintf("ct.conn.ServeHTTP(ct) premature exit: %+v\n", err))
+				log.Println("ct.conn.ServeHTTP(ct) premature exit")
+				assert.NoError(ct.t, err)
 			}
 			if err != nil && !isClosedError(err) {
 				assert.NoError(ct.t, err)
@@ -347,6 +349,7 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
 	ct.expectServerError = reflect.TypeOf((*ProtocolError)(nil))
+	ct.expectConnError = reflect.TypeOf(io.EOF)
 	ct.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(connControlReserved000)
