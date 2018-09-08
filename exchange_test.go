@@ -49,11 +49,14 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 	}
 
 	go func() {
+		timeout := time.NewTimer(time.Second * 10)
 		for {
 			var fd FrameData
 			select {
 			case fd = <-etw.writeCh:
 			case <-etw.closeCh:
+			case <-timeout.C:
+				assert.Fail(etw.et.t, "newExchangeTesterWriter timeout waiting for data")
 			}
 			if fd == nil {
 				break
