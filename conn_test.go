@@ -21,8 +21,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const connTimeout = time.Millisecond * time.Duration(10)
-
 func init() {
 	// limit goroutines to avoid debugger overload
 	if int(MaxExchangeID) > 512 {
@@ -208,7 +206,7 @@ func (ct *connTester) InjectRequestNoErrors(r *http.Request) {
 
 func (ct *connTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
 	w := httptest.NewRecorder()
-	e := ct.conn.NewExchangeWait(connTimeout)
+	e := ct.conn.NewExchangeWait(time.Second * 10)
 	defer e.Close()
 	requestErr = e.WriteRequest(r)
 	_, responseErr = e.ProxyResponse(w)
