@@ -24,7 +24,6 @@ type exchangeTester struct {
 	wg          sync.WaitGroup
 	once        sync.Once
 	releasedCh  chan struct{}
-	writeClosed int32
 	ackFn       func(*Exchange)
 	finFn       func(*Exchange)
 	conn        ExchangeConnection
@@ -39,6 +38,7 @@ type exchangeTesterWriter struct {
 	writeCh     chan FrameData
 	lastWritten FrameData
 	closeCh     chan struct{}
+	writeClosed int32
 }
 
 func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
@@ -50,7 +50,11 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 
 	go func() {
 		for {
-			fd := <-etw.writeCh
+			var fd FrameData
+			select {
+			case fd = <-etw.writeCh:
+			case <-etw.closeCh:
+			}
 			if fd == nil {
 				break
 			}
@@ -73,10 +77,33 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 				}
 			}
 		}
-		close(etw.closeCh)
+		etw.Close()
 	}()
 
 	return etw
+}
+
+func (etw *exchangeTesterWriter) isWriteClosed() bool {
+	return atomic.LoadInt32(&etw.writeClosed) != 0
+}
+
+func (etw *exchangeTesterWriter) closingWrite() bool {
+	return atomic.CompareAndSwapInt32(&etw.writeClosed, 0, 1)
+}
+
+func (etw *exchangeTesterWriter) CloseWrite() {
+	if etw.closingWrite() {
+		close(etw.writeCh)
+	}
+}
+
+func (etw *exchangeTesterWriter) Close() {
+	select {
+	case <-etw.closeCh:
+	default:
+		close(etw.closeCh)
+	}
+	etw.CloseWrite()
 }
 
 func (etw *exchangeTesterWriter) ExchangeWrite(fd FrameData) error {
@@ -136,11 +163,17 @@ func newExchangeTesterUsingClient(t *testing.T, c *Client) *exchangeTester {
 }
 
 func (et *exchangeTester) isWriteClosed() bool {
-	return atomic.LoadInt32(&et.writeClosed) != 0
+	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+		return etw.isWriteClosed()
+	}
+	return false
 }
 
 func (et *exchangeTester) closeWrite() bool {
-	return atomic.CompareAndSwapInt32(&et.writeClosed, 0, 1)
+	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+		return etw.closingWrite()
+	}
+	return false
 }
 
 func (et *exchangeTester) Released() bool {
@@ -155,10 +188,8 @@ func (et *exchangeTester) Released() bool {
 }
 
 func (et *exchangeTester) CloseWrite() {
-	if et.closeWrite() {
-		if etw, ok := et.conn.(*exchangeTesterWriter); ok {
-			close(etw.writeCh)
-		}
+	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+		etw.CloseWrite()
 	}
 }
 
@@ -196,7 +227,9 @@ func (et *exchangeTester) ExchangeAbortChannel() <-chan struct{} {
 
 func (et *exchangeTester) Close() {
 	et.Exchange.Close()
-	et.CloseWrite()
+	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+		etw.Close()
+	}
 }
 
 func (et *exchangeTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
