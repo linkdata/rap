@@ -242,6 +242,7 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 		*fd = (*fd)[:len(*fd)+num]
 		n = int64(num)
 		if err != nil || len(*fd) < FrameHeaderSize {
+			err = errors.WithStack(err)
 			return
 		}
 	}
@@ -256,6 +257,9 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 		num, err = io.ReadFull(r, (*fd)[len(*fd):endIndex])
 		*fd = (*fd)[:len(*fd)+num]
 		n += int64(num)
+		if err != nil {
+			err = errors.WithStack(err)
+		}
 	}
 
 	return

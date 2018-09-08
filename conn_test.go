@@ -106,7 +106,7 @@ func (ct *connTester) Start() {
 			assert.NotNil(ct.t, err)
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
-				panic(fmt.Sprint("ct.server.ServeHTTP(ct) premature exit: ", err))
+				panic(fmt.Sprintf("ct.server.ServeHTTP(ct) premature exit: %v\n", err))
 			}
 			switch errors.Cause(err) {
 			case nil:
@@ -133,7 +133,7 @@ func (ct *connTester) Start() {
 			assert.Equal(ct.t, ct.expectConnError.Name(), reflect.TypeOf(errors.Cause(err)).Name())
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
-				panic(fmt.Sprint("ct.conn.ServeHTTP(ct) premature exit: ", err))
+				panic(fmt.Sprintf("ct.conn.ServeHTTP(ct) premature exit: %+v\n", err))
 			}
 			if err != nil && !isClosedError(err) {
 				assert.NoError(ct.t, err)
