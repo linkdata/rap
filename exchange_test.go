@@ -796,9 +796,15 @@ func Test_Exchange_Stop(t *testing.T) {
 func Test_Exchange_Serve(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
-	go et.Exchange.ServeHTTP(et)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		et.Exchange.ServeHTTP(et)
+		wg.Done()
+	}()
 	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
 	et.SendFinal()
+	wg.Wait()
 }
 
 func Test_Exchange_flowcontrol_errors(t *testing.T) {
