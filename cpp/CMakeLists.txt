@@ -13,6 +13,7 @@ if(WIN32)
 endif()
 
 set(Boost_USE_STATIC_LIBS ON)
+set(Boost_ADDITIONAL_VERSIONS 1.68)
 find_package(Boost REQUIRED COMPONENTS system)
 include_directories(${Boost_INCLUDE_DIRS})
 link_directories(${Boost_LIBRARY_DIRS})
