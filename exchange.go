@@ -182,7 +182,14 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	if fd == nil || fd.Header().IsFinal() {
 		// final frame
 		e.recievedFinal(fd)
-	} else if fd.IsAck() {
+		return
+	}
+
+	if e.hasRemoteClosed() {
+		panic(fmt.Sprint(e, " received frame after final: ", fd))
+	}
+
+	if fd.IsAck() {
 		// ack frame
 		FrameDataFree(fd)
 		select {
