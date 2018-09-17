@@ -48,7 +48,7 @@ func main() {
 	defer hs.Close()
 
 	if *printURL {
-		fmt.Fprintln(os.Stdout, "http://", ln.Addr().String(), "/")
+		fmt.Fprintf(os.Stdout, "http://%s/\n", ln.Addr().String())
 	}
 
 	err = hs.Serve(ln)
