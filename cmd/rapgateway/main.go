@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -12,30 +11,19 @@ import (
 	"github.com/linkdata/rap"
 )
 
-func serveHome(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.Error(w, "Not found.", http.StatusNotFound)
-		return
-	}
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	io.WriteString(w, "<html><body>Echo Server</body></html>")
-}
-
 func main() {
-	rapServer := flag.String("rapserver", "", "the address of the upstream RAP server")
 	listenAddr := flag.String("listen", "127.0.0.1:0", "the address the HTTP server should listen on")
 	printURL := flag.Bool("printurl", false, "print the listen URL on stdout")
 
 	flag.Parse()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", serveHome)
+	args := flag.Args()
 
-	c := rap.NewClient(*rapServer)
+	if len(args) < 1 {
+		log.Fatal("missing required argument: address:port of upstream RAP server")
+	}
+
+	c := rap.NewClient(args[0])
 	defer c.Close()
 
 	ln, err := net.Listen("tcp", *listenAddr)
