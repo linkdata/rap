@@ -2,10 +2,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/linkdata/rap"
 )
@@ -26,6 +28,7 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 func main() {
 	rapServer := flag.String("rapserver", "", "the address of the upstream RAP server")
 	listenAddr := flag.String("listen", "127.0.0.1:0", "the address the HTTP server should listen on")
+	printURL := flag.Bool("printurl", false, "print the listen URL on stdout")
 
 	flag.Parse()
 
@@ -44,7 +47,10 @@ func main() {
 	}
 	defer hs.Close()
 
-	log.Print("listening on ", ln.Addr().String())
+	if *printURL {
+		fmt.Fprintln(os.Stdout, "http://", ln.Addr().String(), "/")
+	}
+
 	err = hs.Serve(ln)
 	if err != nil {
 		log.Fatalln(err)
