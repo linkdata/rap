@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,4 +217,31 @@ func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
 
 	ts := httptest.NewServer(c)
 	defer ts.Close()
+}
+
+func Test_Client_parallel_queries(t *testing.T) {
+	s := &Server{
+		Addr: srvAddr,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+		}),
+	}
+	ln, lnerr := s.Listen(srvAddr)
+	assert.NoError(t, lnerr)
+	defer s.Close()
+	go s.Serve(ln)
+
+	c := NewClient(s.Addr)
+	defer c.Close()
+	wg := sync.WaitGroup{}
+	for i := 0; i < int(MaxExchangeID*2); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rr := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/", nil)
+			c.ServeHTTP(rr, r)
+		}()
+	}
+	wg.Wait()
 }
