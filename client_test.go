@@ -222,6 +222,10 @@ func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
 }
 
 func Test_Client_parallel_queries(t *testing.T) {
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
+
 	// race detector limit is 8192 goroutines
 	parallelism := int32((8192 - runtime.NumGoroutine()) / 3)
 	factor := int32(MaxExchangeID*4) / parallelism
@@ -229,7 +233,9 @@ func Test_Client_parallel_queries(t *testing.T) {
 	serveCount := int32(0)
 
 	s := &Server{
-		Addr: srvAddr,
+		Addr:         srvAddr,
+		ReadTimeout:  time.Second * 5,
+		WriteTimeout: time.Second * 5,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&serveCount, 1)
 			w.WriteHeader(200)
