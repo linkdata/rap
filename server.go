@@ -16,9 +16,11 @@ var ErrServerClosed = errors.New("rap: Server closed")
 
 // Server listens for incoming RAP connections and creates Conn's for them.
 type Server struct {
-	Addr           string       // TCP address to listen on, ":10111" if empty
-	Handler        http.Handler // HTTP handler to invoke
-	MaxConnections int          // maximum number of RAP Conn's to allow
+	Addr           string        // TCP address to listen on, ":10111" if empty
+	Handler        http.Handler  // HTTP handler to invoke
+	MaxConnections int           // maximum number of RAP Conn's to allow
+	ReadTimeout    time.Duration // read timeout (reading the request)
+	WriteTimeout   time.Duration // write timeout (writing the response)
 	listeners      map[net.Listener]struct{}
 	bytesWritten   int64
 	bytesRead      int64
@@ -135,6 +137,8 @@ func (srv *Server) Serve(l net.Listener) error {
 		go func(rwc io.ReadWriteCloser) {
 			conn := NewConn(rwc)
 			conn.StatsCollector = srv
+			conn.ReadTimeout = srv.ReadTimeout
+			conn.WriteTimeout = srv.WriteTimeout
 			srv.trackConn(conn)
 			if err := conn.ServeHTTP(srv.Handler); err != nil {
 				srv.serveErrorsMu.Lock()
