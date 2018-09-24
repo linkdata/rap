@@ -821,10 +821,15 @@ func Test_Exchange_flowcontrol_errors(t *testing.T) {
 	}
 	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, FrameMaxPayloadSize*(MaxSendWindowSize+1)))))
 	assert.Error(t, err)
-	nerr, ok := err.(net.Error)
+	nerr, ok := errors.Cause(err).(net.Error)
 	assert.True(t, ok)
 	if ok {
-		assert.True(t, nerr.Timeout())
+		if !nerr.Timeout() {
+			assert.NoError(t, nerr)
+		}
+	} else {
+		// expected a net.Error
+		assert.NoError(t, err)
 	}
 	assert.Zero(t, len(et.Exchange.ackCh))
 	assert.Zero(t, et.Exchange.getSendWindow())
