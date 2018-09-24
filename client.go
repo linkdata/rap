@@ -33,8 +33,9 @@ type Client struct {
 // connection will be made immediately.
 func NewClient(addr string) *Client {
 	return &Client{
-		Addr:  addr,
-		conns: make([]*Conn, 0),
+		Addr:        addr,
+		DialTimeout: time.Second * 60,
+		conns:       make([]*Conn, 0),
 	}
 }
 
@@ -147,7 +148,7 @@ func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
 			}
 		}
 		// grab an exchange before we publish the new conn
-		if e = bestConn.NewExchangeWait(time.Millisecond * 100); e != nil {
+		if e = bestConn.NewExchangeWait(c.DialTimeout); e != nil {
 			c.setConn(bestConn)
 		}
 	}
