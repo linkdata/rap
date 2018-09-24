@@ -242,8 +242,9 @@ func Test_Conn_exchanges_exhausted(t *testing.T) {
 		if e := ct.conn.NewExchange(); e != nil {
 			if firstExchange == nil {
 				firstExchange = e
+			} else {
+				defer e.Close()
 			}
-			defer e.Close()
 		} else {
 			break
 		}
