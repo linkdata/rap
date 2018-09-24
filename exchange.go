@@ -370,6 +370,9 @@ func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 	if err = e.writeStart(); err == nil {
 		maxCount := e.fdw.Available()
 		if count, err = r.Read(e.fdw[len(e.fdw) : len(e.fdw)+maxCount]); count > 0 {
+			if err != nil {
+				err = errors.WithStack(err)
+			}
 			e.fdw.Header().SetBody()
 			n += int64(count)
 			e.fdw = e.fdw[:len(e.fdw)+count]
@@ -678,7 +681,9 @@ func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 	if err = e.WriteStart(); err == nil {
 		if err = e.fdw.WriteRequest(r); err == nil {
 			if r.ContentLength > 0 {
-				_, err = io.CopyN(e, r.Body, r.ContentLength)
+				if _, err = io.CopyN(e, r.Body, r.ContentLength); err != nil {
+					err = errors.WithStack(err)
+				}
 			} else {
 				_, err = e.ReadFrom(r.Body)
 			}
