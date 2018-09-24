@@ -252,7 +252,7 @@ func (e *Exchange) readFrame() (err error) {
 	case <-e.conn.ExchangeAbortChannel():
 		err = ErrServerClosed
 	case <-e.localClosed:
-		err = io.ErrClosedPipe
+		err = errors.WithStack(io.ErrClosedPipe)
 	}
 
 	return
@@ -290,7 +290,7 @@ func (e *Exchange) writeStart() error {
 	}
 	select {
 	case <-e.localClosed:
-		return io.ErrClosedPipe
+		return errors.WithStack(io.ErrClosedPipe)
 	case <-e.writeDeadline.wait():
 		return errors.WithStack(timeoutError{})
 	default:
@@ -531,7 +531,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		case <-e.ackCh:
 			e.consumeAck()
 		case <-e.localClosed:
-			err = io.ErrClosedPipe
+			err = errors.WithStack(io.ErrClosedPipe)
 		case <-e.conn.ExchangeAbortChannel():
 			err = ErrServerClosed
 		case <-e.writeDeadline.wait():
@@ -551,7 +551,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 				case <-e.ackCh:
 					e.consumeAck()
 				case <-e.localClosed:
-					err = io.ErrClosedPipe
+					err = errors.WithStack(io.ErrClosedPipe)
 				case <-e.conn.ExchangeAbortChannel():
 					err = ErrServerClosed
 				case <-e.writeDeadline.wait():
@@ -651,7 +651,7 @@ func (e *Exchange) close(notIfHijacked bool) (err error) {
 	select {
 	case <-e.localClosed:
 		// already closed
-		return io.ErrClosedPipe
+		return errors.WithStack(io.ErrClosedPipe)
 	default:
 		if notIfHijacked && e.isHijacked {
 			return nil
@@ -752,29 +752,6 @@ func (e *Exchange) writeResponseData(code int, contentLength int64, header http.
 	return
 }
 
-// RepeatServeHTTP repeatedly calls ServeHTTP() until an error occurs
-func (e *Exchange) RepeatServeHTTP(h http.Handler) (err error) {
-	recycleCh := make(chan struct{})
-	e.OnRecycle(func(e *Exchange) {
-		select {
-		case recycleCh <- struct{}{}:
-		default:
-		}
-	})
-	defer e.OnRecycle(nil)
-	for err == nil {
-		err = e.ServeHTTP(h)
-		if err == nil {
-			select {
-			case <-recycleCh:
-			case <-e.conn.ExchangeAbortChannel():
-				err = ErrServerClosed
-			}
-		}
-	}
-	return
-}
-
 // ServeHTTP waits for a start frame and then invokes the given http.Handler.
 func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 	defer e.close(true)
@@ -838,7 +815,7 @@ func (e *Exchange) RemoteAddr() net.Addr {
 // SetReadDeadline and SetWriteDeadline.
 func (e *Exchange) SetDeadline(t time.Time) error {
 	if e.hasLocalClosed() {
-		return io.ErrClosedPipe
+		return errors.WithStack(io.ErrClosedPipe)
 	}
 	e.readDeadline.set(t)
 	e.writeDeadline.set(t)
@@ -850,7 +827,7 @@ func (e *Exchange) SetDeadline(t time.Time) error {
 // A zero value for t means Read will not time out.
 func (e *Exchange) SetReadDeadline(t time.Time) error {
 	if e.hasLocalClosed() {
-		return io.ErrClosedPipe
+		return errors.WithStack(io.ErrClosedPipe)
 	}
 	e.readDeadline.set(t)
 	return nil
@@ -863,7 +840,7 @@ func (e *Exchange) SetReadDeadline(t time.Time) error {
 // A zero value for t means Write will not time out.
 func (e *Exchange) SetWriteDeadline(t time.Time) error {
 	if e.hasLocalClosed() {
-		return io.ErrClosedPipe
+		return errors.WithStack(io.ErrClosedPipe)
 	}
 	e.writeDeadline.set(t)
 	return nil
