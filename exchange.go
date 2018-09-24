@@ -248,7 +248,7 @@ func (e *Exchange) readFrame() (err error) {
 			err = errors.WithStack(io.EOF)
 		}
 	case <-e.readDeadline.wait():
-		err = timeoutError{}
+		err = errors.WithStack(timeoutError{})
 	case <-e.conn.ExchangeAbortChannel():
 		err = ErrServerClosed
 	case <-e.localClosed:
@@ -292,7 +292,7 @@ func (e *Exchange) writeStart() error {
 	case <-e.localClosed:
 		return io.ErrClosedPipe
 	case <-e.writeDeadline.wait():
-		return timeoutError{}
+		return errors.WithStack(timeoutError{})
 	default:
 		if e.fdw == nil {
 			// log.Print("Exchange.writeStart() (new fd)", e)
@@ -535,7 +535,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		case <-e.conn.ExchangeAbortChannel():
 			err = ErrServerClosed
 		case <-e.writeDeadline.wait():
-			err = timeoutError{}
+			err = errors.WithStack(timeoutError{})
 		default:
 			if e.hasRemoteClosed() {
 				err = errors.WithStack(io.EOF)
@@ -555,7 +555,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 				case <-e.conn.ExchangeAbortChannel():
 					err = ErrServerClosed
 				case <-e.writeDeadline.wait():
-					err = timeoutError{}
+					err = errors.WithStack(timeoutError{})
 				}
 			}
 		}
