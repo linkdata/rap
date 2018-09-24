@@ -441,7 +441,7 @@ func testConcurrentMethods(t *testing.T, c1, c2 net.Conn) {
 // checkForTimeoutError checks that the error satisfies the Error interface
 // and that Timeout returns true.
 func checkForTimeoutError(t *testing.T, err error) {
-	if nerr, ok := err.(net.Error); ok {
+	if nerr, ok := errors.Cause(err).(net.Error); ok {
 		if !nerr.Timeout() {
 			t.Errorf("err.Timeout() = false, want true")
 		}

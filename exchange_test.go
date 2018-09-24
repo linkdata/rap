@@ -914,7 +914,7 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 	c2.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
 	n, err := c2.Write([]byte{1})
 	assert.Zero(t, n)
-	assert.Equal(t, timeoutError{}, err)
+	assert.Equal(t, timeoutError{}, errors.Cause(err))
 	c2.SetWriteDeadline(time.Time{})
 	// Read a byte from c1, should free up window space
 	b1 := make([]byte, 1)
