@@ -18,6 +18,8 @@ import (
 type Client struct {
 	Addr         string        // where to connect
 	DialTimeout  time.Duration // dialing timeout
+	ReadTimeout  time.Duration // read timeout (reading the request)
+	WriteTimeout time.Duration // write timeout (writing the response)
 	conn         *Conn         // the current active connection (atomic access only)
 	mu           sync.Mutex    // protects those below
 	lastError    error
@@ -183,7 +185,17 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var statusCode int
 
+	if c.ReadTimeout != 0 {
+		e.SetDeadline(time.Now().Add(c.ReadTimeout))
+	}
+
 	requestErr = e.WriteRequest(r)
+
+	if c.WriteTimeout != 0 {
+		e.SetDeadline(time.Now().Add(c.WriteTimeout))
+	} else {
+		e.SetDeadline(time.Time{})
+	}
 
 	// request write may have been interrupted by server, for example
 	// by sending a 4xx in repsonse to a too-long request or a timeout
