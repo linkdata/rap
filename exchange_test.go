@@ -471,7 +471,7 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	// Flushing should fail since final is sent
 	et.Exchange.write(make([]byte, et.Exchange.Available()))
 	err := et.Exchange.WriteByte(0x01)
-	assert.Equal(t, io.ErrClosedPipe, err)
+	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
 	assert.True(t, et.Exchange.remoteClosing())
 	et.Exchange.recycle()
 }
@@ -578,7 +578,7 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 	assert.NoError(t, err)
 	et.Exchange.Close()
 	n, err = et.Exchange.ReadFrom(&buf)
-	assert.Error(t, io.ErrClosedPipe, err)
+	assert.Error(t, io.ErrClosedPipe, errors.Cause(err))
 }
 
 func Test_Exchange_WriteTo(t *testing.T) {
@@ -621,7 +621,7 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	assert.True(t, et.Exchange.hasLocalClosed())
 	assert.False(t, et.Exchange.hasRemoteClosed())
 	err = et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", nil))
-	assert.Equal(t, io.ErrClosedPipe, err)
+	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
 }
 
 func Test_Exchange_WriteResponse(t *testing.T) {
@@ -640,7 +640,7 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 	defer et.Close()
 	close(et.Exchange.localClosed)
 	err := et.Exchange.Close()
-	assert.Equal(t, io.ErrClosedPipe, err)
+	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
 
 	et = newExchangeTester(t)
 	defer et.Close()
@@ -842,9 +842,9 @@ func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
 	et.finFn = func(e *Exchange) {}
 	// et.Exchange.started()
 	et.Exchange.Close()
-	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetDeadline(time.Now()))
-	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetReadDeadline(time.Now()))
-	assert.Equal(t, io.ErrClosedPipe, et.Exchange.SetWriteDeadline(time.Now()))
+	assert.Equal(t, io.ErrClosedPipe, errors.Cause(et.Exchange.SetDeadline(time.Now())))
+	assert.Equal(t, io.ErrClosedPipe, errors.Cause(et.Exchange.SetReadDeadline(time.Now())))
+	assert.Equal(t, io.ErrClosedPipe, errors.Cause(et.Exchange.SetWriteDeadline(time.Now())))
 	assert.True(t, et.Exchange.remoteClosing())
 	et.Exchange.recycle()
 }
