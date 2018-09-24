@@ -241,6 +241,8 @@ func Test_Client_parallel_queries(t *testing.T) {
 	go s.Serve(ln)
 
 	c := NewClient(s.Addr)
+	c.ReadTimeout = time.Second * 10
+	c.WriteTimeout = time.Second * 10
 	defer c.Close()
 	wg := sync.WaitGroup{}
 	for i := parallelism; i > 0; i-- {
