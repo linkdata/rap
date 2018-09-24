@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -197,6 +198,19 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		e := c.getExchangeForID(id)
 		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow(), "+", len(e.ackCh))
 
+		if fd.Header().HasHead() {
+			if c.ReadTimeout != 0 {
+				e.SetReadDeadline(time.Now().Add(c.ReadTimeout))
+			} else {
+				e.SetReadDeadline(time.Time{})
+			}
+			if c.WriteTimeout != 0 {
+				e.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
+			} else {
+				e.SetWriteDeadline(time.Time{})
+			}
+		}
+
 		e.SubmitFrame(fd)
 	}
 	return
@@ -210,10 +224,32 @@ func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
 		e = NewExchange(c, id)
 		c.exchangeLookup[id] = e
 		if c.Handler != nil {
-			go e.RepeatServeHTTP(c.Handler)
+			go c.RepeatServeHTTP(e)
 		}
 	}
 	return
+}
+
+// RepeatServeHTTP repeatedly calls Exchange.ServeHTTP() until an error occurs
+func (c *Conn) RepeatServeHTTP(e *Exchange) (err error) {
+	recycleCh := make(chan struct{}, 1)
+	e.OnRecycle(func(e *Exchange) {
+		recycleCh <- struct{}{}
+	})
+	defer e.OnRecycle(nil)
+	for {
+		err = e.ServeHTTP(c.Handler)
+		if err != nil {
+			if !isClosedError(err) {
+				log.Printf("rap.Conn.RepeatServeHTTP(): error: %+v\nexchange: %+v\n", err, e)
+			}
+		}
+		select {
+		case <-recycleCh:
+		case <-c.doneChan:
+			return
+		}
+	}
 }
 
 type flusher interface {
