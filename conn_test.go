@@ -21,13 +21,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func init() {
-	// limit goroutines to avoid debugger overload
-	if int(MaxExchangeID) > 512 {
-		MaxExchangeID = ExchangeID(512)
-	}
-}
-
 type rwcPipe struct {
 	io.ReadCloser
 	io.WriteCloser
