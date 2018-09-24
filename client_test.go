@@ -6,7 +6,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -220,9 +222,16 @@ func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
 }
 
 func Test_Client_parallel_queries(t *testing.T) {
+	// race detector limit is 8192 goroutines
+	parallelism := int32((8192 - runtime.NumGoroutine()) / 3)
+	factor := int32(MaxExchangeID*4) / parallelism
+	queryCount := parallelism * factor
+	serveCount := int32(0)
+
 	s := &Server{
 		Addr: srvAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&serveCount, 1)
 			w.WriteHeader(200)
 		}),
 	}
@@ -234,14 +243,17 @@ func Test_Client_parallel_queries(t *testing.T) {
 	c := NewClient(s.Addr)
 	defer c.Close()
 	wg := sync.WaitGroup{}
-	for i := 0; i < int(MaxExchangeID*2); i++ {
+	for i := parallelism; i > 0; i-- {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rr := httptest.NewRecorder()
-			r := httptest.NewRequest("GET", "/", nil)
-			c.ServeHTTP(rr, r)
+			for i := factor; i > 0; i-- {
+				rr := httptest.NewRecorder()
+				r := httptest.NewRequest("GET", "/", nil)
+				c.ServeHTTP(rr, r)
+			}
 		}()
 	}
 	wg.Wait()
+	assert.Equal(t, queryCount, serveCount)
 }
