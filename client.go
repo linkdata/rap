@@ -115,6 +115,8 @@ func (c *Client) NewExchange() (e *Exchange) {
 		e = conn.NewExchange()
 	}
 	if e == nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 		bestConn := c.selectBestConn()
 		if bestConn != nil {
 			if e = bestConn.NewExchange(); e != nil {
