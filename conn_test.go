@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,10 +63,10 @@ type connTester struct {
 	server                 *Conn
 	isClosed               int32
 	injectFramesAtClose    bool
-	expectServerError      reflect.Type
-	expectConnError        reflect.Type
-	expectConnCloseError   reflect.Type
-	expectServerCloseError reflect.Type
+	expectServerError      error
+	expectConnError        error
+	expectConnCloseError   error
+	expectServerCloseError error
 	serverDone             chan struct{}
 	connDone               chan struct{}
 }
@@ -90,10 +89,7 @@ func (ct *connTester) Start() {
 		wg.Done()
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
-			if ct.expectServerError.Name() != reflect.TypeOf(errors.Cause(err)).Name() {
-				log.Print("expected error of type ", ct.expectServerError.Name(), " got ", err)
-			}
-			assert.Equal(ct.t, ct.expectServerError.Name(), reflect.TypeOf(errors.Cause(err)).Name())
+			assert.Equal(ct.t, ct.expectServerError, errors.Cause(err))
 			assert.NotNil(ct.t, err)
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
@@ -119,10 +115,7 @@ func (ct *connTester) Start() {
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.NotNil(ct.t, err)
-			if ct.expectConnError.Name() != reflect.TypeOf(errors.Cause(err)).Name() {
-				assert.Nil(ct.t, err)
-			}
-			assert.Equal(ct.t, ct.expectConnError.Name(), reflect.TypeOf(errors.Cause(err)).Name())
+			assert.Equal(ct.t, ct.expectConnError, errors.Cause(err))
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				log.Println("ct.conn.ServeHTTP(ct) premature exit")
@@ -151,14 +144,14 @@ func (ct *connTester) Close() {
 		}
 		err := ct.a.WriteCloser.Close()
 		if ct.expectConnCloseError != nil {
-			assert.Equal(ct.t, ct.expectConnCloseError, reflect.TypeOf(err))
+			assert.Equal(ct.t, ct.expectConnCloseError, errors.Cause(err))
 			assert.Error(ct.t, err)
 		} else {
 			assert.NoError(ct.t, err)
 		}
 		err = ct.b.WriteCloser.Close()
 		if ct.expectServerCloseError != nil {
-			assert.Equal(ct.t, ct.expectServerCloseError, reflect.TypeOf(err))
+			assert.Equal(ct.t, ct.expectServerCloseError, errors.Cause(err))
 			assert.Error(ct.t, err)
 		} else {
 			assert.NoError(ct.t, err)
@@ -226,7 +219,7 @@ func Test_Conn_String(t *testing.T) {
 	}
 	ct := newConnTester(t)
 	defer ct.Close()
-	expected := fmt.Sprintf("[Conn %v]", ct.conn.identity)
+	expected := fmt.Sprintf("[Conn %x]", ct.conn.serialNumber)
 	assert.Equal(t, expected, ct.conn.String())
 	assert.Equal(t, int(MaxExchangeID)+1, len(ct.conn.exchangeLookup))
 	assert.Equal(t, int(MaxExchangeID), cap(ct.conn.exchanges))
@@ -330,20 +323,21 @@ func Test_Conn_conncontrol_ping_pong(t *testing.T) {
 func Test_Conn_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
-	ct.expectServerError = reflect.TypeOf(io.ErrClosedPipe)
+	//ct.expectServerError = io.ErrClosedPipe
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(ConnControlPing)
 	fd.WriteInt64(time.Now().UnixNano())
 	fd.SetSizeValue()
 	close(ct.server.doneChan)
-	connControlPingHandler(ct.server, fd)
+	err := connControlPingHandler(ct.server, fd)
+	assert.Equal(t, serverClosedError{}, errors.Cause(err))
 }
 
 func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
-	ct.expectServerError = reflect.TypeOf((*ProtocolError)(nil))
-	ct.expectConnError = reflect.TypeOf(io.EOF)
+	ct.expectServerError = ProtocolError{}
+	ct.expectConnError = io.EOF
 	ct.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(connControlReserved000)
@@ -353,8 +347,8 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 func Test_Conn_conncontrol_panic(t *testing.T) {
 	ct := newConnTesterNotStarted(t)
 	defer ct.Close()
-	ct.expectConnError = reflect.TypeOf(io.EOF)
-	ct.expectServerError = reflect.TypeOf((*PanicError)(nil))
+	ct.expectConnError = io.EOF
+	ct.expectServerError = PanicError{}
 	ct.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(ConnControlPanic)
@@ -371,8 +365,8 @@ func Test_Conn_ServeHTTP_write_error(t *testing.T) {
 		failOnWrite: true,
 		WriteCloser: ct.a.WriteCloser,
 	}
-	ct.expectConnError = reflect.TypeOf(errFailWriter)
-	ct.expectServerError = reflect.TypeOf(io.ErrUnexpectedEOF)
+	ct.expectConnError = errFailWriter
+	ct.expectServerError = io.ErrUnexpectedEOF
 	ct.Start()
 	ct.conn.Ping()
 }
@@ -383,20 +377,9 @@ func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
 		failOnClose: true,
 		WriteCloser: ct.a.WriteCloser,
 	}
-	ct.expectConnCloseError = reflect.TypeOf(errFailWriter)
-	ct.expectConnError = reflect.TypeOf(errFailWriter)
+	ct.expectConnCloseError = errFailWriter
+	ct.expectConnError = errFailWriter
 	ct.Start()
 	ct.conn.Ping()
 	ct.Close()
-}
-
-func Test_Conn_stolen_exchange(t *testing.T) {
-	ct := newConnTester(t)
-	ct.expectConnError = reflect.TypeOf(ErrTimeoutReapingExchanges{})
-	ct.conn.ReadTimeout = time.Millisecond * 10
-	ct.injectFramesAtClose = true
-	e := ct.conn.NewExchange()
-	assert.NotNil(t, e)
-	ct.Close()
-	e.Close()
 }

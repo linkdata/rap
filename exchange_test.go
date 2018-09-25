@@ -2,6 +2,7 @@ package rap
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -127,7 +128,7 @@ func (etw *exchangeTesterWriter) ExchangeWrite(fd FrameData) error {
 		select {
 		case etw.writeCh <- fd:
 		case <-etw.closeCh:
-			return ErrServerClosed
+			return serverClosedError{}
 		case <-t.C:
 			log.Print("e: ", etw.et.Exchange)
 			log.Print("fd: ", fd)
@@ -323,7 +324,9 @@ func (fw *failWriter) failError() (err error) {
 
 func Test_Exchange_String(t *testing.T) {
 	e := NewExchange(&exchangeTester{}, 0x1)
-	assert.Equal(t, "[Exchange [ExchangeID 0001] sendW=8 sentC=false recvC=false len(ackCh)=0]", e.String())
+	expected := fmt.Sprintf("[Exchange %v %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
+		e.Serial(), e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
+	assert.Equal(t, expected, e.String())
 }
 
 func Test_Exchange_Release(t *testing.T) {
@@ -331,7 +334,7 @@ func Test_Exchange_Release(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
-	et.Exchange.ServeHTTP(et)
+	et.Exchange.Serve(et)
 	assert.True(t, et.Released())
 }
 
@@ -340,7 +343,7 @@ func Test_Exchange_StartAndRelease_eof_before_starting(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.SendFinal()
-	err := et.Exchange.ServeHTTP(et)
+	err := et.Exchange.Serve(et)
 	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.True(t, et.Released())
 }
@@ -354,7 +357,7 @@ func Test_Exchange_StartAndRelease_empty_frame(t *testing.T) {
 	fd.Header().SetHead()
 	et.SubmitFrame(fd)
 	et.SendFinal()
-	err := et.Exchange.ServeHTTP(et)
+	err := et.Exchange.Serve(et)
 	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.True(t, et.Released())
 }
@@ -370,7 +373,7 @@ func Test_Exchange_StartAndRelease_two_empty_frames(t *testing.T) {
 	fd.Header().SetHead()
 	et.SubmitFrame(fd)
 	et.SendFinal()
-	err := et.Exchange.ServeHTTP(et)
+	err := et.Exchange.Serve(et)
 	assert.Equal(t, io.EOF, errors.Cause(err))
 	assert.True(t, et.Released())
 }
@@ -384,8 +387,9 @@ func Test_Exchange_StartAndRelease_missing_frame_head(t *testing.T) {
 	fd.Header().SetBody()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	et.SubmitFrame(fd)
-	err := et.Exchange.ServeHTTP(et)
-	assert.Equal(t, ErrMissingFrameHead, err)
+	assert.Panics(t, func() { et.Exchange.Serve(et) })
+	//err := et.Exchange.ServeHTTP(et)
+	//assert.Equal(t, ErrMissingFrameHead, err)
 	assert.True(t, et.Released())
 }
 
@@ -401,7 +405,7 @@ func Test_Exchange_StartAndRelease_invalid_url_in_request_record(t *testing.T) {
 	fd.WriteStringNull() // scheme
 	fd.WriteRoute(":a:") // illegal url
 	et.SubmitFrame(fd)
-	err := et.Exchange.ServeHTTP(et)
+	err := et.Exchange.Serve(et)
 	assert.Error(t, err)
 	assert.True(t, et.Released())
 }
@@ -416,7 +420,7 @@ func Test_Exchange_StartAndRelease_incomplete_request_frame(t *testing.T) {
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	et.SubmitFrame(fd)
 	assert.Panics(t, func() {
-		et.Exchange.ServeHTTP(et)
+		et.Exchange.Serve(et)
 	})
 	assert.True(t, et.Released())
 }
@@ -430,7 +434,7 @@ func Test_Exchange_StartAndRelease_illegal_record_type(t *testing.T) {
 	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeUserFirst - 1)
 	et.SubmitFrame(fd)
-	assert.Panics(t, func() { et.Exchange.ServeHTTP(et) })
+	assert.Panics(t, func() { et.Exchange.Serve(et) })
 	assert.True(t, et.Released())
 }
 
@@ -522,7 +526,7 @@ func Test_Exchange_Flush(t *testing.T) {
 	et.Exchange.fdw.Header().SetBody()
 	assert.Equal(t, FrameMaxSize+1, len(et.Exchange.fdw))
 	err = et.Exchange.Flush()
-	assert.Equal(t, ErrFrameTooBig, err)
+	assert.Equal(t, ErrFrameTooBig{}, errors.Cause(err))
 }
 
 func Test_Exchange_Read(t *testing.T) {
@@ -648,7 +652,7 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 	et.Exchange.fdw.Write(make([]byte, FrameMaxSize+1))
 	et.Exchange.fdw.Header().SetBody()
 	err = et.Exchange.Flush()
-	assert.Equal(t, ErrFrameTooBig, err)
+	assert.Equal(t, ErrFrameTooBig{}, errors.Cause(err))
 	err = et.Exchange.Close()
 	assert.NoError(t, err)
 
@@ -771,7 +775,7 @@ func Test_Exchange_ProxyResponse_wrong_record_type(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
 	assert.True(t, et.Exchange.hasRemoteClosed())
-	assert.Equal(t, ErrUnhandledRecordType, err)
+	assert.Equal(t, ErrUnhandledRecordType{}, errors.Cause(err))
 }
 
 func Test_Exchange_Close(t *testing.T) {
@@ -788,7 +792,7 @@ func Test_Exchange_Stop(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.InjectRequest(httptest.NewRequest("GET", "/", nil))
-	assert.NoError(t, et.Exchange.ServeHTTP(et))
+	assert.NoError(t, et.Exchange.Serve(et))
 	assert.NoError(t, et.Exchange.Close())
 	assert.True(t, et.Released())
 }
@@ -799,7 +803,7 @@ func Test_Exchange_Serve(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		et.Exchange.ServeHTTP(et)
+		et.Exchange.Serve(et)
 		wg.Done()
 	}()
 	et.InjectRequest(httptest.NewRequest("GET", "/", nil))

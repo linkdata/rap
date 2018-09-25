@@ -19,28 +19,22 @@ type StatsCollector interface {
 	AddBytesRead(int64)
 }
 
-// ErrTimeoutReapingExchanges indicates an Exchange leak - one of the connections exchanges
-// did not terminate in time.
-var ErrTimeoutReapingExchanges = errors.New("timeout reaping exchanges")
-
 // ErrTimeoutWaitingForReader means the reader timed out when closing the connection.
-var ErrTimeoutWaitingForReader = errors.New("timeout waiting for reader at close")
+type ErrTimeoutWaitingForReader struct{}
+
+func (ErrTimeoutWaitingForReader) Error() string { return "timeout waiting for reader at close" }
 
 // ProtocolError is the error type used for reporting protocol errors,
 // all of which are fatal to a connection.
-type ProtocolError struct {
-	msg string // description of error
-}
+type ProtocolError struct{}
 
-func (e *ProtocolError) Error() string { return e.msg }
+func (e ProtocolError) Error() string { return "protocol error" }
 
 // PanicError is the error type used for reporting peer panic errors,
 // all of which are fatal to a connection.
-type PanicError struct {
-	msg string // description of error
-}
+type PanicError struct{}
 
-func (e *PanicError) Error() string { return e.msg }
+func (e PanicError) Error() string { return "peer panic" }
 
 type connControlHandler func(*Conn, FrameData) error
 
@@ -74,13 +68,13 @@ type Conn struct {
 	latency            int64 // Unix nanoseconds
 	isReadClosed       bool
 	isWriteClosed      bool
-	identity           int64
+	serialNumber       uint32
 }
 
-var identityCounter int64
+var connNextSerialNumber uint32
 
 func (c *Conn) String() string {
-	return fmt.Sprintf("[Conn %v]", c.identity)
+	return fmt.Sprintf("[Conn %x]", c.serialNumber)
 }
 
 // NewConn creates a new Conn and initializes it.
@@ -93,7 +87,7 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
 		doneChan:        make(chan struct{}),
-		identity:        atomic.AddInt64(&identityCounter, 1),
+		serialNumber:    atomic.AddUint32(&connNextSerialNumber, 1),
 	}
 	return c
 }
@@ -103,7 +97,7 @@ func connControlPingHandler(c *Conn, fd FrameData) (err error) {
 	select {
 	case c.writeCh <- fd:
 	case <-c.doneChan:
-		return ErrServerClosed
+		return errors.WithStack(serverClosedError{})
 	}
 	return
 }
@@ -126,12 +120,12 @@ func connControlPanicHandler(c *Conn, fd FrameData) error {
 		fp := NewFrameParser(fd)
 		msg, _ = fp.ReadString()
 	}
-	return &PanicError{msg: msg}
+	return errors.WithStack(errors.WithMessage(PanicError{}, msg))
 }
 
 func connControlReservedHandler(c *Conn, fd FrameData) error {
 	defer FrameDataFree(fd)
-	return &ProtocolError{msg: fmt.Sprintf("unknown conn control frame %v", fd.Header())}
+	return errors.WithStack(errors.WithMessage(ProtocolError{}, fmt.Sprintf("unknown conn control frame %v", fd.Header())))
 }
 
 // Ping sends a ping frame and returns without waiting for response.
@@ -194,8 +188,12 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			continue
 		}
 
-		id := fd.Header().ExchangeID()
-		e := c.getExchangeForID(id)
+		e := c.getExchangeForID(fd.Header().ExchangeID())
+		if e == nil {
+			FrameDataFree(fd)
+			break
+		}
+
 		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow(), "+", len(e.ackCh))
 
 		if fd.Header().HasHead() {
@@ -221,24 +219,29 @@ func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
 	defer c.mu.Unlock()
 	e = c.exchangeLookup[id]
 	if e == nil {
+		select {
+		case <-c.doneChan:
+			return
+		default:
+		}
 		e = NewExchange(c, id)
 		c.exchangeLookup[id] = e
 		if c.Handler != nil {
-			go c.RepeatServeHTTP(e)
+			go c.RepeatServe(e)
 		}
 	}
 	return
 }
 
-// RepeatServeHTTP repeatedly calls Exchange.ServeHTTP() until an error occurs
-func (c *Conn) RepeatServeHTTP(e *Exchange) (err error) {
+// RepeatServe repeatedly calls Exchange.Serve() until an error occurs
+func (c *Conn) RepeatServe(e *Exchange) (err error) {
 	recycleCh := make(chan struct{}, 1)
 	e.OnRecycle(func(e *Exchange) {
 		recycleCh <- struct{}{}
 	})
 	defer e.OnRecycle(nil)
 	for {
-		err = e.ServeHTTP(c.Handler)
+		err = e.Serve(c.Handler)
 		if err != nil {
 			if !isClosedError(err) {
 				log.Printf("rap.Conn.RepeatServeHTTP(): error: %+v\nexchange: %+v\n", err, e)
@@ -270,7 +273,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 
 		select {
 		case <-c.doneChan:
-			return 0, ErrServerClosed
+			return 0, errors.WithStack(serverClosedError{})
 		case fd = <-c.writeCh:
 		default:
 			// no immediately available FrameData, flush the output
@@ -291,7 +294,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 				select {
 				case fd = <-c.writeCh:
 				case <-c.doneChan:
-					err = ErrServerClosed
+					err = errors.WithStack(serverClosedError{})
 				}
 				if fd == nil {
 					// c.writeCh is closed
@@ -375,14 +378,10 @@ func (c *Conn) Close() (err error) {
 		err = c.ReadWriteCloser.Close()
 
 		// Drain the unused exchange channel
-	drain:
-		for {
-			select {
-			case e := <-c.exchanges:
+		for len(c.exchanges) > 0 {
+			if e := <-c.exchanges; e != nil {
 				e.OnRecycle(nil)
 				c.exchangeLookup[e.ID] = nil
-			default:
-				break drain
 			}
 		}
 
@@ -397,6 +396,7 @@ func (c *Conn) Close() (err error) {
 				}
 			}
 		}
+
 	}
 
 	return
@@ -404,7 +404,7 @@ func (c *Conn) Close() (err error) {
 
 func isClosedError(err error) bool {
 	switch errors.Cause(err) {
-	case ErrServerClosed:
+	case serverClosedError{}:
 		return true
 	case io.ErrClosedPipe:
 		return true
@@ -424,6 +424,19 @@ func (c *Conn) NewExchangeWait(d time.Duration) (e *Exchange) {
 		case e = <-c.exchanges:
 		case <-timer.C:
 		}
+	}
+	return
+}
+
+// AvailableExchanges returns the number of Exchanges that are
+// currently able to be returned from NewExchange(). Note that
+// the value may not be exact if there are other goroutines using
+// the Conn.
+func (c *Conn) AvailableExchanges() (exchangeCount int) {
+	exchangeCount = len(c.exchanges)
+	lastID := atomic.LoadInt32(&c.exchangeLastID)
+	if lastID < int32(MaxExchangeID) {
+		exchangeCount += int(int32(MaxExchangeID) - lastID)
 	}
 	return
 }
@@ -456,7 +469,7 @@ func (c *Conn) ExchangeWrite(fd FrameData) error {
 	case c.writeCh <- fd:
 		return nil
 	case <-c.doneChan:
-		return ErrServerClosed
+		return errors.WithStack(serverClosedError{})
 	}
 }
 

@@ -20,14 +20,20 @@ func (e ExchangeID) String() string {
 	return fmt.Sprintf("[ExchangeID %04x]", uint16(e))
 }
 
-var (
-	// ErrTimeoutFlowControl is returned when a the flow control window doesn't reach parity in time.
-	ErrTimeoutFlowControl = errors.New("flow control timeout")
-	// ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
-	ErrUnhandledRecordType = errors.New("unhandled record type")
-	// ErrMissingFrameHead is returned when a frame was expected to have a head part but did not.
-	ErrMissingFrameHead = errors.New("missing frame head")
-)
+// ErrTimeoutFlowControl is returned when a the flow control window doesn't reach parity in time.
+type ErrTimeoutFlowControl struct{}
+
+func (ErrTimeoutFlowControl) Error() string { return "flow control timeout" }
+
+// ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
+type ErrUnhandledRecordType struct{}
+
+func (ErrUnhandledRecordType) Error() string { return "unhandled record type" }
+
+// ErrMissingFrameHead is returned when a frame was expected to have a head part but did not.
+type ErrMissingFrameHead struct{}
+
+func (ErrMissingFrameHead) Error() string { return "missing frame head" }
 
 // ExchangeConnection is the interface that an Exchange needs in order to
 // communicate with the outside world and clean up.
@@ -134,7 +140,10 @@ type Exchange struct {
 	isHijacked    bool               // true if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
+	serialNumber  uint32
 }
+
+var exchangeNextSerialNumber uint32
 
 func (e *Exchange) hasRemoteClosed() bool {
 	return atomic.LoadInt32(&e.remoteClosed) != 0 // isClosedChan(e.remoteClosed)
@@ -152,9 +161,20 @@ func (e *Exchange) hasLocalClosed() bool {
 	return isClosedChan(e.localClosed)
 }
 
+// Serial returns a string identifying the Exchange, containing the
+// owning Conn's serial number, a colon, and this exchange's serial number.
+// Note that the serial number is unrelated to the Exchange ID.
+func (e *Exchange) Serial() string {
+	connSerial := uint32(0)
+	if c := e.getConn(); c != nil {
+		connSerial = c.serialNumber
+	}
+	return fmt.Sprintf("%x:%x", connSerial, e.serialNumber)
+}
+
 func (e *Exchange) String() string {
-	return fmt.Sprintf("[Exchange %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
+	return fmt.Sprintf("[Exchange %v %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
+		e.Serial(), e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
@@ -168,6 +188,7 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 		localClosed:   make(chan struct{}),
 		readDeadline:  makeExchangeDeadline(),
 		writeDeadline: makeExchangeDeadline(),
+		serialNumber:  atomic.AddUint32(&exchangeNextSerialNumber, 1),
 	}
 	return
 }
@@ -212,6 +233,7 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 func (e *Exchange) recievedFinal(fd FrameData) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
+	// log.Print(" FIN ", e, fd)
 	if fd != nil {
 		if fd.Header().HasPayload() {
 			panic(fmt.Sprint("final frame has payload: ", fd))
@@ -221,10 +243,8 @@ func (e *Exchange) recievedFinal(fd FrameData) {
 	if !e.remoteClosing() {
 		panic("received multiple final frames")
 	}
-	select {
-	case <-e.localClosed:
+	if e.hasLocalClosed() {
 		e.recycle()
-	default:
 	}
 }
 
@@ -250,7 +270,7 @@ func (e *Exchange) readFrame() (err error) {
 	case <-e.readDeadline.wait():
 		err = errors.WithStack(timeoutError{})
 	case <-e.conn.ExchangeAbortChannel():
-		err = ErrServerClosed
+		err = errors.WithStack(serverClosedError{})
 	case <-e.localClosed:
 		err = errors.WithStack(io.ErrClosedPipe)
 	}
@@ -507,12 +527,12 @@ func (e *Exchange) flush() (err error) {
 
 func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	if fd.Header().IsFinal() {
-		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", e.getConn(), e, fd))
+		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", e, fd))
 	}
 
 	if !fd.Header().HasPayload() {
 		if len(fd) > FrameHeaderSize {
-			panic(fmt.Sprint("missing payload flag: ", e.getConn(), e, fd))
+			panic(fmt.Sprint("missing payload flag: ", e, fd))
 		}
 		// empty blank frame
 		FrameDataFree(fd)
@@ -520,7 +540,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	}
 
 	if len(fd) > FrameMaxSize {
-		return ErrFrameTooBig
+		return ErrFrameTooBig{}
 	}
 
 	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
@@ -533,7 +553,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		case <-e.localClosed:
 			err = errors.WithStack(io.ErrClosedPipe)
 		case <-e.conn.ExchangeAbortChannel():
-			err = ErrServerClosed
+			err = errors.WithStack(serverClosedError{})
 		case <-e.writeDeadline.wait():
 			err = errors.WithStack(timeoutError{})
 		default:
@@ -553,7 +573,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 				case <-e.localClosed:
 					err = errors.WithStack(io.ErrClosedPipe)
 				case <-e.conn.ExchangeAbortChannel():
-					err = ErrServerClosed
+					err = errors.WithStack(serverClosedError{})
 				case <-e.writeDeadline.wait():
 					err = errors.WithStack(timeoutError{})
 				}
@@ -585,7 +605,7 @@ func (e *Exchange) recycle() {
 	e.rmu.Lock()
 	defer e.rmu.Unlock()
 
-	// log.Print("  RC ", e.getConn(), e)
+	// log.Print("  RC ", e)
 
 	if len(e.fdw) > 0 {
 		panic("still data left in fdw")
@@ -646,7 +666,7 @@ func (e *Exchange) close(notIfHijacked bool) (err error) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 
-	// log.Print("  CL ", e.getConn(), e)
+	// log.Print("  CL ", e)
 
 	select {
 	case <-e.localClosed:
@@ -712,7 +732,7 @@ func (e *Exchange) ProxyResponse(w http.ResponseWriter) (statusCode int, err err
 		case RecordTypeHijacked:
 			statusCode = 101
 		default:
-			return 0, ErrUnhandledRecordType
+			return 0, errors.WithStack(ErrUnhandledRecordType{})
 		}
 	}
 
@@ -752,14 +772,14 @@ func (e *Exchange) writeResponseData(code int, contentLength int64, header http.
 	return
 }
 
-// ServeHTTP waits for a start frame and then invokes the given http.Handler.
-func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
+// Serve waits for a start frame and then invokes the given http.Handler.
+func (e *Exchange) Serve(h http.Handler) (err error) {
 	defer e.close(true)
 	if err = e.LoadFrameReader(); err != nil {
 		return
 	}
 	if !e.fdr.Header().HasHead() {
-		return ErrMissingFrameHead
+		panic(fmt.Sprintf("rap.Exchange.Serve(): missing frame head\n%+v\n%+v\n", e, e.fdr))
 	}
 	switch rt := e.fp.ReadRecordType(); rt {
 	case RecordTypeHTTPRequest:
@@ -767,7 +787,7 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 		if err != nil {
 			return err
 		}
-		// log.Printf("rap.Exchange.ServeHTTP(): %+v\n", req)
+		// log.Printf("rap.Exchange.Serve(): %+v\n", req)
 		req.Body = e
 		h.ServeHTTP(&ResponseWriter{Exchange: e}, req)
 		// if the handler left things in the buffer, flush it
@@ -777,7 +797,7 @@ func (e *Exchange) ServeHTTP(h http.Handler) (err error) {
 	case RecordTypeHijacked:
 		e.isHijacked = true
 	default:
-		panic(fmt.Sprint("unhandled record type ", rt))
+		panic(fmt.Sprint("rap.Exchange.Serve(): unhandled record type ", rt))
 	}
 	return
 }
