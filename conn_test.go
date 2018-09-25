@@ -103,7 +103,7 @@ func (ct *connTester) Start() {
 			switch errors.Cause(err) {
 			case nil:
 			case io.EOF:
-			case ErrServerClosed:
+			case serverClosedError{}:
 			case io.ErrClosedPipe:
 			default:
 				assert.NoError(ct.t, err)
@@ -392,7 +392,7 @@ func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
 
 func Test_Conn_stolen_exchange(t *testing.T) {
 	ct := newConnTester(t)
-	ct.expectConnError = reflect.TypeOf(ErrTimeoutReapingExchanges)
+	ct.expectConnError = reflect.TypeOf(ErrTimeoutReapingExchanges{})
 	ct.conn.ReadTimeout = time.Millisecond * 10
 	ct.injectFramesAtClose = true
 	e := ct.conn.NewExchange()
