@@ -99,7 +99,7 @@ func (st *srvTester) Serve(ln net.Listener) {
 	case <-st.closeCh:
 	default:
 		st.serveErr = st.srv.Serve(ln)
-		assert.Equal(st.t, ErrServerClosed, st.serveErr)
+		assert.Equal(st.t, serverClosedError{}, errors.Cause(st.serveErr))
 	}
 }
 
@@ -135,6 +135,7 @@ func (st *srvTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			assert.Equal(st.t, wanted, n)
 		}
 		w.WriteHeader(400)
+		return
 	}
 	w.WriteHeader(200)
 }
@@ -169,7 +170,7 @@ func Test_Server_ListenAndServe(t *testing.T) {
 	srv := &Server{Addr: "127.0.0.1:"}
 	go func() {
 		err := srv.ListenAndServe()
-		assert.Equal(t, ErrServerClosed, err)
+		assert.Equal(t, serverClosedError{}, errors.Cause(err))
 	}()
 	assert.NoError(t, srv.Close())
 
@@ -211,7 +212,7 @@ func Test_Server_Close_listener_error(t *testing.T) {
 	wl := &wrapListener{Listener: ln, CloseError: io.ErrUnexpectedEOF, listenStarted: ls}
 	go func() {
 		srverr := srv.Serve(wl)
-		assert.Equal(t, ErrServerClosed, srverr)
+		assert.Equal(t, serverClosedError{}, errors.Cause(srverr))
 	}()
 	<-ls
 	assert.Equal(t, io.ErrUnexpectedEOF, srv.Close())
