@@ -11,8 +11,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-// ErrServerClosed is returned by the Server's Serve method after a call to Close.
-var ErrServerClosed = errors.New("rap: Server closed")
+type serverClosedError struct{}
+
+func (serverClosedError) Error() string   { return "server closed" }
+func (serverClosedError) Timeout() bool   { return false }
+func (serverClosedError) Temporary() bool { return false }
 
 // Server listens for incoming RAP connections and creates Conn's for them.
 type Server struct {
@@ -96,7 +99,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		defer srv.mu.Unlock()
 		select {
 		case <-srv.getDoneChanLocked():
-			return ErrServerClosed
+			return errors.WithStack(serverClosedError{})
 		default:
 		}
 		srv.trackListenerLocked(l, true)
@@ -115,7 +118,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		if e != nil {
 			select {
 			case <-srv.getDoneChan():
-				return ErrServerClosed
+				return errors.WithStack(serverClosedError{})
 			default:
 			}
 			if ne, ok := e.(net.Error); ok && ne.Temporary() {
