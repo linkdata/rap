@@ -93,13 +93,13 @@ var connControlTexts = map[ConnControl]string{
 }
 
 var connFlagTexts = map[FrameFlag]string{
-	(0):                                              "...",
-	(FrameFlagBody):                                  "..B",
-	(FrameFlagHead):                                  ".H.",
-	(FrameFlagHead | FrameFlagBody):                  ".HB",
-	(FrameFlagFinal):                                 "F..",
-	(FrameFlagFinal | FrameFlagBody):                 "F.B",
-	(FrameFlagFinal | FrameFlagHead):                 "FH.",
+	(0):                              "...",
+	(FrameFlagBody):                  "..B",
+	(FrameFlagHead):                  ".H.",
+	(FrameFlagHead | FrameFlagBody):  ".HB",
+	(FrameFlagFinal):                 "F..",
+	(FrameFlagFinal | FrameFlagBody): "F.B",
+	(FrameFlagFinal | FrameFlagHead): "FH.",
 	(FrameFlagFinal | FrameFlagHead | FrameFlagBody): "FHB",
 }
 
@@ -113,33 +113,53 @@ func (fh FrameHeader) String() string {
 	return fmt.Sprintf("[FrameHeader %s %s %d (%d)]", fh.ExchangeID(), midText, fh.SizeValue(), len(fh))
 }
 
+// returns the 16-bit value stored in bytes 0 and 1
+func (fh FrameHeader) getLargeValue() uint16 {
+	return uint16(fh[0])<<8 | uint16(fh[1])
+}
+
+// sets the 16-bit value stored in bytes 0 and 1
+func (fh FrameHeader) setLargeValue(n uint16) {
+	fh[0] = byte(n >> 8)
+	fh[1] = byte(n)
+}
+
+// gets the 13-bit value stored in LSB of bytes 2 and 3
+func (fh FrameHeader) getSmallValue() uint16 {
+	return uint16(fh[2]&(^FrameFlagMask))<<8 | uint16(fh[3])
+}
+
+// sets the 13-bit value stored in LSB of bytes 2 and 3
+func (fh FrameHeader) setSmallValue(n uint16) {
+	fh[2] = (fh[2] & FrameFlagMask) | byte(n>>8)
+	fh[3] = byte(n)
+}
+
 // SizeValue returns the Size value of the frame.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) SizeValue() int {
-	return int(fh[0])<<8 | int(fh[1])
+	return int(fh.getLargeValue())
 }
 
 // SetSizeValue sets the Size value of the header.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) SetSizeValue(n int) {
-	fh[0] = byte(n >> 8)
-	fh[1] = byte(n)
+	fh.setLargeValue(uint16(n))
 }
 
 // ExchangeID returns the Exchange ID of the frame.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) ExchangeID() ExchangeID {
-	return ExchangeID(fh[2]&(^FrameFlagMask))<<8 | ExchangeID(fh[3])
+	return ExchangeID(fh.getSmallValue())
 }
 
 // SetExchangeID sets the exchange ID.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) SetExchangeID(exchangeID ExchangeID) {
-	if exchangeID > MaxExchangeID {
+	if exchangeID > ConnExchangeID {
 		panic("SetExchangeID(): exchangeID > MaxExchangeID")
 	}
-	fh[2] = (fh[2] & FrameFlagMask) | byte(exchangeID>>8)
-	fh[3] = byte(exchangeID)
+	fh.setSmallValue(uint16(exchangeID))
 }
 
 // HasPayload returns true if either the Headers or Body bit is set.
@@ -166,7 +186,7 @@ func (fh FrameHeader) PayloadSize() (n int) {
 
 // IsConnControl returns true if the Exchange ID indicates this is a conn control frame.
 func (fh FrameHeader) IsConnControl() bool {
-	return (fh[3] == 0xff) && ((fh[2] & (^FrameFlagMask)) == (^FrameFlagMask))
+	return fh.ExchangeID() == ConnExchangeID
 }
 
 // ConnControl returns the frame control bits as a ConnControl value.
@@ -182,10 +202,10 @@ func (fh FrameHeader) FrameControl() FrameFlag {
 }
 
 // SetConnControl sets the frame header to a conn control frame.
-// This sets the control bits and also sets the Exchange ID to 0x1fff.
+// This sets the control bits and also sets the Exchange ID to ConnExchangeID.
 func (fh FrameHeader) SetConnControl(sc ConnControl) {
-	fh[2] = byte(sc) | 0x1f
-	fh[3] = 0xff
+	fh[2] = (fh[2] & (^FrameFlagMask)) | byte(sc)
+	fh.SetExchangeID(ConnExchangeID)
 }
 
 // IsFinal returns true if the Final bit is set in the frame header.
@@ -221,21 +241,6 @@ func (fh FrameHeader) SetBody() {
 	fh[2] |= byte(FrameFlagBody)
 }
 
-/*
-// AppendFrameHeader adds a placeholder frame header to the given array.
-func AppendFrameHeader(dst []byte, exchangeID ExchangeID) []byte {
-	if exchangeID > MaxExchangeID {
-		panic("AppendFrameHeader(): exchangeID > MaxExchangeID")
-	}
-	return append(dst,
-		byte(0),             // MSB size bits
-		byte(0),             // LSB size bits
-		byte(exchangeID>>8), // control bits, MSB exchange id
-		byte(exchangeID),    // LSB exchange id
-	)
-}
-*/
-
 // Clear zeroes out the frameheader bytes.
 func (fh FrameHeader) Clear() {
 	fh[0] = byte(0)
@@ -249,8 +254,6 @@ func (fh FrameHeader) ClearID(exchangeID ExchangeID) {
 	if exchangeID > MaxExchangeID {
 		panic("AppendFrameHeader(): exchangeID > MaxExchangeID")
 	}
-	fh[0] = byte(0)
-	fh[1] = byte(0)
-	fh[2] = byte(exchangeID >> 8)
-	fh[3] = byte(exchangeID)
+	fh.Clear()
+	fh.SetExchangeID(exchangeID)
 }
