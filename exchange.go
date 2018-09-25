@@ -20,11 +20,6 @@ func (e ExchangeID) String() string {
 	return fmt.Sprintf("[ExchangeID %04x]", uint16(e))
 }
 
-// ErrTimeoutFlowControl is returned when a the flow control window doesn't reach parity in time.
-type ErrTimeoutFlowControl struct{}
-
-func (ErrTimeoutFlowControl) Error() string { return "flow control timeout" }
-
 // ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
 type ErrUnhandledRecordType struct{}
 
