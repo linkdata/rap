@@ -21,6 +21,7 @@ const noSrvAddr string = "192.0.2.1:1"
 func Test_Client_NewClient(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	assert.NotNil(t, c)
+	assert.Zero(t, c.AvailableExchanges())
 	defer c.Close()
 }
 
@@ -57,6 +58,7 @@ func Test_Client_connect_and_close(t *testing.T) {
 	defer e1.Close()
 	e2 := c.NewExchange()
 	assert.NotNil(t, e2)
+	assert.NotZero(t, c.AvailableExchanges())
 	defer e2.Close()
 	if e1 != nil && e2 != nil {
 		assert.Equal(t, e1.conn, e2.conn)
