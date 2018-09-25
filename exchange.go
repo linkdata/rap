@@ -25,11 +25,6 @@ type ErrUnhandledRecordType struct{}
 
 func (ErrUnhandledRecordType) Error() string { return "unhandled record type" }
 
-// ErrMissingFrameHead is returned when a frame was expected to have a head part but did not.
-type ErrMissingFrameHead struct{}
-
-func (ErrMissingFrameHead) Error() string { return "missing frame head" }
-
 // ExchangeConnection is the interface that an Exchange needs in order to
 // communicate with the outside world and clean up.
 type ExchangeConnection interface {
