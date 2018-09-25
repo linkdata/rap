@@ -131,18 +131,6 @@ func (c *Client) NewExchange() (e *Exchange) {
 	return
 }
 
-// support function for tests
-func (c *Client) dialAnother() (err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if bestConn := c.dialLocked(); bestConn == nil {
-		c.setConn(bestConn)
-	} else {
-		err = c.offlineError()
-	}
-	return
-}
-
 // AvailableExchanges returns the number of Exchanges currently not
 // serving a request. They may be distributed across many Conn's.
 func (c *Client) AvailableExchanges() int {
