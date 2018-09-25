@@ -176,6 +176,13 @@ func Test_FrameData_WriteLen(t *testing.T) {
 	}
 }
 
+func Test_FrameData_WriteLen_errors(t *testing.T) {
+	fd := NewFrameData()
+	fd.WriteHeader(0)
+	assert.Equal(t, ErrLengthNegative{}, errors.Cause(fd.WriteLen(-1)))
+	assert.Equal(t, ErrLengthOverflow{}, errors.Cause(fd.WriteLen(0x8000)))
+}
+
 func Test_FrameData_WriteStringNull(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
