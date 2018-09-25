@@ -12,18 +12,30 @@ import (
 	"github.com/pkg/errors"
 )
 
-var (
-	// ErrLengthNegative is returned for strings with negative length.
-	ErrLengthNegative = errors.New("length negative")
-	// ErrLengthOverflow is returned for strings longer than 32K.
-	ErrLengthOverflow = errors.New("length overflow")
-	// ErrFrameTooBig means a frame with more than FrameMaxPayloadSize bytes occurred
-	ErrFrameTooBig = errors.New("rap: frame too big")
-	// ErrFrameTooSmall means a frame size value is smaller than allowed
-	ErrFrameTooSmall = errors.New("rap: frame too small")
-	// ErrInvalidRouteIndex means a route index is less than one or larger than allowed
-	ErrInvalidRouteIndex = errors.New("rap: invalid route index")
-)
+// ErrLengthNegative is returned for strings with negative length.
+type ErrLengthNegative struct{}
+
+func (ErrLengthNegative) Error() string { return "length negative" }
+
+// ErrLengthOverflow is returned for strings longer than 32K.
+type ErrLengthOverflow struct{}
+
+func (ErrLengthOverflow) Error() string { return "length overflow" }
+
+// ErrFrameTooBig means a frame with more than FrameMaxPayloadSize bytes occurred
+type ErrFrameTooBig struct{}
+
+func (ErrFrameTooBig) Error() string { return "frame too big" }
+
+// ErrFrameTooSmall means a frame size value is smaller than allowed
+type ErrFrameTooSmall struct{}
+
+func (ErrFrameTooSmall) Error() string { return "frame too small" }
+
+// ErrInvalidRouteIndex means a route index is less than one or larger than allowed
+type ErrInvalidRouteIndex struct{}
+
+func (ErrInvalidRouteIndex) Error() string { return "invalid route index" }
 
 // FrameDataReader is the interface that wraps the ReadFrameData() method.
 type FrameDataReader interface {
@@ -89,7 +101,7 @@ func (fd FrameData) Payload() []byte {
 func (fd FrameData) SetSizeValue() {
 	payloadSize := len(fd) - FrameHeaderSize
 	if payloadSize < 0 {
-		panic(ErrFrameTooSmall)
+		panic(ErrFrameTooSmall{})
 	}
 	FrameHeader(fd).SetSizeValue(payloadSize)
 }
@@ -155,13 +167,13 @@ func (fd *FrameData) WriteInt64(x int64) {
 func (fd *FrameData) WriteLen(x int) error {
 	switch {
 	case x < 0:
-		return ErrLengthNegative
+		return errors.WithStack(ErrLengthNegative{})
 	case x < 0x80:
 		*fd = append(*fd, byte(x))
 	case x <= 0x7fff:
 		*fd = append(*fd, byte(x>>8)|0x80, byte(x))
 	default:
-		return ErrLengthOverflow
+		return errors.WithStack(ErrLengthOverflow{})
 	}
 	return nil
 }
@@ -197,7 +209,7 @@ func (fd *FrameData) WriteRoute(s string) (err error) {
 // WriteRegisteredRoute writes a registered route to a FrameData.
 func (fd *FrameData) WriteRegisteredRoute(idx int, vals []string) (err error) {
 	if idx < 1 {
-		return ErrInvalidRouteIndex
+		return errors.WithStack(ErrInvalidRouteIndex{})
 	}
 	if err = fd.WriteLen(idx); err != nil {
 		return
@@ -248,10 +260,10 @@ func (fd *FrameData) ReadFrom(r io.Reader) (n int64, err error) {
 	if fd.Header().HasPayload() {
 		endIndex := FrameHeaderSize + int(fd.Header().SizeValue())
 		if endIndex < len(*fd) {
-			return n, ErrFrameTooSmall
+			return n, errors.WithStack(ErrFrameTooSmall{})
 		}
 		if endIndex > FrameMaxSize {
-			return n, ErrFrameTooBig
+			return n, errors.WithStack(ErrFrameTooBig{})
 		}
 		num, err = io.ReadFull(r, (*fd)[len(*fd):endIndex])
 		*fd = (*fd)[:len(*fd)+num]
@@ -269,7 +281,7 @@ func (fd FrameData) WriteTo(w io.Writer) (int64, error) {
 	if fd.Header().HasPayload() {
 		payloadLength := len(fd) - FrameHeaderSize
 		if payloadLength > FrameMaxPayloadSize {
-			return 0, ErrFrameTooBig
+			return 0, errors.WithStack(ErrFrameTooBig{})
 		}
 		fd.Header().SetSizeValue(payloadLength)
 	}
@@ -345,7 +357,7 @@ func (fd *FrameData) WriteRequest(r *http.Request) error {
 		fd.WriteInt64(-1)
 	}
 	if len(*fd) > FrameMaxSize {
-		return ErrFrameTooBig
+		return errors.WithStack(ErrFrameTooBig{})
 	}
 	return nil
 }
