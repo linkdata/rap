@@ -73,7 +73,7 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	defer c.Close()
 	c.DialTimeout = time.Second
 
-	grabbed := make(chan *Exchange, MaxExchangeID*2+1)
+	grabbed := make(chan *Exchange, ConnExchangeID*2+1)
 	e, err := c.NewExchangeMayDial()
 	firstConn := c.getConn()
 	assert.NoError(t, err)
