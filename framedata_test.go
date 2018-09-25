@@ -56,7 +56,7 @@ func Test_FrameData_WriteRegisteredRoute(t *testing.T) {
 	fd.WriteHeader(0)
 	assert.NoError(t, fd.WriteRegisteredRoute(1, []string{"foo", "bar"}))
 	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (13)] 0103666f6f03626172]", fd.String())
-	assert.Equal(t, ErrInvalidRouteIndex{}, errors.Cause(fd.WriteRegisteredRoute(0, []string{})))
+	assert.Equal(t, ErrInvalidRouteIndex{}.Error(), fd.WriteRegisteredRoute(0, []string{}).Error())
 }
 
 // WriteRegisteredRoute
@@ -179,8 +179,8 @@ func Test_FrameData_WriteLen(t *testing.T) {
 func Test_FrameData_WriteLen_errors(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
-	assert.Equal(t, ErrLengthNegative{}, errors.Cause(fd.WriteLen(-1)))
-	assert.Equal(t, ErrLengthOverflow{}, errors.Cause(fd.WriteLen(0x8000)))
+	assert.Equal(t, ErrLengthNegative{}.Error(), fd.WriteLen(-1).Error())
+	assert.Equal(t, ErrLengthOverflow{}.Error(), fd.WriteLen(0x8000).Error())
 }
 
 func Test_FrameData_WriteStringNull(t *testing.T) {
@@ -292,7 +292,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	fd1.Header().SetSizeValue(0)
 	fd1.WriteString("Meh")
 	n, err := fd1.ReadFrom(bytes.NewBuffer([]byte{0x01}))
-	assert.Equal(t, ErrFrameTooSmall{}, errors.Cause(err))
+	assert.Equal(t, ErrFrameTooSmall{}.Error(), err.Error())
 	assert.Zero(t, n)
 
 	// Test overflow
@@ -300,7 +300,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	fd1.Header().SetBody()
 	fd1.Header().SetSizeValue(FrameMaxPayloadSize + 1)
 	n, err = fd1.ReadFrom(bytes.NewBuffer(make([]byte, FrameMaxPayloadSize+1)))
-	assert.Equal(t, ErrFrameTooBig{}, errors.Cause(err))
+	assert.Equal(t, ErrFrameTooBig{}.Error(), err.Error())
 	assert.Zero(t, n)
 }
 
