@@ -355,6 +355,7 @@ func Test_Conn_conncontrol_panic(t *testing.T) {
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
 	ct.conn.ExchangeWrite(fd)
+	<-ct.serverDone
 }
 
 func Test_Conn_ServeHTTP_write_error(t *testing.T) {
