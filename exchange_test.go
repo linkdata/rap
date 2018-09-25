@@ -775,7 +775,7 @@ func Test_Exchange_ProxyResponse_wrong_record_type(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
 	assert.True(t, et.Exchange.hasRemoteClosed())
-	assert.Equal(t, ErrUnhandledRecordType{}, errors.Cause(err))
+	assert.Equal(t, ErrUnhandledRecordType{}.Error(), errors.Cause(err).Error())
 }
 
 func Test_Exchange_Close(t *testing.T) {
