@@ -89,7 +89,7 @@ func (ct *connTester) Start() {
 		wg.Done()
 		err := ct.server.ServeHTTP(ct)
 		if ct.expectServerError != nil {
-			assert.Equal(ct.t, ct.expectServerError, errors.Cause(err))
+			assert.Equal(ct.t, ct.expectServerError.Error(), errors.Cause(err).Error())
 			assert.NotNil(ct.t, err)
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
@@ -115,7 +115,7 @@ func (ct *connTester) Start() {
 		err := ct.conn.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.NotNil(ct.t, err)
-			assert.Equal(ct.t, ct.expectConnError, errors.Cause(err))
+			assert.Equal(ct.t, ct.expectConnError.Error(), errors.Cause(err).Error())
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
 				log.Println("ct.conn.ServeHTTP(ct) premature exit")
@@ -144,14 +144,14 @@ func (ct *connTester) Close() {
 		}
 		err := ct.a.WriteCloser.Close()
 		if ct.expectConnCloseError != nil {
-			assert.Equal(ct.t, ct.expectConnCloseError, errors.Cause(err))
+			assert.Equal(ct.t, ct.expectConnCloseError.Error(), errors.Cause(err).Error())
 			assert.Error(ct.t, err)
 		} else {
 			assert.NoError(ct.t, err)
 		}
 		err = ct.b.WriteCloser.Close()
 		if ct.expectServerCloseError != nil {
-			assert.Equal(ct.t, ct.expectServerCloseError, errors.Cause(err))
+			assert.Equal(ct.t, ct.expectServerCloseError.Error(), errors.Cause(err).Error())
 			assert.Error(ct.t, err)
 		} else {
 			assert.NoError(ct.t, err)
