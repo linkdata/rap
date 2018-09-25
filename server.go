@@ -13,9 +13,7 @@ import (
 
 type serverClosedError struct{}
 
-func (serverClosedError) Error() string   { return "server closed" }
-func (serverClosedError) Timeout() bool   { return false }
-func (serverClosedError) Temporary() bool { return false }
+func (serverClosedError) Error() string { return "server closed" }
 
 // Server listens for incoming RAP connections and creates Conn's for them.
 type Server struct {
