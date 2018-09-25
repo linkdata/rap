@@ -95,7 +95,7 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	e.Close()
 
 	if secondConn != nil {
-		assert.NotEqual(t, firstConn.identity, secondConn.identity)
+		assert.NotEqual(t, firstConn.serialNumber, secondConn.serialNumber)
 		// assert.NotEqual(t, len(firstConn.exchanges), len(secondConn.exchanges))
 		assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
 		// assert.Equal(t, 1, len(secondConn.exchanges))
