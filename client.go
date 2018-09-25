@@ -83,8 +83,9 @@ func (c *Client) dialLocked() *Conn {
 func (c *Client) selectBestConn() (bestConn *Conn) {
 	bestLength := 0
 	for _, conn := range c.conns {
-		if len(conn.exchanges) > bestLength {
-			bestLength = len(conn.exchanges)
+		avail := conn.AvailableExchanges()
+		if avail > bestLength {
+			bestLength = avail
 			bestConn = conn
 		}
 	}
@@ -130,6 +131,33 @@ func (c *Client) NewExchange() (e *Exchange) {
 	return
 }
 
+// support function for tests
+func (c *Client) dialAnother() (err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if bestConn := c.dialLocked(); bestConn == nil {
+		c.setConn(bestConn)
+	} else {
+		err = c.offlineError()
+	}
+	return
+}
+
+// AvailableExchanges returns the number of Exchanges currently not
+// serving a request. They may be distributed across many Conn's.
+func (c *Client) AvailableExchanges() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.availableExchangesLocked()
+}
+
+func (c *Client) availableExchangesLocked() (exchangeCount int) {
+	for _, conn := range c.conns {
+		exchangeCount += conn.AvailableExchanges()
+	}
+	return
+}
+
 // NewExchangeMayDial will find a Conn with free Exchanges or
 // create a new one if needed.
 func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
@@ -148,7 +176,7 @@ func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
 			}
 		}
 		// grab an exchange before we publish the new conn
-		if e = bestConn.NewExchangeWait(c.DialTimeout); e != nil {
+		if e = bestConn.NewExchangeWait(time.Second * 5); e != nil {
 			c.setConn(bestConn)
 		}
 	}
@@ -157,7 +185,6 @@ func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
 
 func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := c.NewExchange()
-
 	if e == nil {
 		var err error
 		e, err = c.NewExchangeMayDial()
@@ -166,7 +193,10 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	c.serveHTTP(w, r, e)
+}
 
+func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Exchange) {
 	defer e.Close()
 
 	var requestErr error
