@@ -169,7 +169,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		if hasCollector {
 			unreported += m
-			if unreported > FrameMaxSize {
+			if unreported > int64(FrameMaxSize) {
 				c.StatsCollector.AddBytesRead(unreported)
 				unreported = 0
 			}
@@ -311,7 +311,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			// handle statistics reporting
 			if hasCollector {
 				unreported += written
-				if unreported > FrameMaxSize {
+				if unreported > int64(FrameMaxSize) {
 					c.StatsCollector.AddBytesWritten(unreported)
 					unreported = 0
 				}
