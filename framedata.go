@@ -211,12 +211,11 @@ func (fd *FrameData) WriteRegisteredRoute(idx int, vals []string) (err error) {
 	if idx < 1 {
 		return errors.WithStack(ErrInvalidRouteIndex{})
 	}
-	if err = fd.WriteLen(idx); err != nil {
-		return
-	}
-	for _, s := range vals {
-		if err = fd.WriteString(s); err != nil {
-			return
+	if err = fd.WriteLen(idx); err == nil {
+		for _, s := range vals {
+			if err = fd.WriteString(s); err != nil {
+				return
+			}
 		}
 	}
 	return
