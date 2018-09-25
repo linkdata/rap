@@ -165,11 +165,17 @@ func Test_Client_ServeHTTP_with_body(t *testing.T) {
 }
 
 func Test_Client_ServeHTTP_aborted_by_server(t *testing.T) {
+	if leaktestEnabled {
+		defer leaktest.Check(t)()
+	}
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
 	rr := httptest.NewRecorder()
 	blob := make([]byte, FrameMaxSize*(SendWindowSize*2))
+	for n := range blob {
+		blob[n] = 0xAB
+	}
 	req := httptest.NewRequest("ABORTBODY", "/abortme", ioutil.NopCloser(bytes.NewBuffer(blob)))
 	req.ContentLength = int64(len(blob))
 	c.ServeHTTP(rr, req)
@@ -184,7 +190,7 @@ func Test_Client_ServeHTTP_overflow_headers(t *testing.T) {
 	c := NewClient(st.srv.Addr)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("NotReallyAMethod", "/overflow", nil)
-	req.ContentLength = -1
+	req.ContentLength = 0
 	for i := 0; i < 8000; i++ {
 		req.Header.Add(fmt.Sprint("Header", i), fmt.Sprint("Value", i))
 	}
