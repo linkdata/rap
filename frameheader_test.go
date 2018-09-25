@@ -1,6 +1,7 @@
 package rap
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,7 @@ func Test_FrameHeader_ExchangeIDRange(t *testing.T) {
 	assert.Equal(t, ExchangeID(1), h.ExchangeID())
 	h.SetExchangeID(MaxExchangeID)
 	assert.Equal(t, MaxExchangeID, h.ExchangeID())
-	assert.Panics(t, func() { h.SetExchangeID(MaxExchangeID + 1) })
+	assert.Panics(t, func() { h.SetExchangeID(ConnExchangeID + 1) })
 }
 
 func Test_FrameHeader_String(t *testing.T) {
@@ -48,6 +49,7 @@ func Test_FrameHeader_String(t *testing.T) {
 	assert.Equal(t, "[FrameHeader [ExchangeID 0001] FHB 12 (4)]", h.String())
 	assert.Equal(t, 12, h.PayloadSize())
 	h.SetConnControl(ConnControlPing)
-	assert.Equal(t, "[FrameHeader [ExchangeID 1fff] Ping 12 (4)]", h.String())
+	expected := fmt.Sprintf("[FrameHeader %v Ping 12 (4)]", ConnExchangeID)
+	assert.Equal(t, expected, h.String())
 	assert.Equal(t, 12, h.PayloadSize())
 }
