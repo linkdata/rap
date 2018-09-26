@@ -141,7 +141,13 @@ func (e *Exchange) hasStarted() bool {
 }
 
 func (e *Exchange) starting() bool {
-	return atomic.CompareAndSwapInt32(&e.isStarted, 0, 1)
+	if atomic.CompareAndSwapInt32(&e.isStarted, 0, 1) {
+		if !isClosedChan(e.localClosed) {
+			return true
+		}
+		atomic.StoreInt32(&e.isStarted, 0)
+	}
+	return false
 }
 
 func (e *Exchange) hasRemoteClosed() bool {
