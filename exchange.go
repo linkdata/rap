@@ -102,6 +102,14 @@ func isClosedChan(c <-chan struct{}) bool {
 	}
 }
 
+type runState int32
+
+const (
+	runStateUnused   = runState(0)
+	runStateStarted  = runState(1)
+	runStateStopping = runState(2)
+)
+
 type timeoutError struct{}
 
 func (timeoutError) Error() string   { return "deadline exceeded" }
@@ -127,7 +135,7 @@ type Exchange struct {
 	rmu           sync.Mutex         // guards fdr
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
-	isStarted     int32              // nonzero if a header frame has been sent or received
+	state         runState           // nonzero if a header frame has been sent or received
 	isHijacked    bool               // true if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
@@ -136,18 +144,28 @@ type Exchange struct {
 
 var exchangeNextSerialNumber uint32
 
-func (e *Exchange) hasStarted() bool {
-	return atomic.LoadInt32(&e.isStarted) != 0
+func (e *Exchange) isUnused() bool {
+	return e.getRunState() == runStateUnused
+}
+
+func (e *Exchange) isStarted() bool {
+	return e.getRunState() == runStateStarted
 }
 
 func (e *Exchange) starting() bool {
-	if atomic.CompareAndSwapInt32(&e.isStarted, 0, 1) {
-		if !isClosedChan(e.localClosed) {
-			return true
-		}
-		atomic.StoreInt32(&e.isStarted, 0)
-	}
-	return false
+	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateUnused), int32(runStateStarted))
+}
+
+func (e *Exchange) stopping() bool {
+	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateStarted), int32(runStateStopping))
+}
+
+func (e *Exchange) setRunState(state runState) {
+	atomic.StoreInt32((*int32)(&e.state), int32(state))
+}
+
+func (e *Exchange) getRunState() runState {
+	return runState(atomic.LoadInt32((*int32)(&e.state)))
 }
 
 func (e *Exchange) hasRemoteClosed() bool {
@@ -178,8 +196,8 @@ func (e *Exchange) Serial() string {
 }
 
 func (e *Exchange) String() string {
-	return fmt.Sprintf("[Exchange %v %v started=%v hijack=%v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.Serial(), e.ID, e.hasStarted(), e.isHijacked, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
+	return fmt.Sprintf("[Exchange %v %v unused=%v hijack=%v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
+		e.Serial(), e.ID, e.isUnused(), e.isHijacked, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
@@ -250,6 +268,10 @@ func (e *Exchange) recievedFinal(fd FrameData) {
 	}
 	if e.hasLocalClosed() {
 		e.recycle()
+	} else if e.isUnused() {
+		// can happen if a local shutdown completes while an aborted
+		// remote sends a final frame as it's only frame
+		e.writeFinal()
 	}
 }
 
@@ -267,7 +289,7 @@ func (e *Exchange) readFrame() (err error) {
 	select {
 	case e.fdr = <-e.readCh:
 		if e.fdr != nil {
-			if !e.hasStarted() {
+			if e.isUnused() {
 				panic("not started!?") // TODO: REMOVE
 			}
 			e.fp = NewFrameParser(e.fdr)
@@ -605,9 +627,9 @@ func (e *Exchange) getConn() *Conn {
 	return nil
 }
 
-// Recycle restores an Exchange to it's initial state and calls the onRecycle handler.
-// Either both localClosed and remoteClosed channels must be closed, or the Exchange
-// must be unused.
+// recycle restores an Exchange to it's initial state and calls the onRecycle handler.
+// Before calling, the local end must be closed. If the exchange is started,
+// then remote must be closed as well. If it is not started, the remote must not be closed.
 func (e *Exchange) recycle() {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
@@ -623,16 +645,16 @@ func (e *Exchange) recycleLocked() {
 		panic("recycle(): local not closed")
 	}
 
-	if e.hasStarted() {
+	if e.isUnused() {
+		if e.hasRemoteClosed() {
+			panic("recycle(): unused, but remote is closed")
+		}
+	} else {
 		if len(e.fdw) > 0 {
 			panic("recycle(): started, and still data left in fdw")
 		}
 		if !e.hasRemoteClosed() {
 			panic("recycle(): started, but remote not closed")
-		}
-	} else {
-		if e.hasRemoteClosed() {
-			panic("recycle(): unused, but remote is closed")
 		}
 	}
 
@@ -648,13 +670,14 @@ func (e *Exchange) recycleLocked() {
 	e.localClosed = make(chan struct{})
 	e.remoteClosed = 0
 	e.sendWindow = int32(SendWindowSize)
-	e.isStarted = 0
 	e.isHijacked = false
 	e.fdw = nil
 	e.fdr = nil
 	e.fp = nil
 	e.writeDeadline.set(time.Time{})
 	e.readDeadline.set(time.Time{})
+
+	e.setRunState(runStateUnused)
 
 	if e.onRecycle != nil {
 		e.onRecycle(e)
@@ -710,7 +733,7 @@ func (e *Exchange) close(notIfHijacked bool) error {
 	e.rmu.Lock()
 	defer e.rmu.Unlock()
 
-	if e.hasStarted() {
+	if e.stopping() {
 		e.writeFinalLocked()
 		if !e.hasRemoteClosed() {
 			// will be recycled when remote is closed

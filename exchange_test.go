@@ -52,7 +52,7 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 	}
 
 	go func() {
-		timeout := time.NewTimer(time.Second * 10)
+		timeout := time.NewTimer(time.Minute)
 		defer timeout.Stop()
 		for {
 			var fd FrameData
@@ -71,7 +71,7 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 						if etw.et.finFn != nil {
 							etw.et.finFn(etw.et.Exchange)
 						} else {
-							etw.et.Exchange.SubmitFrame(fd)
+							etw.et.SubmitFrame(fd)
 						}
 					}
 				} else if fd.Header().HasPayload() {
@@ -328,8 +328,8 @@ func (fw *failWriter) failError() (err error) {
 
 func Test_Exchange_String(t *testing.T) {
 	e := NewExchange(&exchangeTester{}, 0x1)
-	expected := fmt.Sprintf("[Exchange %v %v started=%v hijack=%v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.Serial(), e.ID, e.hasStarted(), e.isHijacked, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
+	expected := fmt.Sprintf("[Exchange %v %v unused=%v hijack=%v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
+		e.Serial(), e.ID, e.isUnused(), e.isHijacked, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
 	assert.Equal(t, expected, e.String())
 }
 
@@ -1011,12 +1011,13 @@ func Test_Exchange_multiple_final_frames_panics(t *testing.T) {
 
 	fd := NewFrameDataID(MaxExchangeID)
 	fd.Header().SetFinal()
-	assert.NoError(t, et.SubmitFrame(fd))
+	err := et.SubmitFrame(fd)
+	assert.NoError(t, err)
 
 	fd = NewFrameDataID(MaxExchangeID)
 	fd.Header().SetFinal()
 	assert.Panics(t, func() {
-		et.Exchange.SubmitFrame(fd)
+		et.SubmitFrame(fd)
 	})
 }
 
