@@ -233,6 +233,16 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		panic(fmt.Sprint(e, " received frame after final: ", fd))
 	}
 
+	if e.isUnused() {
+		// can happen if a local shutdown completes while a
+		// remote has frames in flight, but before any of them
+		// have been received. has only been seen in tests, where the
+		// same process has control over both ends and can
+		// force the situation.
+		FrameDataFree(fd)
+		return
+	}
+
 	if fd.IsAck() {
 		// ack frame
 		FrameDataFree(fd)
