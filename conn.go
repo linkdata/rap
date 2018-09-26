@@ -346,7 +346,7 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 
 	err = <-errCh
 
-	if closeErr := c.Close(); closeErr != nil && (err == nil || errors.Cause(err) == io.EOF) {
+	if closeErr := c.Close(); closeErr != nil && (err == nil || isClosedError(err)) {
 		err = closeErr
 	}
 
