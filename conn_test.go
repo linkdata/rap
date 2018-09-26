@@ -370,6 +370,7 @@ func Test_Conn_ServeHTTP_write_error(t *testing.T) {
 	ct.expectServerError = io.ErrUnexpectedEOF
 	ct.Start()
 	ct.conn.Ping()
+	<-ct.serverDone
 }
 
 func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
