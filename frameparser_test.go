@@ -69,7 +69,6 @@ func Test_FrameParser_ProxyResponse(t *testing.T) {
 
 	fd.Clear()
 	fd.WriteHeader(MaxExchangeID)
-	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPResponse)
 	fd.WriteLen(200)
 	fd.WriteString("Content-Length")

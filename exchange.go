@@ -127,6 +127,7 @@ type Exchange struct {
 	rmu           sync.Mutex         // guards fdr
 	fdr           FrameData          // FrameData being read from by fr
 	fp            FrameParser        // Frame parser (into fdr)
+	isStarted     int32              // nonzero if a header frame has been sent or received
 	isHijacked    bool               // true if Hijack() was called
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
@@ -135,8 +136,16 @@ type Exchange struct {
 
 var exchangeNextSerialNumber uint32
 
+func (e *Exchange) hasStarted() bool {
+	return atomic.LoadInt32(&e.isStarted) != 0
+}
+
+func (e *Exchange) starting() bool {
+	return atomic.CompareAndSwapInt32(&e.isStarted, 0, 1)
+}
+
 func (e *Exchange) hasRemoteClosed() bool {
-	return atomic.LoadInt32(&e.remoteClosed) != 0 // isClosedChan(e.remoteClosed)
+	return atomic.LoadInt32(&e.remoteClosed) != 0
 }
 
 func (e *Exchange) remoteClosing() bool {
@@ -163,8 +172,8 @@ func (e *Exchange) Serial() string {
 }
 
 func (e *Exchange) String() string {
-	return fmt.Sprintf("[Exchange %v %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.Serial(), e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
+	return fmt.Sprintf("[Exchange %v %v started=%v hijack=%v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
+		e.Serial(), e.ID, e.hasStarted(), e.isHijacked, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
@@ -252,6 +261,9 @@ func (e *Exchange) readFrame() (err error) {
 	select {
 	case e.fdr = <-e.readCh:
 		if e.fdr != nil {
+			if !e.hasStarted() {
+				panic("not started!?") // TODO: REMOVE
+			}
 			e.fp = NewFrameParser(e.fdr)
 			e.writeAckFrame()
 		} else {
@@ -554,6 +566,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
 					panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
 				}
+				e.starting()
 				return e.conn.ExchangeWrite(fd)
 			} else {
 				// SendWindow is empty, so do a blocking wait for an ACK
@@ -594,15 +607,27 @@ func (e *Exchange) recycle() {
 	defer e.wmu.Unlock()
 	e.rmu.Lock()
 	defer e.rmu.Unlock()
+	e.recycleLocked()
+}
 
+func (e *Exchange) recycleLocked() {
 	// log.Print("  RC ", e)
 
-	if len(e.fdw) > 0 {
-		panic("still data left in fdw")
+	if !e.hasLocalClosed() {
+		panic("recycle(): local not closed")
 	}
 
-	if !e.hasLocalClosed() || !e.hasRemoteClosed() {
-		panic("recycle() requires both local and remote channels closed")
+	if e.hasStarted() {
+		if len(e.fdw) > 0 {
+			panic("recycle(): started, and still data left in fdw")
+		}
+		if !e.hasRemoteClosed() {
+			panic("recycle(): started, but remote not closed")
+		}
+	} else {
+		if e.hasRemoteClosed() {
+			panic("recycle(): unused, but remote is closed")
+		}
 	}
 
 	// drain ack and read channels
@@ -615,8 +640,9 @@ func (e *Exchange) recycle() {
 
 	e.readCh = make(chan FrameData, MaxSendWindowSize)
 	e.localClosed = make(chan struct{})
-	atomic.StoreInt32(&e.remoteClosed, 0)
-	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
+	e.remoteClosed = 0
+	e.sendWindow = int32(SendWindowSize)
+	e.isStarted = 0
 	e.isHijacked = false
 	e.fdw = nil
 	e.fdr = nil
@@ -629,14 +655,18 @@ func (e *Exchange) recycle() {
 	}
 }
 
-func (e *Exchange) writeFinal() {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
+func (e *Exchange) writeFinalLocked() {
 	e.flush()
 	if fd := FrameDataAllocID(e.ID); fd != nil {
 		fd.Header().SetFinal()
 		e.conn.ExchangeWrite(fd)
 	}
+}
+
+func (e *Exchange) writeFinal() {
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	e.writeFinalLocked()
 }
 
 func (e *Exchange) consumeAck() {
@@ -652,7 +682,7 @@ func (e *Exchange) Close() (err error) {
 	return e.close(false)
 }
 
-func (e *Exchange) close(notIfHijacked bool) (err error) {
+func (e *Exchange) close(notIfHijacked bool) error {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 
@@ -667,12 +697,22 @@ func (e *Exchange) close(notIfHijacked bool) (err error) {
 			return nil
 		}
 		close(e.localClosed)
-		e.writeFinal()
 	}
 
-	if e.hasRemoteClosed() {
-		e.recycle() // otherwise will be recycled when remote is closed
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	e.rmu.Lock()
+	defer e.rmu.Unlock()
+
+	if e.hasStarted() {
+		e.writeFinalLocked()
+		if !e.hasRemoteClosed() {
+			// will be recycled when remote is closed
+			return nil
+		}
 	}
+
+	e.recycleLocked()
 
 	return nil
 }
@@ -684,6 +724,17 @@ func (e *Exchange) OnRecycle(onRecycle func(*Exchange)) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 	e.onRecycle = onRecycle
+}
+
+// WriteUserRecordType writes a user record marker and sets the head bit.
+func (e *Exchange) WriteUserRecordType(c byte) (err error) {
+	if c < 0x80 {
+		return ErrUnhandledRecordType{}
+	}
+	if err = e.WriteStart(); err == nil {
+		e.fdw.WriteRecordType(RecordType(c))
+	}
+	return
 }
 
 // WriteRequest writes a http.Request to the exchange, including it's Body.
@@ -798,10 +849,10 @@ func (e *Exchange) Serve(h http.Handler) (err error) {
 func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
+	e.starting()
 	e.isHijacked = true
 	fd := NewFrameDataID(e.ID)
 	fd.WriteRecordType(RecordTypeHijacked)
-	fd.Header().SetHead()
 	return e, bufio.NewReadWriter(bufio.NewReader(e), bufio.NewWriter(e)), e.writeFrame(fd)
 }
 

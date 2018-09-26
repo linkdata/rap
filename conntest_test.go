@@ -65,7 +65,7 @@ func timeoutWrapper(t *testing.T, mp MakePipe, f connTesterFn) {
 		t.Fatalf("unable to make pipe: %v", err)
 	}
 	var once sync.Once
-	defer once.Do(func() { stop() })
+	defer once.Do(stop)
 	timer := time.AfterFunc(time.Second*10, func() {
 		once.Do(func() {
 			t.Error("test timed out; terminating pipe")

@@ -78,14 +78,15 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	firstConn := c.getConn()
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
+	assert.Equal(t, int(MaxExchangeID)-1, firstConn.AvailableExchanges())
 	for e != nil {
 		grabbed <- e
 		e = c.NewExchange()
 	}
-	if firstConn != nil {
-		assert.Equal(t, int(MaxExchangeID), cap(firstConn.exchanges))
-		assert.Equal(t, 0, len(firstConn.exchanges))
-	}
+	assert.Equal(t, int(MaxExchangeID), cap(firstConn.exchanges))
+	assert.Equal(t, 0, len(firstConn.exchanges))
+	assert.Equal(t, 0, firstConn.AvailableExchanges())
+	assert.Equal(t, int(MaxExchangeID), len(grabbed))
 	e = c.NewExchange()
 	assert.Nil(t, e)
 
@@ -94,44 +95,49 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
 	secondConn := c.getConn()
-	e.Close()
+	assert.NotEqual(t, firstConn.serialNumber, secondConn.serialNumber)
+	assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
+	assert.Equal(t, int(MaxExchangeID)-1, secondConn.AvailableExchanges())
 
-	if secondConn != nil {
-		assert.NotEqual(t, firstConn.serialNumber, secondConn.serialNumber)
-		// assert.NotEqual(t, len(firstConn.exchanges), len(secondConn.exchanges))
-		assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
-		// assert.Equal(t, 1, len(secondConn.exchanges))
+	// close the exchange, should go back to the secondConn
+	e.Close()
+	timer1 := time.NewTimer(time.Second * 5)
+	defer timer1.Stop()
+	for secondConn.AvailableExchanges() != int(MaxExchangeID) {
+		select {
+		case <-timer1.C:
+			assert.FailNow(t, "exchange did not release in time")
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
+	assert.Equal(t, int(MaxExchangeID), secondConn.AvailableExchanges())
 
 	// Now free all the Exchanges in the old conn
-releaseOldConn:
-	for {
-		select {
-		case e = <-grabbed:
-			e.Close()
-			assert.NotNil(t, e)
-			assert.Equal(t, firstConn, e.conn)
-		default:
-			break releaseOldConn
-		}
+	for len(grabbed) > 0 {
+		e = <-grabbed
+		e.Close()
+		assert.NotNil(t, e)
+		assert.Equal(t, firstConn.serialNumber, e.getConn().serialNumber)
 	}
 
 	// Grab all available exchanges, should be two conn's worth available eventually
 	e = c.NewExchange()
 	assert.NotNil(t, e)
-	timer := time.NewTimer(time.Minute)
-	defer timer.Stop()
+	timer2 := time.NewTimer(time.Second * 5)
+	defer timer2.Stop()
 	for len(grabbed) < int(MaxExchangeID)*2 {
 		if e != nil {
 			grabbed <- e
 		} else {
 			select {
-			case <-timer.C:
-				assert.Equal(t, int(MaxExchangeID)*2, len(grabbed))
+			case <-timer2.C:
+				assert.FailNow(t, fmt.Sprint("unable to grab ", int(MaxExchangeID)*2, " exchanges, got ", len(grabbed)))
 			default:
 			}
 		}
 		e = c.NewExchange()
+		// log.Print("grabbed ", len(grabbed), " e=", e)
 	}
 
 	assert.Equal(t, int(MaxExchangeID)*2, len(grabbed))
@@ -140,7 +146,7 @@ releaseOldConn:
 	}
 }
 
-func Test_Client_ServeHTTP(t *testing.T) {
+func Test_Client_ServeHTTP_simple(t *testing.T) {
 	if leaktestEnabled {
 		defer leaktest.Check(t)()
 	}

@@ -196,7 +196,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 
 		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow(), "+", len(e.ackCh))
 
-		if fd.Header().HasHead() {
+		if e.starting() {
 			if c.ReadTimeout != 0 {
 				e.SetReadDeadline(time.Now().Add(c.ReadTimeout))
 			} else {
@@ -206,6 +206,9 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 				e.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
 			} else {
 				e.SetWriteDeadline(time.Time{})
+			}
+			if c.Handler != nil {
+				go e.Serve(c.Handler)
 			}
 		}
 
@@ -226,18 +229,23 @@ func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
 		}
 		e = NewExchange(c, id)
 		c.exchangeLookup[id] = e
-		if c.Handler != nil {
-			go c.RepeatServe(e)
-		}
+		/*
+			if c.Handler != nil {
+				go c.repeatServe(e)
+			}*/
 	}
 	return
 }
 
-// RepeatServe repeatedly calls Exchange.Serve() until an error occurs
-func (c *Conn) RepeatServe(e *Exchange) (err error) {
+// repeatServe repeatedly calls Exchange.Serve() until an error occurs
+func (c *Conn) repeatServe(e *Exchange) (err error) {
 	recycleCh := make(chan struct{}, 1)
 	e.OnRecycle(func(e *Exchange) {
-		recycleCh <- struct{}{}
+		select {
+		case recycleCh <- struct{}{}:
+		default:
+			panic("recycle trigger would block")
+		}
 	})
 	defer e.OnRecycle(nil)
 	for {
@@ -396,7 +404,6 @@ func (c *Conn) Close() (err error) {
 				}
 			}
 		}
-
 	}
 
 	return
