@@ -342,6 +342,7 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(connControlReserved000)
 	ct.conn.ExchangeWrite(fd)
+	<-ct.serverDone
 }
 
 func Test_Conn_conncontrol_panic(t *testing.T) {
