@@ -962,7 +962,7 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 
 func Test_Exchange_transparency(t *testing.T) {
 	if leaktestEnabled {
-		defer leaktest.Check(t)()
+		defer leaktest.CheckTimeout(t, time.Minute)()
 	}
 
 	testConn(t, func() (c1, c2 net.Conn, stop func(), err error) {
