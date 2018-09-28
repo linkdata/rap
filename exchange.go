@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -342,7 +343,7 @@ func (e *Exchange) receivedFinal(fd FrameData) {
 		if needAck {
 			e.writeFinal(true)
 		}
-		panic("got final frame on unused") // TODO: REMOVE
+		log.Printf("got final frame on unused: needAck=%v\n%v\n", needAck, e) // TODO: REMOVE
 	}
 }
 
