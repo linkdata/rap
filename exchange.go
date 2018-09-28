@@ -326,24 +326,34 @@ func (e *Exchange) receivedFinal(fd FrameData) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 	// log.Print(" FIN ", e, fd)
+
 	needAck := false
 	if fd != nil {
-		needAck = !fd.Header().IsFinalAck()
 		if fd.Header().SizeValue() != 0 {
 			panic("final frame has size value set")
 		}
+		needAck = !fd.Header().IsFinalAck()
 		FrameDataFree(fd)
 	}
+
+	if e.isUnused() {
+		log.Printf("got final frame on unused: needAck=%v\n%v\n", needAck, e) // TODO: REMOVE
+		if needAck {
+			if fd := e.makeFinalFrame(needAck); fd != nil {
+				e.wmu.Lock()
+				defer e.wmu.Unlock()
+				e.conn.ExchangeWrite(fd)
+			}
+		}
+		return
+	}
+
 	if !e.remoteSendingFinal() {
 		panic("received multiple final frames")
 	}
+
 	if e.hasLocalSentFinal() {
 		e.recycle()
-	} else if e.isUnused() {
-		if needAck {
-			e.writeFinal(true)
-		}
-		log.Printf("got final frame on unused: needAck=%v\n%v\n", needAck, e) // TODO: REMOVE
 	}
 }
 
