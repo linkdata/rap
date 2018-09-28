@@ -39,14 +39,14 @@ func (e PanicError) Error() string { return "peer panic" }
 type connControlHandler func(*Conn, FrameData) error
 
 var connControlHandlers = map[ConnControl]connControlHandler{
-	connControlReserved000: connControlReservedHandler,
+	ConnControlPanic:       connControlPanicHandler,
 	connControlReserved001: connControlReservedHandler,
 	ConnControlPing:        connControlPingHandler,
 	ConnControlPong:        connControlPongHandler,
 	connControlReserved100: connControlReservedHandler,
 	connControlReserved101: connControlReservedHandler,
 	connControlReserved110: connControlReservedHandler,
-	ConnControlPanic:       connControlPanicHandler,
+	connControlReserved111: connControlReservedHandler,
 }
 
 // Conn multiplexes concurrent requests-response Exchanges.
@@ -120,12 +120,12 @@ func connControlPanicHandler(c *Conn, fd FrameData) error {
 		fp := NewFrameParser(fd)
 		msg, _ = fp.ReadString()
 	}
-	return errors.WithStack(errors.WithMessage(PanicError{}, msg))
+	return errors.Wrap(PanicError{}, msg)
 }
 
 func connControlReservedHandler(c *Conn, fd FrameData) error {
 	defer FrameDataFree(fd)
-	return errors.WithStack(errors.WithMessage(ProtocolError{}, fmt.Sprintf("unknown conn control frame %v", fd.Header())))
+	return errors.Wrapf(ProtocolError{}, "unknown conn control frame %v", fd.Header())
 }
 
 // Ping sends a ping frame and returns without waiting for response.
@@ -194,7 +194,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			break
 		}
 
-		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow(), "+", len(e.ackCh))
+		// log.Print("READ ", e, fd)
 
 		if e.starting() {
 			if c.ReadTimeout != 0 {
@@ -239,16 +239,8 @@ func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
 
 // repeatServe repeatedly calls Exchange.Serve() until an error occurs
 func (c *Conn) repeatServe(e *Exchange) (err error) {
-	recycleCh := make(chan struct{}, 1)
-	e.OnRecycle(func(e *Exchange) {
-		select {
-		case recycleCh <- struct{}{}:
-		default:
-			panic("recycle trigger would block")
-		}
-	})
-	defer e.OnRecycle(nil)
 	for {
+		recycleCh := make(chan struct{})
 		err = e.Serve(c.Handler)
 		if err != nil {
 			if !isClosedError(err) {
@@ -311,7 +303,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow(), "+", len(c.getExchangeForID(fd.Header().ExchangeID()).ackCh))
+			// log.Print("WRIT ", c.getExchangeForID(fd.Header().ExchangeID()), fd)
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)

@@ -274,7 +274,7 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
 	e := NewExchange(ct.conn, 1)
 	e.OnRecycle(ct.conn.ExchangeRelease)
-	assert.True(t, e.remoteClosing())
+	assert.True(t, e.remoteSendingFinal())
 	assert.Panics(t, func() { e.Close() })
 }
 
@@ -340,7 +340,7 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct.expectConnError = io.EOF
 	ct.Start()
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(connControlReserved000)
+	fd.WriteConnControl(connControlReserved001)
 	ct.conn.ExchangeWrite(fd)
 	<-ct.serverDone
 }

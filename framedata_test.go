@@ -37,9 +37,9 @@ func Test_FrameData_String(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	fd.WriteString("Hello world")
-	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (16)] 0b48656c6c6f20776f726c64]", fd.String())
+	assert.Equal(t, "[FrameData [FrameHeader [ID 0000] ... 0 (16)] 0b48656c6c6f20776f726c64]", fd.String())
 	fd.WriteString("the data is greater than 32 length")
-	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (51)] 0b48656c6c6f20776f726c6422746865206461746120697320677265...]", fd.String())
+	assert.Equal(t, "[FrameData [FrameHeader [ID 0000] ... 0 (51)] 0b48656c6c6f20776f726c6422746865206461746120697320677265...]", fd.String())
 	fd = nil
 	assert.Equal(t, "[FrameData nil]", fd.String())
 }
@@ -48,14 +48,14 @@ func Test_FrameData_WriteRoute(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	assert.NoError(t, fd.WriteRoute("/"))
-	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (7)] 00012f]", fd.String())
+	assert.Equal(t, "[FrameData [FrameHeader [ID 0000] ... 0 (7)] 00012f]", fd.String())
 }
 
 func Test_FrameData_WriteRegisteredRoute(t *testing.T) {
 	fd := NewFrameData()
 	fd.WriteHeader(0)
 	assert.NoError(t, fd.WriteRegisteredRoute(1, []string{"foo", "bar"}))
-	assert.Equal(t, "[FrameData [FrameHeader [ExchangeID 0000] ... 0 (13)] 0103666f6f03626172]", fd.String())
+	assert.Equal(t, "[FrameData [FrameHeader [ID 0000] ... 0 (13)] 0103666f6f03626172]", fd.String())
 	assert.Equal(t, ErrInvalidRouteIndex{}.Error(), fd.WriteRegisteredRoute(0, []string{}).Error())
 }
 
