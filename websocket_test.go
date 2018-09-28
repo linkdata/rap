@@ -123,7 +123,7 @@ func echoCopy(w http.ResponseWriter, r *http.Request, writerOnly bool) {
 	for {
 		mt, r, err := conn.NextReader()
 		if err != nil {
-			if errors.Cause(err) != io.EOF {
+			if !isClosedError(err) {
 				if !websocket.IsCloseError(err, 1000) {
 					log.Println("NextReader:", err)
 				}
@@ -183,7 +183,7 @@ func echoReadAll(w http.ResponseWriter, r *http.Request, writeMessage, writePrep
 	for {
 		mt, b, err := conn.ReadMessage()
 		if err != nil {
-			if errors.Cause(err) != io.EOF {
+			if !isClosedError(err) {
 				if !websocket.IsCloseError(err, 1000) {
 					log.Println("NextReader:", err)
 				}
