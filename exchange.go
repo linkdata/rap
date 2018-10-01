@@ -255,6 +255,9 @@ func (e *Exchange) String() string {
 
 // NewExchange creates a new exchange
 func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
+	if exchangeID >= ConnExchangeID {
+		panic(fmt.Sprintf("illegal exchange ID %d", int(exchangeID)))
+	}
 	e = &Exchange{
 		ID:            exchangeID,
 		conn:          conn,
@@ -305,13 +308,15 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		panic(fmt.Sprint(e, " received frame after final: ", fd))
 	}
 
-	if e.getRunState() != runStateActive {
-		// will happen, for example, if the server aborts a request
-		// that is too large.
-		FrameDataFree(fd)
-		e.writeAckFrame()
-		return
-	}
+	/*
+		if e.getRunState() != runStateActive {
+			// will happen, for example, if the server aborts a request
+			// that is too large.
+			FrameDataFree(fd)
+			e.writeAckFrame()
+			return
+		}
+	*/
 
 	select {
 	case e.readCh <- fd:

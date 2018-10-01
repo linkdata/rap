@@ -63,6 +63,7 @@ type Conn struct {
 	exchangeLastID     int32
 	mu                 sync.Mutex
 	doneChan           chan struct{}
+	readerWaitGroup    sync.WaitGroup
 	lastPingSent       int64 // Unix nanoseconds
 	lastPongRcvd       int64 // Unix nanoseconds
 	latency            int64 // Unix nanoseconds
@@ -87,7 +88,12 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
 		doneChan:        make(chan struct{}),
+		readerWaitGroup: sync.WaitGroup{},
 		serialNumber:    atomic.AddUint32(&connNextSerialNumber, 1),
+	}
+
+	for idx := range c.exchangeLookup {
+		c.exchangeLookup[idx] = NewExchange(c, ExchangeID(idx))
 	}
 	return c
 }
@@ -158,7 +164,19 @@ func (c *Conn) Latency() (d time.Duration) {
 // ReadFrom implements io.ReaderFrom.
 func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 	var unreported int64
+
 	hasCollector := c.StatsCollector != nil
+
+	c.mu.Lock()
+	select {
+	case <-c.doneChan:
+		c.mu.Unlock()
+		return
+	default:
+		c.readerWaitGroup.Add(1)
+		defer c.readerWaitGroup.Done()
+	}
+	c.mu.Unlock()
 
 	for {
 		var m int64
@@ -218,23 +236,26 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 }
 
 func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e = c.exchangeLookup[id]
-	if e == nil {
-		select {
-		case <-c.doneChan:
-			return
-		default:
+	return c.exchangeLookup[id]
+	/*
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		e = c.exchangeLookup[id]
+		if e == nil {
+			select {
+			case <-c.doneChan:
+				return
+			default:
+			}
+			e = NewExchange(c, id)
+			c.exchangeLookup[id] = e
+
+				//if c.Handler != nil {
+				//	go c.repeatServe(e)
+				//}
 		}
-		e = NewExchange(c, id)
-		c.exchangeLookup[id] = e
-		/*
-			if c.Handler != nil {
-				go c.repeatServe(e)
-			}*/
-	}
-	return
+		return
+	*/
 }
 
 // repeatServe repeatedly calls Exchange.Serve() until an error occurs
@@ -376,6 +397,8 @@ func (c *Conn) Close() (err error) {
 	if c.closeDoneChanLocked() {
 		// closing the I/O stream will cause the reader goroutine to stop with an error
 		err = c.ReadWriteCloser.Close()
+
+		c.readerWaitGroup.Wait()
 
 		// Drain the unused exchange channel
 		for len(c.exchanges) > 0 {
