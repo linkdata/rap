@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"testing"
 	"time"
@@ -446,6 +447,7 @@ func checkForTimeoutError(t *testing.T, err error) {
 			t.Errorf("err.Timeout() = false, want true")
 		}
 	} else {
+		debug.PrintStack()
 		t.Errorf("got %T, want net.Error", err)
 	}
 }
