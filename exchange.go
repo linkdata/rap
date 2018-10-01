@@ -833,14 +833,14 @@ func (e *Exchange) Close() error {
 	e.rmu.Lock()
 	defer e.rmu.Unlock()
 
-	if e.stopping() {
-		e.writeFinalLocked(e.hasRemoteSentFinal())
-		if !e.hasRemoteSentFinal() {
-			// will be recycled when remote is closed
-			e.setRunState(runStateWaitFin)
-			return nil
-		}
+	// if e.stopping() {
+	e.writeFinalLocked(e.hasRemoteSentFinal())
+	if !e.hasRemoteSentFinal() {
+		// will be recycled when remote is closed
+		e.setRunState(runStateWaitFin)
+		return nil
 	}
+	// }
 
 	e.recycleLocked()
 
