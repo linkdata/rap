@@ -696,27 +696,20 @@ func (e *Exchange) recycle() {
 func (e *Exchange) recycleLocked() {
 	// log.Print("  RC ", e)
 
+	e.setRunState(runStateRecycle)
+
 	if !isClosedChan(e.localClosed) {
 		panic(fmt.Sprintf("recycle(): local not closed\n%v\n", e))
 	}
-
-	if e.isUnused() {
-		if e.hasRemoteSentFinal() {
-			panic(fmt.Sprintf("recycle(): unused but remote has sent final\n%v\n", e))
-		}
-	} else {
-		if len(e.fdw) > 0 {
-			panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", e, e.fdw))
-		}
-		if !e.hasLocalSentFinal() {
-			panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", e))
-		}
-		if !e.hasRemoteSentFinal() {
-			panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", e))
-		}
+	if len(e.fdw) > 0 {
+		panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", e, e.fdw))
 	}
-
-	e.setRunState(runStateRecycle)
+	if !e.hasLocalSentFinal() {
+		panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", e))
+	}
+	if !e.hasRemoteSentFinal() {
+		panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", e))
+	}
 
 	// drain ack and read channels
 	for len(e.ackCh) > 0 {
