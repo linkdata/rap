@@ -49,7 +49,7 @@ func Test_FrameHeader_String(t *testing.T) {
 	assert.Equal(t, "[FrameHeader [ID 0001] FBH 12 (4)]", h.String())
 	assert.Equal(t, 0, h.PayloadSize()) // zero since Flow is set
 	h.SetConnControl(ConnControlPing)
-	expected := fmt.Sprintf("[FrameHeader %v Ping 12 (4)]", ConnExchangeID)
+	expected := fmt.Sprintf("[FrameHeader %v Ping 12 (4)]", ExchangeID(ConnExchangeID))
 	assert.Equal(t, expected, h.String())
 	assert.Equal(t, 12, h.PayloadSize())
 }
