@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -207,12 +206,6 @@ func (e *Exchange) localSendingFinal() bool {
 	return atomic.CompareAndSwapInt32(&e.localSentFinal, 0, 1)
 }
 
-/*
-func (e *Exchange) hasLocalClosed() bool {
-	return isClosedChan(e.localClosed)
-}
-*/
-
 // Serial returns a string identifying the Exchange, containing the
 // owning Conn's serial number, a colon, and this exchange's serial number.
 // Note that the serial number is unrelated to the Exchange ID.
@@ -308,16 +301,6 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 		panic(fmt.Sprint(e, " received frame after final: ", fd))
 	}
 
-	/*
-		if e.getRunState() != runStateActive {
-			// will happen, for example, if the server aborts a request
-			// that is too large.
-			FrameDataFree(fd)
-			e.writeAckFrame()
-			return
-		}
-	*/
-
 	select {
 	case e.readCh <- fd:
 	default:
@@ -332,25 +315,11 @@ func (e *Exchange) receivedFinal(fd FrameData) {
 	defer e.cmu.Unlock()
 	// log.Print(" FIN ", e, fd)
 
-	needAck := false
 	if fd != nil {
 		if fd.Header().SizeValue() != 0 {
 			panic("final frame has size value set")
 		}
-		needAck = !fd.Header().IsFinalAck()
 		FrameDataFree(fd)
-	}
-
-	if e.isUnused() {
-		log.Printf("got final frame on unused: needAck=%v\n%v\n", needAck, e) // TODO: REMOVE
-		if needAck {
-			if fd := e.makeFinalFrame(needAck); fd != nil {
-				e.wmu.Lock()
-				defer e.wmu.Unlock()
-				e.conn.ExchangeWrite(fd)
-			}
-		}
-		return
 	}
 
 	if !e.remoteSendingFinal() {
@@ -376,9 +345,6 @@ func (e *Exchange) readFrame() (err error) {
 	select {
 	case e.fdr = <-e.readCh:
 		if e.fdr != nil {
-			if e.isUnused() {
-				panic("not started!?") // TODO: REMOVE
-			}
 			e.fp = NewFrameParser(e.fdr)
 			e.writeAckFrame()
 		} else {
