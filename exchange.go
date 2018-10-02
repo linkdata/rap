@@ -269,12 +269,10 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 			default:
 				panic(fmt.Sprint("ACK would block"))
 			}
-			return
 		}
-		if fd.Header().IsFinal() {
+		else if fd.Header().IsFinal() {
 			// a final frame
 			e.receivedFinal(fd)
-			return
 		}
 		return
 	}
