@@ -117,11 +117,6 @@ func (fd FrameData) Buffered() int {
 	return len(fd)
 }
 
-// IsAck returns true if this FrameData is an ACK frame
-func (fd FrameData) IsAck() bool {
-	return fd != nil && fd.Header().IsAck()
-}
-
 // Write implements io.Writer for FrameData, and is used to write body data.
 func (fd *FrameData) Write(p []byte) (n int, err error) {
 	*fd = append(*fd, p...)
