@@ -460,6 +460,8 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
+	assert.Equal(t, ErrUnhandledRecordType{}, errors.Cause(et.Exchange.WriteUserRecordType(0x1)))
+
 	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
 
 	// HasBody is true after writing
