@@ -154,10 +154,6 @@ type Exchange struct {
 
 var exchangeNextSerialNumber uint32
 
-func (e *Exchange) isUnused() bool {
-	return e.getRunState() == runStateUnused
-}
-
 func (e *Exchange) isHijacked() bool {
 	return atomic.LoadInt32(&e.hijacked) != 0
 }
@@ -166,16 +162,8 @@ func (e *Exchange) hijacking() bool {
 	return atomic.CompareAndSwapInt32(&e.hijacked, 0, 1)
 }
 
-func (e *Exchange) isStarted() bool {
-	return e.getRunState() == runStateActive
-}
-
 func (e *Exchange) starting() bool {
 	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateUnused), int32(runStateActive))
-}
-
-func (e *Exchange) stopping() bool {
-	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateActive), int32(runStateWaitFin))
 }
 
 func (e *Exchange) setRunState(state runState) {
