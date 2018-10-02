@@ -235,6 +235,7 @@ func (fd *FrameData) WriteBytes(bs []byte) error {
 
 // WriteRecordType writes a frame record type constant.
 func (fd *FrameData) WriteRecordType(rt RecordType) {
+	fd.Header().SetHead()
 	*fd = append(*fd, byte(rt))
 }
 
@@ -298,7 +299,6 @@ func (fd FrameData) WriteTo(w io.Writer) (int64, error) {
 
 // WriteRequest writes a FrameTypeRequest record to a FrameData given a http.Request.
 func (fd *FrameData) WriteRequest(r *http.Request) error {
-	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	fd.WriteString(r.Method)
 	fd.WriteString(r.URL.Scheme)
@@ -364,7 +364,6 @@ func (fd *FrameData) WriteRequest(r *http.Request) error {
 // WriteResponse writes a FrameTypeResponse record to a FrameData given a http.Header.
 func (fd *FrameData) WriteResponse(code int, contentLength int64, header http.Header) error {
 	// log.Print("FrameData.WriteResponse(", code, ", ", contentLength, ", ", header)
-	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPResponse)
 	fd.WriteLen(code)
 	for k, vv := range header {

@@ -27,19 +27,25 @@ A RAP *exchange* maintains the state of a request-response sequence or WebSocket
 A RAP *frame* is the basic structure within a connection. It consists of a *frame header* followed by the *frame body* data bytes.
 
 A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a connection control frame and the control field is a 3-bit MSB value specifying the frame type:
-* 000 - reserved, may not have payload
+* 000 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
 * 001 - reserved, but expect Size to reflect payload size
 * 010 - Ping, Size is bytes of payload data to return in a Pong
 * 011 - Pong, Size is bytes of payload data as received in the Ping
-* 100 - reserved, may not have payload
-* 101 - reserved, expect Size to reflect payload size
-* 110 - reserved, expect Size to reflect payload size
-* 111 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
+* 100 - reserved, ignore the Size value
+* 101 - reserved, ignore the Size value
+* 110 - reserved, ignore the Size value
+* 111 - reserved, ignore the Size value
 
-If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Final, Head and Body. If neither Head nor Body flags are set, the frame is a flow control frame and the Size is ignored.
-* 001 - Body - if set, data bytes form body data (after any RAP record, if present)
-* 010 - Head - if set, the data bytes starts with a RAP *record*
-* 100 - Final - if set, this is the final frame for the exchange
+If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Flow, Body and Head. The following table lists the valid flag combinations and their meaning:
+* 000 - () *reserved*, expect Size to reflect payload size
+* 001 - (Head) the data bytes starts with a RAP *record*, without any body bytes
+* 010 - (Body) data bytes form body data, no RAP *record* present
+* 011 - (Head|Body) data bytes starts with a RAP *record*, remaining bytes form body data
+* 100 - (Flow) flow control acknowledging the receipt of a data frame
+* 101 - (Flow|Head) *reserved*, ignore the Size value
+* 110 - (Flow|Body) final frame, requesting a ack in the form of a (Flow|Body)
+* 111 - (Flow|Body|Head) final frame ack, sent in response to a (Flow|Head), no response may be sent
+
 
 ## RAP records
 
@@ -159,13 +165,13 @@ Or:
 
 ## Flow control
 
-Each side of an *exchange* maintains a count of *frames* with payload (with the header and/or body bits set) sent but not acknowledged. Frames sent with the exchange id set to `0x1FFF` or those without payload are not counted.
+Each side of an *exchange* maintains a count of *frames* with payload (with the header and/or body bits set) sent but not acknowledged. Frames sent with the exchange id set to `0x1FFF` or flow control frames (those with the *flow* bit set) does not count.
 
-A receiver must be able to buffer the full window size count of *frames* per *exchange*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *exchange id*, control bits set to `000` (not final, no head data, no body data) and the size value set to zero. This is called a *flow control frame*.
+A receiver must be able to buffer the full window size count of *frames* per *exchange*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *exchange id*, control bits set to `000` (not flow, no body data, no head data) and the size value set to zero. This is called a *flow control frame*.
 
 ## Closing
 
-Before an *exchange* is done and it's id may be reused, both sides must send and receive a empty *frame* with only the  *final* control bit set. This is known as the *final frame*. After the *final frame* is sent, no more frames may be sent. Upon receiving a *final frame*, we must send a *final frame* in response if we haven't already.
+Before an *exchange* is done and it's id may be reused, both sides must send and receive a empty *frame* with the *flow* and *body* control bits set. These are known as the *final frames*. After the *final frame* is sent, no more non-flow-control frames may be sent. Upon receiving a *final frame*, we must send a *final frame ack* in response if we haven't already (known as a *final frame ack*).
 
 Once an *exchange* has both sent and received *final frames* it may be recycled and re-used.
 

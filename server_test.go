@@ -249,7 +249,7 @@ func Test_Server_serve_errors(t *testing.T) {
 	assert.True(t, st.haveServed())
 	// wait for ServerErrors to be populated
 	for attempt := 0; attempt < 1000; attempt++ {
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond * 10)
 		se := st.srv.ServeErrors()
 		assert.NotNil(t, se)
 		if len(se) > 0 {

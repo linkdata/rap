@@ -2,6 +2,10 @@ package rap
 
 import (
 	"log"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -71,4 +75,71 @@ func Benchmark_streamed_4k_frame_latency(b *testing.B) {
 
 		ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	})
+}
+
+/*
+func init() {
+	pprofsync.Do(func() {
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+	})
+}
+*/
+
+func Benchmark_100k_small_queries(b *testing.B) {
+	exchangeCount := 100000
+	parallelism := 20000
+	queryCount := int32(exchangeCount)
+	serveCount := int32(0)
+
+	s := &Server{
+		Addr: srvAddr,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&serveCount, 1)
+			w.WriteHeader(200)
+		}),
+	}
+	ln, lnerr := s.Listen(srvAddr)
+	if lnerr != nil {
+		log.Fatal(lnerr)
+	}
+	defer s.Close()
+	go s.Serve(ln)
+
+	c := NewClient(s.Addr)
+	defer c.Close()
+
+	/*
+		// warmup by making sure all the needed TCP links are up
+		exchanges := make(chan *Exchange, exchangeCount)
+		for i := 0; i < exchangeCount; i++ {
+			if e, err := c.NewExchangeMayDial(); err == nil {
+				exchanges <- e
+			} else {
+				log.Fatal(err)
+			}
+		}
+	*/
+
+	wg := sync.WaitGroup{}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		for i := 0; i < parallelism; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for atomic.LoadInt32(&serveCount) < atomic.LoadInt32(&queryCount) {
+					rr := httptest.NewRecorder()
+					r := httptest.NewRequest("GET", "/", nil)
+					c.ServeHTTP(rr, r)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	b.StopTimer()
+	if atomic.LoadInt32(&serveCount) < atomic.LoadInt32(&queryCount) {
+		log.Fatal("serveCount (", serveCount, ") < queryCount (", queryCount, ")")
+	}
 }

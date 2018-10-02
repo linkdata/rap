@@ -17,13 +17,18 @@ import (
 type ExchangeID uint16
 
 func (e ExchangeID) String() string {
-	return fmt.Sprintf("[ExchangeID %04x]", uint16(e))
+	return fmt.Sprintf("[ID %04x]", uint16(e))
 }
 
 // ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
 type ErrUnhandledRecordType struct{}
 
 func (ErrUnhandledRecordType) Error() string { return "unhandled record type" }
+
+// ErrMissingFrameHead is returned when an RAP frame was expected to have the HEAD bit set and contain a RAP record.
+type ErrMissingFrameHead struct{}
+
+func (ErrMissingFrameHead) Error() string { return "missing frame head" }
 
 // ExchangeConnection is the interface that an Exchange needs in order to
 // communicate with the outside world and clean up.
@@ -102,6 +107,15 @@ func isClosedChan(c <-chan struct{}) bool {
 	}
 }
 
+type runState int32
+
+const (
+	runStateUnused  = runState(0) // idle
+	runStateActive  = runState(1) // sent or received frame that needs ack
+	runStateWaitFin = runState(2) // sent local final, needs remote final or final-ack
+	runStateRecycle = runState(3) // recycling
+)
+
 type timeoutError struct{}
 
 func (timeoutError) Error() string   { return "deadline exceeded" }
@@ -113,21 +127,26 @@ func (timeoutError) Temporary() bool { return true }
 // handles the flow control mechanism, which is a simple transmission
 // window with intermittent ACKs from the receiver.
 type Exchange struct {
-	ID            ExchangeID         // Exchange ID
-	conn          ExchangeConnection // the Conn that owns us
-	onRecycle     func(*Exchange)    // function to call when Exchange is recycled
-	ackCh         chan struct{}      // ack's from peer go in this
-	readCh        chan FrameData     // data frames from peer go in this
-	cmu           sync.Mutex         // guards localClosed and remoteClosed
-	localClosed   chan struct{}      // closed when Close() has been called
-	remoteClosed  int32              // nonzero if remote has sent it's final frame
-	sendWindow    int32              // number of frames still allowed to be in flight
-	wmu           sync.Mutex         // guards fdw
-	fdw           FrameData          // FrameData being written to, nil after final frame sent
-	rmu           sync.Mutex         // guards fdr
-	fdr           FrameData          // FrameData being read from by fr
-	fp            FrameParser        // Frame parser (into fdr)
-	isHijacked    bool               // true if Hijack() was called
+	ID          ExchangeID         // Exchange ID
+	conn        ExchangeConnection // the Conn that owns us
+	onRecycle   func(*Exchange)    // function to call when Exchange is recycled
+	ackCh       chan struct{}      // ack's from peer go in this
+	readCh      chan FrameData     // data frames from peer go in this
+	cmu         sync.Mutex         // guards localClosed and remoteClosed
+	localClosed chan struct{}      // closed when Close() has been called
+
+	// these are atomic to allow Exchange.String() to print the state without causing races
+	localSentFinal  int32    // nonzero if local has sent it's final frame
+	remoteSentFinal int32    // nonzero if remote has sent it's final frame
+	sendWindow      int32    // number of frames still allowed to be in flight
+	state           runState // nonzero if a header frame has been sent or received
+	hijacked        int32    // nonzero if Hijack() was called
+
+	wmu           sync.Mutex  // guards fdw
+	fdw           FrameData   // FrameData being written to, nil after final frame sent
+	rmu           sync.Mutex  // guards fdr
+	fdr           FrameData   // FrameData being read from by fr
+	fp            FrameParser // Frame parser (into fdr)
 	readDeadline  exchangeDeadline
 	writeDeadline exchangeDeadline
 	serialNumber  uint32
@@ -135,20 +154,56 @@ type Exchange struct {
 
 var exchangeNextSerialNumber uint32
 
-func (e *Exchange) hasRemoteClosed() bool {
-	return atomic.LoadInt32(&e.remoteClosed) != 0 // isClosedChan(e.remoteClosed)
+func (e *Exchange) isUnused() bool {
+	return e.getRunState() == runStateUnused
 }
 
-func (e *Exchange) remoteClosing() bool {
-	if atomic.CompareAndSwapInt32(&e.remoteClosed, 0, 1) {
+func (e *Exchange) isHijacked() bool {
+	return atomic.LoadInt32(&e.hijacked) != 0
+}
+
+func (e *Exchange) hijacking() bool {
+	return atomic.CompareAndSwapInt32(&e.hijacked, 0, 1)
+}
+
+func (e *Exchange) isStarted() bool {
+	return e.getRunState() == runStateActive
+}
+
+func (e *Exchange) starting() bool {
+	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateUnused), int32(runStateActive))
+}
+
+func (e *Exchange) stopping() bool {
+	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateActive), int32(runStateWaitFin))
+}
+
+func (e *Exchange) setRunState(state runState) {
+	atomic.StoreInt32((*int32)(&e.state), int32(state))
+}
+
+func (e *Exchange) getRunState() runState {
+	return runState(atomic.LoadInt32((*int32)(&e.state)))
+}
+
+func (e *Exchange) hasRemoteSentFinal() bool {
+	return atomic.LoadInt32(&e.remoteSentFinal) != 0
+}
+
+func (e *Exchange) remoteSendingFinal() bool {
+	if atomic.CompareAndSwapInt32(&e.remoteSentFinal, 0, 1) {
 		close(e.readCh)
 		return true
 	}
 	return false
 }
 
-func (e *Exchange) hasLocalClosed() bool {
-	return isClosedChan(e.localClosed)
+func (e *Exchange) hasLocalSentFinal() bool {
+	return atomic.LoadInt32(&e.localSentFinal) != 0
+}
+
+func (e *Exchange) localSendingFinal() bool {
+	return atomic.CompareAndSwapInt32(&e.localSentFinal, 0, 1)
 }
 
 // Serial returns a string identifying the Exchange, containing the
@@ -163,12 +218,39 @@ func (e *Exchange) Serial() string {
 }
 
 func (e *Exchange) String() string {
-	return fmt.Sprintf("[Exchange %v %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.Serial(), e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
+	state := ""
+	switch e.getRunState() {
+	case runStateUnused:
+		state = "IDLE  "
+	case runStateActive:
+		state = " RUN  "
+	case runStateWaitFin:
+		state = "  FIN "
+	case runStateRecycle:
+		state = "    RC"
+	}
+	hijacked := "  "
+	if e.isHijacked() {
+		hijacked = " HJ"
+	}
+	locF := "  "
+	if e.hasLocalSentFinal() {
+		locF = "LF"
+	}
+	remF := "  "
+	if e.hasRemoteSentFinal() {
+		remF = "RF"
+	}
+
+	return fmt.Sprintf("[Exchange %v %v %s %s %s %s (%d+%d)]",
+		e.Serial(), e.ID, state, hijacked, locF, remF, e.getSendWindow(), len(e.ackCh))
 }
 
 // NewExchange creates a new exchange
 func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
+	if exchangeID >= ConnExchangeID {
+		panic(fmt.Sprintf("illegal exchange ID %d", int(exchangeID)))
+	}
 	e = &Exchange{
 		ID:            exchangeID,
 		conn:          conn,
@@ -190,50 +272,61 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 // the Conn.
 func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	// log.Print("SubmitFrame() ", e, fd)
-	if fd == nil || fd.Header().IsFinal() {
-		// final frame
-		e.recievedFinal(fd)
+
+	if fd == nil {
+		// unexpected EOF
+		e.receivedFinal(nil)
 		return
 	}
 
-	if e.hasRemoteClosed() {
+	if fd.Header().HasFlow() {
+		if fd.Header().IsAck() {
+			FrameDataFree(fd)
+			select {
+			case e.ackCh <- struct{}{}:
+			default:
+				panic(fmt.Sprint("ACK would block"))
+			}
+			return
+		}
+		if fd.Header().IsFinal() {
+			// a final frame
+			e.receivedFinal(fd)
+			return
+		}
+		return
+	}
+
+	if e.hasRemoteSentFinal() {
 		panic(fmt.Sprint(e, " received frame after final: ", fd))
 	}
 
-	if fd.IsAck() {
-		// ack frame
-		FrameDataFree(fd)
-		select {
-		case e.ackCh <- struct{}{}:
-		default:
-			panic(fmt.Sprint("ACK would block"))
-		}
-	} else {
-		// data frame
-		select {
-		case e.readCh <- fd:
-		default:
-			panic(fmt.Sprint("DATA would block: ", fd))
-		}
+	select {
+	case e.readCh <- fd:
+	default:
+		panic(fmt.Sprint("DATA would block: ", fd))
 	}
 
 	return
 }
 
-func (e *Exchange) recievedFinal(fd FrameData) {
+func (e *Exchange) receivedFinal(fd FrameData) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 	// log.Print(" FIN ", e, fd)
+
 	if fd != nil {
-		if fd.Header().HasPayload() {
-			panic(fmt.Sprint("final frame has payload: ", fd))
+		if fd.Header().SizeValue() != 0 {
+			panic("final frame has size value set")
 		}
 		FrameDataFree(fd)
 	}
-	if !e.remoteClosing() {
+
+	if !e.remoteSendingFinal() {
 		panic("received multiple final frames")
 	}
-	if e.hasLocalClosed() {
+
+	if e.hasLocalSentFinal() {
 		e.recycle()
 	}
 }
@@ -269,7 +362,9 @@ func (e *Exchange) readFrame() (err error) {
 }
 
 func (e *Exchange) writeAckFrame() {
-	e.conn.ExchangeWrite(FrameDataAllocID(e.ID))
+	fd := FrameDataAllocID(e.ID)
+	fd.Header().SetFlow()
+	e.conn.ExchangeWrite(fd)
 }
 
 // LoadFrameReader ensures the frame reader has payload data or an error.
@@ -295,7 +390,7 @@ func (e *Exchange) WriteStart() error {
 }
 
 func (e *Exchange) writeStart() error {
-	if e.hasRemoteClosed() {
+	if e.hasRemoteSentFinal() {
 		return errors.WithStack(io.EOF)
 	}
 	select {
@@ -516,13 +611,13 @@ func (e *Exchange) flush() (err error) {
 }
 
 func (e *Exchange) writeFrame(fd FrameData) (err error) {
-	if fd.Header().IsFinal() {
-		panic(fmt.Sprint("attempt to send final frame from other than Close(): ", e, fd))
+	if fd.Header().HasFlow() {
+		panic(fmt.Sprint("attempt to send flow control frame: ", e, fd))
 	}
 
-	if !fd.Header().HasPayload() {
+	if !fd.Header().HasBodyOrHead() {
 		if len(fd) > FrameHeaderSize {
-			panic(fmt.Sprint("missing payload flag: ", e, fd))
+			panic(fmt.Sprint("missing head or body flag: ", e, fd))
 		}
 		// empty blank frame
 		FrameDataFree(fd)
@@ -547,13 +642,14 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 		case <-e.writeDeadline.wait():
 			err = errors.WithStack(timeoutError{})
 		default:
-			if e.hasRemoteClosed() {
+			if e.hasRemoteSentFinal() {
 				err = errors.WithStack(io.EOF)
 			} else if e.getSendWindow() > 0 {
 				// if the send window allows, go ahead and send it
 				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
 					panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
 				}
+				e.starting()
 				return e.conn.ExchangeWrite(fd)
 			} else {
 				// SendWindow is empty, so do a blocking wait for an ACK
@@ -586,23 +682,33 @@ func (e *Exchange) getConn() *Conn {
 	return nil
 }
 
-// Recycle restores an Exchange to it's initial state and calls the onRecycle handler.
-// Either both localClosed and remoteClosed channels must be closed, or the Exchange
-// must be unused.
+// recycle restores an Exchange to it's initial state and calls the onRecycle handler.
+// Before calling, the local end must be closed. If the exchange is started,
+// then remote must be closed as well. If it is not started, the remote must not be closed.
 func (e *Exchange) recycle() {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
 	e.rmu.Lock()
 	defer e.rmu.Unlock()
+	e.recycleLocked()
+}
 
+func (e *Exchange) recycleLocked() {
 	// log.Print("  RC ", e)
 
-	if len(e.fdw) > 0 {
-		panic("still data left in fdw")
-	}
+	e.setRunState(runStateRecycle)
 
-	if !e.hasLocalClosed() || !e.hasRemoteClosed() {
-		panic("recycle() requires both local and remote channels closed")
+	if !isClosedChan(e.localClosed) {
+		panic(fmt.Sprintf("recycle(): local not closed\n%v\n", e))
+	}
+	if len(e.fdw) > 0 {
+		panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", e, e.fdw))
+	}
+	if !e.hasLocalSentFinal() {
+		panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", e))
+	}
+	if !e.hasRemoteSentFinal() {
+		panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", e))
 	}
 
 	// drain ack and read channels
@@ -615,28 +721,47 @@ func (e *Exchange) recycle() {
 
 	e.readCh = make(chan FrameData, MaxSendWindowSize)
 	e.localClosed = make(chan struct{})
-	atomic.StoreInt32(&e.remoteClosed, 0)
+	atomic.StoreInt32(&e.localSentFinal, 0)
+	atomic.StoreInt32(&e.remoteSentFinal, 0)
 	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
-	e.isHijacked = false
+	atomic.StoreInt32(&e.hijacked, 0)
 	e.fdw = nil
 	e.fdr = nil
 	e.fp = nil
 	e.writeDeadline.set(time.Time{})
 	e.readDeadline.set(time.Time{})
 
+	e.setRunState(runStateUnused)
+
 	if e.onRecycle != nil {
 		e.onRecycle(e)
 	}
 }
 
-func (e *Exchange) writeFinal() {
+func (e *Exchange) makeFinalFrame(isAck bool) (fd FrameData) {
+	if fd = FrameDataAllocID(e.ID); fd != nil {
+		fd.Header().SetFlow()
+		fd.Header().SetBody()
+		if isAck {
+			fd.Header().SetHead()
+		}
+	}
+	return
+}
+
+func (e *Exchange) writeFinalLocked(isAck bool) {
+	if e.localSendingFinal() {
+		e.flush()
+		if fd := e.makeFinalFrame(isAck); fd != nil {
+			e.conn.ExchangeWrite(fd)
+		}
+	}
+}
+
+func (e *Exchange) writeFinal(isAck bool) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
-	e.flush()
-	if fd := FrameDataAllocID(e.ID); fd != nil {
-		fd.Header().SetFinal()
-		e.conn.ExchangeWrite(fd)
-	}
+	e.writeFinalLocked(isAck)
 }
 
 func (e *Exchange) consumeAck() {
@@ -648,11 +773,7 @@ func (e *Exchange) consumeAck() {
 // Close unblocks all blocked calls to Read and Write, sends the final frame and
 // discards any pending data in the receive queue.
 // If the remote is closed, it recycles the Exchange.
-func (e *Exchange) Close() (err error) {
-	return e.close(false)
-}
-
-func (e *Exchange) close(notIfHijacked bool) (err error) {
+func (e *Exchange) Close() error {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 
@@ -663,18 +784,32 @@ func (e *Exchange) close(notIfHijacked bool) (err error) {
 		// already closed
 		return errors.WithStack(io.ErrClosedPipe)
 	default:
-		if notIfHijacked && e.isHijacked {
-			return nil
-		}
 		close(e.localClosed)
-		e.writeFinal()
 	}
 
-	if e.hasRemoteClosed() {
-		e.recycle() // otherwise will be recycled when remote is closed
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	e.rmu.Lock()
+	defer e.rmu.Unlock()
+
+	if !e.hasRemoteSentFinal() {
+		// will be recycled when remote is closed
+		e.writeFinalLocked(false)
+		e.setRunState(runStateWaitFin)
+		return nil
 	}
+
+	e.writeFinalLocked(true)
+	e.recycleLocked()
 
 	return nil
+}
+
+func (e *Exchange) closeIfNotHijacked() error {
+	if e.isHijacked() {
+		return nil
+	}
+	return e.Close()
 }
 
 // OnRecycle sets the callback to be invoked when the exchange is being recycled.
@@ -684,6 +819,17 @@ func (e *Exchange) OnRecycle(onRecycle func(*Exchange)) {
 	e.cmu.Lock()
 	defer e.cmu.Unlock()
 	e.onRecycle = onRecycle
+}
+
+// WriteUserRecordType writes a user record marker and sets the head bit.
+func (e *Exchange) WriteUserRecordType(c byte) (err error) {
+	if c < 0x80 {
+		return ErrUnhandledRecordType{}
+	}
+	if err = e.WriteStart(); err == nil {
+		e.fdw.WriteRecordType(RecordType(c))
+	}
+	return
 }
 
 // WriteRequest writes a http.Request to the exchange, including it's Body.
@@ -764,30 +910,30 @@ func (e *Exchange) writeResponseData(code int, contentLength int64, header http.
 
 // Serve waits for a start frame and then invokes the given http.Handler.
 func (e *Exchange) Serve(h http.Handler) (err error) {
-	defer e.close(true)
-	if err = e.LoadFrameReader(); err != nil {
-		return
-	}
-	if !e.fdr.Header().HasHead() {
-		panic(fmt.Sprintf("rap.Exchange.Serve(): missing frame head\n%+v\n%+v\n", e, e.fdr))
-	}
-	switch rt := e.fp.ReadRecordType(); rt {
-	case RecordTypeHTTPRequest:
-		req, err := e.fp.ReadRequest()
-		if err != nil {
-			return err
+	defer e.closeIfNotHijacked()
+	if err = e.LoadFrameReader(); err == nil {
+		if e.fdr.Header().HasHead() {
+			switch rt := e.fp.ReadRecordType(); rt {
+			case RecordTypeHTTPRequest:
+				var req *http.Request
+				req, err = e.fp.ReadRequest()
+				if err == nil {
+					// log.Printf("rap.Exchange.Serve(): %+v\n", req)
+					req.Body = e
+					h.ServeHTTP(&ResponseWriter{Exchange: e}, req)
+					// if the handler left things in the buffer, flush it
+					if flushErr := e.Flush(); err == nil {
+						err = flushErr
+					}
+				}
+			case RecordTypeHijacked:
+				e.hijacking()
+			default:
+				err = errors.Wrapf(ErrUnhandledRecordType{}, "type code '%02x'", int(rt))
+			}
+		} else {
+			err = errors.Wrapf(ErrMissingFrameHead{}, "%v", e.fdr)
 		}
-		// log.Printf("rap.Exchange.Serve(): %+v\n", req)
-		req.Body = e
-		h.ServeHTTP(&ResponseWriter{Exchange: e}, req)
-		// if the handler left things in the buffer, flush it
-		if flushErr := e.Flush(); err == nil {
-			err = flushErr
-		}
-	case RecordTypeHijacked:
-		e.isHijacked = true
-	default:
-		panic(fmt.Sprint("rap.Exchange.Serve(): unhandled record type ", rt))
 	}
 	return
 }
@@ -798,11 +944,13 @@ func (e *Exchange) Serve(h http.Handler) (err error) {
 func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	e.wmu.Lock()
 	defer e.wmu.Unlock()
-	e.isHijacked = true
-	fd := NewFrameDataID(e.ID)
-	fd.WriteRecordType(RecordTypeHijacked)
-	fd.Header().SetHead()
-	return e, bufio.NewReadWriter(bufio.NewReader(e), bufio.NewWriter(e)), e.writeFrame(fd)
+	if e.hijacking() {
+		e.starting()
+		fd := NewFrameDataID(e.ID)
+		fd.WriteRecordType(RecordTypeHijacked)
+		return e, bufio.NewReadWriter(bufio.NewReader(e), bufio.NewWriter(e)), e.writeFrame(fd)
+	}
+	return nil, nil, errors.Errorf("already hijacked")
 }
 
 type exchangeAddr struct{}
@@ -824,7 +972,7 @@ func (e *Exchange) RemoteAddr() net.Addr {
 // with the connection. It is equivalent to calling both
 // SetReadDeadline and SetWriteDeadline.
 func (e *Exchange) SetDeadline(t time.Time) error {
-	if e.hasLocalClosed() {
+	if e.hasLocalSentFinal() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	e.readDeadline.set(t)
@@ -836,7 +984,7 @@ func (e *Exchange) SetDeadline(t time.Time) error {
 // and any currently-blocked Read call.
 // A zero value for t means Read will not time out.
 func (e *Exchange) SetReadDeadline(t time.Time) error {
-	if e.hasLocalClosed() {
+	if e.hasLocalSentFinal() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	e.readDeadline.set(t)
@@ -849,7 +997,7 @@ func (e *Exchange) SetReadDeadline(t time.Time) error {
 // some of the data was successfully written.
 // A zero value for t means Write will not time out.
 func (e *Exchange) SetWriteDeadline(t time.Time) error {
-	if e.hasLocalClosed() {
+	if e.hasLocalSentFinal() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	e.writeDeadline.set(t)

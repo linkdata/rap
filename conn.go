@@ -39,14 +39,14 @@ func (e PanicError) Error() string { return "peer panic" }
 type connControlHandler func(*Conn, FrameData) error
 
 var connControlHandlers = map[ConnControl]connControlHandler{
-	connControlReserved000: connControlReservedHandler,
+	ConnControlPanic:       connControlPanicHandler,
 	connControlReserved001: connControlReservedHandler,
 	ConnControlPing:        connControlPingHandler,
 	ConnControlPong:        connControlPongHandler,
 	connControlReserved100: connControlReservedHandler,
 	connControlReserved101: connControlReservedHandler,
 	connControlReserved110: connControlReservedHandler,
-	ConnControlPanic:       connControlPanicHandler,
+	connControlReserved111: connControlReservedHandler,
 }
 
 // Conn multiplexes concurrent requests-response Exchanges.
@@ -63,6 +63,7 @@ type Conn struct {
 	exchangeLastID     int32
 	mu                 sync.Mutex
 	doneChan           chan struct{}
+	readerWaitGroup    sync.WaitGroup
 	lastPingSent       int64 // Unix nanoseconds
 	lastPongRcvd       int64 // Unix nanoseconds
 	latency            int64 // Unix nanoseconds
@@ -87,7 +88,12 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
 		doneChan:        make(chan struct{}),
+		readerWaitGroup: sync.WaitGroup{},
 		serialNumber:    atomic.AddUint32(&connNextSerialNumber, 1),
+	}
+
+	for idx := range c.exchangeLookup {
+		c.exchangeLookup[idx] = NewExchange(c, ExchangeID(idx))
 	}
 	return c
 }
@@ -120,12 +126,12 @@ func connControlPanicHandler(c *Conn, fd FrameData) error {
 		fp := NewFrameParser(fd)
 		msg, _ = fp.ReadString()
 	}
-	return errors.WithStack(errors.WithMessage(PanicError{}, msg))
+	return errors.Wrap(PanicError{}, msg)
 }
 
 func connControlReservedHandler(c *Conn, fd FrameData) error {
 	defer FrameDataFree(fd)
-	return errors.WithStack(errors.WithMessage(ProtocolError{}, fmt.Sprintf("unknown conn control frame %v", fd.Header())))
+	return errors.Wrapf(ProtocolError{}, "unknown conn control frame %v", fd.Header())
 }
 
 // Ping sends a ping frame and returns without waiting for response.
@@ -158,7 +164,19 @@ func (c *Conn) Latency() (d time.Duration) {
 // ReadFrom implements io.ReaderFrom.
 func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 	var unreported int64
+
 	hasCollector := c.StatsCollector != nil
+
+	c.mu.Lock()
+	select {
+	case <-c.doneChan:
+		c.mu.Unlock()
+		return
+	default:
+		c.readerWaitGroup.Add(1)
+		defer c.readerWaitGroup.Done()
+	}
+	c.mu.Unlock()
 
 	for {
 		var m int64
@@ -194,9 +212,9 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			break
 		}
 
-		// log.Print("READ ", c, fd, " sendW=", e.getSendWindow(), "+", len(e.ackCh))
+		// log.Print("READ ", e, fd)
 
-		if fd.Header().HasHead() {
+		if e.starting() {
 			if c.ReadTimeout != 0 {
 				e.SetReadDeadline(time.Now().Add(c.ReadTimeout))
 			} else {
@@ -207,6 +225,9 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			} else {
 				e.SetWriteDeadline(time.Time{})
 			}
+			if c.Handler != nil {
+				go e.Serve(c.Handler)
+			}
 		}
 
 		e.SubmitFrame(fd)
@@ -215,32 +236,32 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 }
 
 func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e = c.exchangeLookup[id]
-	if e == nil {
-		select {
-		case <-c.doneChan:
-			return
-		default:
+	return c.exchangeLookup[id]
+	/*
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		e = c.exchangeLookup[id]
+		if e == nil {
+			select {
+			case <-c.doneChan:
+				return
+			default:
+			}
+			e = NewExchange(c, id)
+			c.exchangeLookup[id] = e
+
+				//if c.Handler != nil {
+				//	go c.repeatServe(e)
+				//}
 		}
-		e = NewExchange(c, id)
-		c.exchangeLookup[id] = e
-		if c.Handler != nil {
-			go c.RepeatServe(e)
-		}
-	}
-	return
+		return
+	*/
 }
 
-// RepeatServe repeatedly calls Exchange.Serve() until an error occurs
-func (c *Conn) RepeatServe(e *Exchange) (err error) {
-	recycleCh := make(chan struct{}, 1)
-	e.OnRecycle(func(e *Exchange) {
-		recycleCh <- struct{}{}
-	})
-	defer e.OnRecycle(nil)
+// repeatServe repeatedly calls Exchange.Serve() until an error occurs
+func (c *Conn) repeatServe(e *Exchange) (err error) {
 	for {
+		recycleCh := make(chan struct{})
 		err = e.Serve(c.Handler)
 		if err != nil {
 			if !isClosedError(err) {
@@ -303,7 +324,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", c, fd, " sendW=", c.getExchangeForID(fd.Header().ExchangeID()).getSendWindow(), "+", len(c.getExchangeForID(fd.Header().ExchangeID()).ackCh))
+			// log.Print("WRIT ", c.getExchangeForID(fd.Header().ExchangeID()), fd)
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)
@@ -377,6 +398,8 @@ func (c *Conn) Close() (err error) {
 		// closing the I/O stream will cause the reader goroutine to stop with an error
 		err = c.ReadWriteCloser.Close()
 
+		c.readerWaitGroup.Wait()
+
 		// Drain the unused exchange channel
 		for len(c.exchanges) > 0 {
 			if e := <-c.exchanges; e != nil {
@@ -396,7 +419,6 @@ func (c *Conn) Close() (err error) {
 				}
 			}
 		}
-
 	}
 
 	return

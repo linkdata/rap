@@ -274,7 +274,7 @@ func Test_Conn_exchange_overflow(t *testing.T) {
 	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
 	e := NewExchange(ct.conn, 1)
 	e.OnRecycle(ct.conn.ExchangeRelease)
-	assert.True(t, e.remoteClosing())
+	assert.True(t, e.remoteSendingFinal())
 	assert.Panics(t, func() { e.Close() })
 }
 
@@ -323,7 +323,7 @@ func Test_Conn_conncontrol_ping_pong(t *testing.T) {
 func Test_Conn_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
-	//ct.expectServerError = io.ErrClosedPipe
+	ct.expectServerError = serverClosedError{}
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(ConnControlPing)
 	fd.WriteInt64(time.Now().UnixNano())
@@ -340,8 +340,9 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct.expectConnError = io.EOF
 	ct.Start()
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(connControlReserved000)
+	fd.WriteConnControl(connControlReserved001)
 	ct.conn.ExchangeWrite(fd)
+	<-ct.serverDone
 }
 
 func Test_Conn_conncontrol_panic(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -52,7 +53,7 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 	}
 
 	go func() {
-		timeout := time.NewTimer(time.Second * 10)
+		timeout := time.NewTimer(time.Minute)
 		defer timeout.Stop()
 		for {
 			var fd FrameData
@@ -66,15 +67,22 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 				break
 			}
 			if !fd.Header().IsConnControl() {
-				if fd.Header().IsFinal() {
-					if etw.et.sendingFinal() {
-						if etw.et.finFn != nil {
-							etw.et.finFn(etw.et.Exchange)
-						} else {
-							etw.et.Exchange.SubmitFrame(fd)
+				if fd.Header().HasFlow() {
+					isFinal := fd.Header().IsFinal()
+					needsAck := !fd.Header().IsFinalAck()
+					FrameDataFree(fd)
+					if isFinal {
+						if etw.et.sendingFinal() {
+							if etw.et.finFn != nil {
+								etw.et.finFn(etw.et.Exchange)
+							} else {
+								if needsAck {
+									etw.et.SubmitFrame(et.Exchange.makeFinalFrame(true))
+								}
+							}
 						}
 					}
-				} else if fd.Header().HasPayload() {
+				} else {
 					etw.lastWritten = fd
 					if etw.et.ackFn != nil {
 						etw.et.ackFn(etw.et.Exchange)
@@ -120,9 +128,6 @@ func (etw *exchangeTesterWriter) WaitForClose() {
 
 func (etw *exchangeTesterWriter) ExchangeWrite(fd FrameData) error {
 	if !etw.et.isWriteClosed() {
-		if fd.Header().IsFinal() && fd.Header().HasPayload() {
-			panic("attempt to send final frame with payload")
-		}
 		t := time.NewTimer(time.Second)
 		defer t.Stop()
 		select {
@@ -206,6 +211,7 @@ func (et *exchangeTester) CloseWrite() {
 }
 
 func (et *exchangeTester) SubmitFrame(fd FrameData) error {
+	et.Exchange.starting()
 	return et.Exchange.SubmitFrame(fd)
 }
 
@@ -215,7 +221,7 @@ func (et *exchangeTester) sendingFinal() bool {
 
 func (et *exchangeTester) SendFinal() {
 	if et.sendingFinal() {
-		et.Exchange.SubmitFrame(nil)
+		et.SubmitFrame(et.Exchange.makeFinalFrame(false))
 	}
 }
 
@@ -324,9 +330,8 @@ func (fw *failWriter) failError() (err error) {
 
 func Test_Exchange_String(t *testing.T) {
 	e := NewExchange(&exchangeTester{}, 0x1)
-	expected := fmt.Sprintf("[Exchange %v %v sendW=%v sentC=%v recvC=%v len(ackCh)=%d]",
-		e.Serial(), e.ID, e.getSendWindow(), e.hasLocalClosed(), e.hasRemoteClosed(), len(e.ackCh))
-	assert.Equal(t, expected, e.String())
+	expected := fmt.Sprintf("[Exchange %v %v", e.Serial(), e.ID)
+	assert.True(t, strings.HasPrefix(e.String(), expected))
 }
 
 func Test_Exchange_Release(t *testing.T) {
@@ -399,7 +404,6 @@ func Test_Exchange_StartAndRelease_invalid_url_in_request_record(t *testing.T) {
 	defer et.Close()
 	fd := NewFrameData()
 	fd.WriteHeader(MaxExchangeID)
-	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	fd.WriteStringNull() // method
 	fd.WriteStringNull() // scheme
@@ -416,7 +420,6 @@ func Test_Exchange_StartAndRelease_incomplete_request_frame(t *testing.T) {
 	defer et.Close()
 	fd := NewFrameData()
 	fd.WriteHeader(MaxExchangeID)
-	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	et.SubmitFrame(fd)
 	assert.Panics(t, func() {
@@ -425,16 +428,15 @@ func Test_Exchange_StartAndRelease_incomplete_request_frame(t *testing.T) {
 	assert.True(t, et.Released())
 }
 
-func Test_Exchange_StartAndRelease_illegal_record_type(t *testing.T) {
-	// Illegal record type
+func Test_Exchange_StartAndRelease_unhandled_record_type(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	fd := NewFrameData()
 	fd.WriteHeader(MaxExchangeID)
-	fd.Header().SetHead()
 	fd.WriteRecordType(RecordTypeUserFirst - 1)
 	et.SubmitFrame(fd)
-	assert.Panics(t, func() { et.Exchange.Serve(et) })
+	err := et.Exchange.Serve(et)
+	assert.Equal(t, ErrUnhandledRecordType{}, errors.Cause(err))
 	assert.True(t, et.Released())
 }
 
@@ -443,8 +445,10 @@ func Test_Exchange_StartAndRelease_missing_body_bit_panics(t *testing.T) {
 	defer et.Close()
 	et.Exchange.writeStart()
 	et.Exchange.fdw.Write(make([]byte, 1))
-	assert.Panics(t, func() { et.Exchange.Flush() })
-	err := et.Exchange.Close()
+	var err error
+	assert.Panics(t, func() { err = et.Exchange.Flush() })
+	assert.NoError(t, err)
+	err = et.Exchange.Close()
 	assert.NoError(t, err)
 	assert.True(t, et.Released())
 }
@@ -453,10 +457,12 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
+	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
+
 	// HasBody is true after writing
 	assert.NoError(t, et.Exchange.writeByte(0x01))
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
-	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
+	assert.Equal(t, FrameHeaderSize+2, et.Exchange.Buffered())
 
 	// Fill up to limit
 	et.Exchange.write(make([]byte, et.Exchange.Available()))
@@ -476,7 +482,7 @@ func Test_Exchange_WriteByte(t *testing.T) {
 	et.Exchange.write(make([]byte, et.Exchange.Available()))
 	err := et.Exchange.WriteByte(0x01)
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
-	assert.True(t, et.Exchange.remoteClosing())
+	assert.True(t, et.Exchange.remoteSendingFinal())
 	et.Exchange.recycle()
 }
 
@@ -489,10 +495,12 @@ func Test_Exchange_Write(t *testing.T) {
 	assert.False(t, et.Exchange.fdw.Header().HasBody())
 	assert.Equal(t, FrameMaxPayloadSize, et.Exchange.Available())
 
+	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
+
 	// HasBody is true after writing
 	et.Exchange.writeByte(0x01)
 	assert.True(t, et.Exchange.fdw.Header().HasBody())
-	assert.Equal(t, FrameHeaderSize+1, et.Exchange.Buffered())
+	assert.Equal(t, FrameHeaderSize+2, et.Exchange.Buffered())
 
 	// Fill up to just under limit
 	et.Exchange.write(make([]byte, et.Exchange.Available()-1))
@@ -509,6 +517,8 @@ func Test_Exchange_Flush(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
+	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
+
 	// Normal flush
 	n, err := et.Exchange.Write([]byte{0x01, 0x02})
 	assert.NoError(t, err)
@@ -521,10 +531,10 @@ func Test_Exchange_Flush(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Overflow the frame and flush should error
-	et.Exchange.writeStart()
+	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
 	et.Exchange.fdw = append(et.Exchange.fdw, make([]byte, FrameMaxPayloadSize+1)...)
 	et.Exchange.fdw.Header().SetBody()
-	assert.Equal(t, FrameMaxSize+1, len(et.Exchange.fdw))
+	assert.Equal(t, FrameMaxSize+2, len(et.Exchange.fdw))
 	err = et.Exchange.Flush()
 	assert.Equal(t, ErrFrameTooBig{}, errors.Cause(err))
 }
@@ -553,6 +563,8 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
+	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
+
 	// Reading from nil
 	n, err := et.Exchange.ReadFrom(nil)
 	assert.Equal(t, io.EOF, errors.Cause(err))
@@ -575,7 +587,7 @@ func Test_Exchange_ReadFrom(t *testing.T) {
 
 	assert.NoError(t, et.Exchange.Flush())
 	assert.Zero(t, len(et.Exchange.fdw))
-	assert.False(t, et.Exchange.hasLocalClosed())
+	assert.False(t, et.Exchange.hasLocalSentFinal())
 
 	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
 	assert.NotZero(t, m)
@@ -615,15 +627,16 @@ func Test_Exchange_WriteRequest(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	err := et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
-	assert.False(t, et.Exchange.hasLocalClosed())
+	assert.False(t, et.Exchange.hasLocalSentFinal())
 	assert.NoError(t, err)
 
 	et = newExchangeTester(t)
 	defer et.Close()
 	et.finFn = func(e *Exchange) {} // ignore the final frame from Close()
+	et.Exchange.starting()
 	assert.NoError(t, et.Exchange.Close())
-	assert.True(t, et.Exchange.hasLocalClosed())
-	assert.False(t, et.Exchange.hasRemoteClosed())
+	assert.True(t, et.Exchange.hasLocalSentFinal())
+	assert.False(t, et.Exchange.hasRemoteSentFinal())
 	err = et.Exchange.WriteRequest(httptest.NewRequest("GET", "/", nil))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
 }
@@ -635,13 +648,14 @@ func Test_Exchange_WriteResponse(t *testing.T) {
 	rr.WriteString("Meh")
 	rr.WriteHeader(200)
 	err := et.Exchange.WriteResponse(rr.Result())
-	assert.False(t, et.Exchange.hasLocalClosed())
+	assert.False(t, et.Exchange.hasLocalSentFinal())
 	assert.NoError(t, err)
 }
 
 func Test_Exchange_CloseWrite(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
+	et.Exchange.starting()
 	close(et.Exchange.localClosed)
 	err := et.Exchange.Close()
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
@@ -658,6 +672,7 @@ func Test_Exchange_CloseWrite(t *testing.T) {
 
 	et = newExchangeTester(t)
 	defer et.Close()
+	assert.NoError(t, et.Exchange.WriteUserRecordType(0xFF))
 	assert.NoError(t, et.Exchange.WriteByte(0x01))
 	assert.NoError(t, et.Exchange.Flush())
 	assert.NoError(t, et.Exchange.WriteByte(0x02))
@@ -709,7 +724,7 @@ func Test_Exchange_ProxyResponse_transparency(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = et2.Exchange.WriteTo(rr2)
 	assert.Error(t, io.EOF, errors.Cause(err))
-	assert.True(t, et2.Exchange.hasRemoteClosed())
+	assert.True(t, et2.Exchange.hasRemoteSentFinal())
 	assert.Equal(t, int(3), rr.Body.Len())
 	assert.Equal(t, int(3), rr2.Body.Len())
 	assert.Equal(t, rr.Body.String(), rr2.Body.String())
@@ -742,7 +757,7 @@ func Test_Exchange_ProxyResponse_read_eof(t *testing.T) {
 	et.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
-	assert.True(t, et.Exchange.hasRemoteClosed())
+	assert.True(t, et.Exchange.hasRemoteSentFinal())
 	assert.Equal(t, io.EOF, errors.Cause(err))
 }
 
@@ -769,12 +784,11 @@ func Test_Exchange_ProxyResponse_wrong_record_type(t *testing.T) {
 	defer et.Close()
 	fd := NewFrameDataID(MaxExchangeID)
 	fd.WriteRecordType(RecordTypeUserFirst)
-	fd.Header().SetHead()
 	et.SubmitFrame(fd)
 	et.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := et.Exchange.ProxyResponse(rr2)
-	assert.True(t, et.Exchange.hasRemoteClosed())
+	assert.True(t, et.Exchange.hasRemoteSentFinal())
 	assert.Equal(t, ErrUnhandledRecordType{}.Error(), errors.Cause(err).Error())
 }
 
@@ -847,12 +861,12 @@ func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 	et.finFn = func(e *Exchange) {}
-	// et.Exchange.started()
+	et.Exchange.starting()
 	et.Exchange.Close()
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(et.Exchange.SetDeadline(time.Now())))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(et.Exchange.SetReadDeadline(time.Now())))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(et.Exchange.SetWriteDeadline(time.Now())))
-	assert.True(t, et.Exchange.remoteClosing())
+	assert.True(t, et.Exchange.remoteSendingFinal())
 	et.Exchange.recycle()
 }
 
@@ -875,9 +889,8 @@ func makeExchangePipe() (e1, e2 *Exchange, stop func(), err error) {
 	go func() { defer wg.Done(); c2.WriteTo(p2) }()
 	go func() { defer wg.Done(); c2.ReadFrom(p2) }()
 
-	ex1 := c1.NewExchange()
-	e1 = ex1
-	e2 = c2.getExchangeForID(ex1.ID)
+	e1 = c1.NewExchange()
+	e2 = c2.getExchangeForID(e1.ID)
 
 	return e1, e2, func() {
 		e1.Close()
@@ -909,6 +922,7 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, c1)
 	assert.NotNil(t, c2)
+	c2.WriteUserRecordType(0xFF)
 	/*
 		c2 being written to is streamed to c1, which is not ACK'ing to c2
 		since there is no one reading from it.
@@ -937,7 +951,7 @@ func Test_Exchange_flowcontrol_halts(t *testing.T) {
 	assert.NoError(t, c1.Close())
 
 	// wait for remote to be closed
-	for !c2.hasRemoteClosed() {
+	for !c2.hasRemoteSentFinal() {
 		time.Sleep(time.Millisecond)
 	}
 
@@ -984,10 +998,9 @@ func Test_Exchange_final_frame_with_body_panics(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
-	fd := NewFrameDataID(MaxExchangeID)
+	fd := et.Exchange.makeFinalFrame(false)
 	fd.WriteByte(0)
-	fd.Header().SetBody()
-	fd.Header().SetFinal()
+	fd.SetSizeValue()
 
 	assert.Panics(t, func() {
 		et.Exchange.SubmitFrame(fd)
@@ -998,14 +1011,13 @@ func Test_Exchange_multiple_final_frames_panics(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
-	fd := NewFrameDataID(MaxExchangeID)
-	fd.Header().SetFinal()
-	assert.NoError(t, et.Exchange.SubmitFrame(fd))
+	fd := et.Exchange.makeFinalFrame(false)
+	err := et.SubmitFrame(fd)
+	assert.NoError(t, err)
 
-	fd = NewFrameDataID(MaxExchangeID)
-	fd.Header().SetFinal()
+	fd = et.Exchange.makeFinalFrame(false)
 	assert.Panics(t, func() {
-		et.Exchange.SubmitFrame(fd)
+		et.SubmitFrame(fd)
 	})
 }
 
@@ -1013,13 +1025,15 @@ func Test_Exchange_recycle_with_only_local_closed_panics(t *testing.T) {
 	et := newExchangeTester(t)
 	defer et.Close()
 
+	et.Exchange.starting()
 	close(et.Exchange.localClosed)
 
 	assert.Panics(t, func() {
 		et.Exchange.recycle()
 	})
 
-	assert.True(t, et.Exchange.remoteClosing())
+	assert.True(t, et.Exchange.remoteSendingFinal())
+
 }
 
 func Test_Exchange_manually_sending_final_frame_panics(t *testing.T) {
@@ -1027,7 +1041,7 @@ func Test_Exchange_manually_sending_final_frame_panics(t *testing.T) {
 	defer et.Close()
 
 	et.Exchange.writeByte(0)
-	et.Exchange.fdw.Header().SetFinal()
+	et.Exchange.fdw.Header().SetFlow()
 
 	assert.Panics(t, func() {
 		et.Exchange.Flush()

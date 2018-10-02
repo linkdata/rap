@@ -18,89 +18,102 @@ package rap
 
 import "fmt"
 
-// FrameHeader provides the interface for manipulating a byte array as such.
-// The 32 bits of the frame header is divided into a 16-bit Size value, a 3-bit
-// control field and a 13-bit exchange Index.
-//
-// If Index is 0x1fff (highest possible), the frame is a connection control frame and the control field is a 3-bit MSB value specifying the frame type:
-// * 000 - reserved, may not have payload
-// * 001 - reserved, but expect Size to reflect payload size
-// * 010 - Ping, Size is bytes of payload data to return in a Pong
-// * 011 - Pong, Size is bytes of payload data as received in the Ping
-// * 100 - reserved, may not have payload
-// * 101 - reserved, expect Size to reflect payload size
-// * 110 - reserved, expect Size to reflect payload size
-// * 111 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
-//
-// If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Final, Head and Body. If neither Head nor Body flags are set, the frame is a flow control frame and the Size is ignored.
-// * 001 - Body - if set, data bytes form body data (after any RAP record, if present)
-// * 010 - Head - if set, the data bytes starts with a RAP *record*
-// * 100 - Final - if set, this is the final frame for the exchange
+/*
+
+FrameHeader is 32 bits, divided into a 16-bit Size value, a 3-bit
+control field and a 13-bit exchange Index. If Index is 0x1fff (highest
+possible), the frame is a connection control frame and the control field
+is a 3-bit MSB value specifying the frame type:
+
+* 000 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
+* 001 - reserved, but expect Size to reflect payload size
+* 010 - Ping, Size is bytes of payload data to return in a Pong
+* 011 - Pong, Size is bytes of payload data as received in the Ping
+* 100 - reserved, ignore the Size value
+* 101 - reserved, ignore the Size value
+* 110 - reserved, ignore the Size value
+* 111 - reserved, ignore the Size value
+
+If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and
+the control field is mapped to three flags: Flow, Body and Head. The following
+table lists the valid flag combinations and their meaning:
+
+* 000 - () *reserved*, expect Size to reflect payload size
+* 001 - (Head) the data bytes starts with a RAP *record*, without any body bytes
+* 010 - (Body) data bytes form body data, no RAP *record* present
+* 011 - (Head|Body) data bytes starts with a RAP *record*, remaining bytes form body data
+* 100 - (Flow) flow control acknowledging the receipt of a data frame
+* 101 - (Flow|Head) *reserved*, ignore the Size value
+* 110 - (Flow|Body) final frame, requesting a ack in the form of a (Flow|Body)
+* 111 - (Flow|Body|Head) final frame, sent in response to a (Flow|Head), no response may be sent
+
+*/
 type FrameHeader []byte
 
 // FrameFlag enumerates the flags used in the frame control bits.
 type FrameFlag byte
 
 const (
-	// FrameFlagBody indicates the presence of body data in the frame payload.
-	// If the frame payload also has a Head record, the body data starts after it.
-	FrameFlagBody FrameFlag = 0x20
 	// FrameFlagHead indicates the presence of a frame head record at the start
-	// of the frame payload.
-	FrameFlagHead FrameFlag = 0x40
-	// FrameFlagFinal signals the final frame for an exchange.
-	FrameFlagFinal FrameFlag = 0x80
+	// of the frame payload when the FLow flag is not set.
+	FrameFlagHead FrameFlag = 0x20
+	// FrameFlagBody indicates the presence of body data in the frame payload
+	// when the FLow flag is not set If the frame payload also has a Head record,
+	// the body data starts after it.
+	FrameFlagBody FrameFlag = 0x40
+	// FrameFlagFlow signals the final frame for an exchange.
+	FrameFlagFlow FrameFlag = 0x80
 	// FrameFlagMask is a byte mask of the bits used in the third header byte.
-	FrameFlagMask = byte(FrameFlagFinal | FrameFlagHead | FrameFlagBody)
+	FrameFlagMask = byte(FrameFlagFlow | FrameFlagBody | FrameFlagHead)
 )
 
 // ConnControl enumerates the different types of conn control frames.
 type ConnControl byte
 
 const (
-	// Unused but reserved for future use, no payload.
-	connControlReserved000 ConnControl = ConnControl(0)
-	// Unused but reserved for future use, Size contains payload size.
-	connControlReserved001 ConnControl = ConnControl(FrameFlagBody)
-	// ConnControlPing requests a Pong in response with the same payload
-	// as this Ping message. Note that the other side may choose to
-	// not respond to all Pings.
-	ConnControlPing ConnControl = ConnControl(FrameFlagHead)
-	// ConnControlPong is in response to a Ping. The Size value must be the
-	// same as the Size value for last received Ping.
-	ConnControlPong ConnControl = ConnControl(FrameFlagHead | FrameFlagBody)
-	// Unused but reserved for future use, no payload.
-	connControlReserved100 ConnControl = ConnControl(FrameFlagFinal)
-	// Unused but reserved for future use, Size contains payload size.
-	connControlReserved101 ConnControl = ConnControl(FrameFlagFinal | FrameFlagBody)
-	// Unused but reserved for future use, Size contains payload size.
-	connControlReserved110 ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead)
 	// ConnControlPanic means sender is shutting down due to error,
 	// Size is bytes of optional technical information. Abort all active requests
 	// and log the technical information, if available.
-	ConnControlPanic ConnControl = ConnControl(FrameFlagFinal | FrameFlagHead | FrameFlagBody)
+	ConnControlPanic ConnControl = ConnControl(0)
+	// Unused but reserved for future use, Size contains payload size.
+	connControlReserved001 ConnControl = ConnControl(FrameFlagHead)
+	// ConnControlPing requests a Pong in response with the same payload
+	// as this Ping message. Note that the other side may choose to
+	// not respond to all Pings.
+	ConnControlPing ConnControl = ConnControl(FrameFlagBody)
+	// ConnControlPong is in response to a Ping. The Size value must be the
+	// same as the Size value for last received Ping.
+	ConnControlPong ConnControl = ConnControl(FrameFlagBody | FrameFlagHead)
+	// Unused but reserved for future use, ignore Size value
+	connControlReserved100 ConnControl = ConnControl(FrameFlagFlow)
+	// Unused but reserved for future use, ignore Size value
+	connControlReserved101 ConnControl = ConnControl(FrameFlagFlow | FrameFlagHead)
+	// Unused but reserved for future use, ignore Size value
+	connControlReserved110 ConnControl = ConnControl(FrameFlagFlow | FrameFlagBody)
+	// Unused but reserved for future use, ignore Size value
+	connControlReserved111 ConnControl = ConnControl(FrameFlagFlow | FrameFlagBody | FrameFlagHead)
 )
 
 var connControlTexts = map[ConnControl]string{
-	connControlReserved000: "Rsvd000",
+	ConnControlPanic:       "Panic",
 	connControlReserved001: "Rsvd001",
 	ConnControlPing:        "Ping",
 	ConnControlPong:        "Pong",
 	connControlReserved100: "Rsvd100",
 	connControlReserved101: "Rsvd101",
 	connControlReserved110: "Rsvd110",
-	ConnControlPanic:       "Panic",
+	connControlReserved111: "Rsvd111",
 }
 
 var connFlagTexts = map[FrameFlag]string{
-	(0):                              "...",
-	(FrameFlagBody):                  "..B",
-	(FrameFlagHead):                  ".H.",
-	(FrameFlagHead | FrameFlagBody):  ".HB",
-	(FrameFlagFinal):                 "F..",
-	(FrameFlagFinal | FrameFlagBody): "F.B",
-	(FrameFlagFinal | FrameFlagHead): "FH.",
-	(FrameFlagFinal | FrameFlagHead | FrameFlagBody): "FHB",
+	(0):                             "...",
+	(FrameFlagHead):                 "..H",
+	(FrameFlagBody):                 ".B.",
+	(FrameFlagBody | FrameFlagHead): ".BH",
+	(FrameFlagFlow):                 "F..",
+	(FrameFlagFlow | FrameFlagHead): "F.H",
+	(FrameFlagFlow | FrameFlagBody): "FB.",
+	(FrameFlagFlow | FrameFlagBody | FrameFlagHead): "FBH",
 }
 
 func (fh FrameHeader) String() string {
@@ -162,16 +175,27 @@ func (fh FrameHeader) SetExchangeID(exchangeID ExchangeID) {
 	fh.setSmallValue(uint16(exchangeID))
 }
 
-// HasPayload returns true if either the Headers or Body bit is set.
-// If false, it means the Size value is not used for payload size.
+// HasPayload returns true if the Size value is used for payload size,
+// and either the Body or Head bit is set.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) HasPayload() bool {
-	return (fh[2] & byte(FrameFlagHead|FrameFlagBody)) != 0
+	return !fh.HasFlow() && fh.HasBodyOrHead()
 }
 
-// IsAck returns true if the frame has neither final, header nor body flags set.
+// IsAck returns true if the frame is acknowledging a sent frame.
 func (fh FrameHeader) IsAck() bool {
-	return (fh[2] & byte(FrameFlagFinal|FrameFlagHead|FrameFlagBody)) == 0
+	return FrameFlag(fh[2]&FrameFlagMask) == FrameFlagFlow
+}
+
+// IsFinal returns true if the frame is a final frame (either type).
+func (fh FrameHeader) IsFinal() bool {
+	return FrameFlag(fh[2]&byte(FrameFlagFlow|FrameFlagBody)) == FrameFlagFlow|FrameFlagBody
+}
+
+// IsFinalAck returns true if the frame is a final frame acknowledgement,
+// and no response is to be sent.
+func (fh FrameHeader) IsFinalAck() bool {
+	return fh[2]&byte(FrameFlagMask) == FrameFlagMask
 }
 
 // PayloadSize returns the number of payload bytes for a frame.
@@ -208,15 +232,21 @@ func (fh FrameHeader) SetConnControl(sc ConnControl) {
 	fh.SetExchangeID(ConnExchangeID)
 }
 
-// IsFinal returns true if the Final bit is set in the frame header.
+// HasFlow returns true if the Flow bit is set in the frame header.
 // Only valid for data frames where IsConnControl() returns false.
-func (fh FrameHeader) IsFinal() bool {
-	return FrameFlag(fh[2])&FrameFlagFinal == FrameFlagFinal
+func (fh FrameHeader) HasFlow() bool {
+	return FrameFlag(fh[2])&FrameFlagFlow == FrameFlagFlow
 }
 
-// SetFinal sets the Final bit in the header. Only valid for data frames.
-func (fh FrameHeader) SetFinal() {
-	fh[2] |= byte(FrameFlagFinal)
+// SetFlow sets the Flow bit in the header.
+// Only valid for data frames where IsConnControl() returns false.
+func (fh FrameHeader) SetFlow() {
+	fh[2] |= byte(FrameFlagFlow)
+}
+
+// HasBodyOrHead returns true if either the Body or Head bits are set.
+func (fh FrameHeader) HasBodyOrHead() bool {
+	return FrameFlag(fh[2])&(FrameFlagBody|FrameFlagHead) != 0
 }
 
 // HasHead returns true if the Head bit is set in the frame header.
