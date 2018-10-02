@@ -895,7 +895,7 @@ func makeExchangePipe() (e1, e2 *Exchange, stop func(), err error) {
 	go func() { defer wg.Done(); c2.ReadFrom(p2) }()
 
 	e1 = c1.NewExchange()
-	e2 = c2.getExchangeForID(e1.ID)
+	e2 = c2.exchangeLookup[e1.ID]
 
 	return e1, e2, func() {
 		e1.Close()
