@@ -261,12 +261,6 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	// log.Print("SubmitFrame() ", e, fd)
 
-	if fd == nil {
-		// unexpected EOF
-		e.receivedFinal(nil)
-		return
-	}
-
 	if fd.Header().HasFlow() {
 		if fd.Header().IsAck() {
 			FrameDataFree(fd)
