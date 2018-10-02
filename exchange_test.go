@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -330,8 +329,12 @@ func (fw *failWriter) failError() (err error) {
 
 func Test_Exchange_String(t *testing.T) {
 	e := NewExchange(&exchangeTester{}, 0x1)
-	expected := fmt.Sprintf("[Exchange %v %v", e.Serial(), e.ID)
-	assert.True(t, strings.HasPrefix(e.String(), expected))
+	e.setRunState(runStateWaitFin)
+	e.hijacking()
+	e.localSendingFinal()
+	e.remoteSendingFinal()
+	expected := fmt.Sprintf("[Exchange %v %v   FIN   HJ LF RF (%d+%d)]", e.Serial(), e.ID, SendWindowSize, 0)
+	assert.Equal(t, expected, e.String())
 }
 
 func Test_Exchange_Release(t *testing.T) {
