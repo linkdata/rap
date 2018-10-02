@@ -737,12 +737,6 @@ func (e *Exchange) writeFinalLocked(isAck bool) {
 	}
 }
 
-func (e *Exchange) writeFinal(isAck bool) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	e.writeFinalLocked(isAck)
-}
-
 func (e *Exchange) consumeAck() {
 	if atomic.AddInt32(&e.sendWindow, 1) > int32(SendWindowSize) {
 		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", e.getSendWindow(), int32(SendWindowSize), e))
