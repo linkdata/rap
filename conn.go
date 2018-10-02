@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -206,11 +205,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 			continue
 		}
 
-		e := c.getExchangeForID(fd.Header().ExchangeID())
-		if e == nil {
-			FrameDataFree(fd)
-			break
-		}
+		e := c.exchangeLookup[fd.Header().ExchangeID()]
 
 		// log.Print("READ ", e, fd)
 
@@ -233,47 +228,6 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		e.SubmitFrame(fd)
 	}
 	return
-}
-
-func (c *Conn) getExchangeForID(id ExchangeID) (e *Exchange) {
-	return c.exchangeLookup[id]
-	/*
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		e = c.exchangeLookup[id]
-		if e == nil {
-			select {
-			case <-c.doneChan:
-				return
-			default:
-			}
-			e = NewExchange(c, id)
-			c.exchangeLookup[id] = e
-
-				//if c.Handler != nil {
-				//	go c.repeatServe(e)
-				//}
-		}
-		return
-	*/
-}
-
-// repeatServe repeatedly calls Exchange.Serve() until an error occurs
-func (c *Conn) repeatServe(e *Exchange) (err error) {
-	for {
-		recycleCh := make(chan struct{})
-		err = e.Serve(c.Handler)
-		if err != nil {
-			if !isClosedError(err) {
-				log.Printf("rap.Conn.RepeatServeHTTP(): error: %+v\nexchange: %+v\n", err, e)
-			}
-		}
-		select {
-		case <-recycleCh:
-		case <-c.doneChan:
-			return
-		}
-	}
 }
 
 type flusher interface {
