@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/linkdata/rap.svg?branch=master)](https://travis-ci.org/linkdata/rap) [![Coverage Status](https://coveralls.io/repos/github/linkdata/rap/badge.svg?branch=master&service=github)](https://coveralls.io/github/linkdata/rap?branch=master&service=github)
+[![Build Status](https://travis-ci.org/linkdata/rap.svg?branch=master)](https://travis-ci.org/linkdata/rap) [![Coverage Status](https://coveralls.io/repos/github/linkdata/rap/badge.svg?branch=master)](https://coveralls.io/github/linkdata/rap?branch=master)
 
 # REST Aggregation Protocol
 
@@ -22,7 +22,7 @@ One or more RAP *gateways* are connected to a single upstream server. The gatewa
 
 A RAP *connection* multiplexes concurrent requests-response *exchanges*, identified by a (small) unsigned integer. The gateway maintains a set of which exchange identifiers are free and may use them in any order. A gateway may open as many connections as it needs, but should strive to keep as few as possible.
 
-A RAP *exchange* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-exchange flow control mechanism, which is a simple transmission window with ACKs from the receiver. Exchanges inject *frames* into the connection for transmission.
+A RAP *exchange* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-exchange flow control mechanism, which is a simple transmission window with ACKs from the receiver. Exchanges inject *frames* into the *connection* for transmission.
 
 A RAP *frame* is the basic structure within a connection. It consists of a *frame header* followed by the *frame body* data bytes.
 
@@ -165,9 +165,9 @@ Or:
 
 ## Flow control
 
-Each side of an *exchange* maintains a count of *frames* with payload (with the header and/or body bits set) sent but not acknowledged. Frames sent with the exchange id set to `0x1FFF` or flow control frames (those with the *flow* bit set) does not count.
+Each side of an *exchange* maintains a count of *frames* with payload (where the *flow* bit is clear) sent but not acknowledged. Frames sent with the exchange id set to `0x1FFF` or flow control frames (those with the *flow* bit set) does not count.
 
-A receiver must be able to buffer the full window size count of *frames* per *exchange*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *exchange id*, control bits set to `000` (not flow, no body data, no head data) and the size value set to zero. This is called a *flow control frame*.
+A receiver *exchange* must be able to buffer the full window size count of *frames*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *exchange id*, control bits set to `000` (not flow, no body data, no head data) and the size value set to zero. This is called a *flow control frame*.
 
 ## Closing
 
