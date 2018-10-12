@@ -35,7 +35,7 @@ type PanicError struct{}
 
 func (e PanicError) Error() string { return "peer panic" }
 
-type muxerControlHandler func(*Conn, FrameData) error
+type muxerControlHandler func(*Muxer, FrameData) error
 
 var muxerControlHandlers = map[MuxerControl]muxerControlHandler{
 	MuxerControlPanic:       muxerControlPanicHandler,
@@ -48,9 +48,9 @@ var muxerControlHandlers = map[MuxerControl]muxerControlHandler{
 	muxerControlReserved111: muxerControlReservedHandler,
 }
 
-// Conn multiplexes concurrent requests-response Exchanges.
+// Muxer multiplexes concurrent requests-response Exchanges.
 // It maintains the set of ExchangeID's that free and may use them in any order.
-type Conn struct {
+type Muxer struct {
 	io.ReadWriteCloser // The I/O endpoint, usually a TCP connection
 	StatsCollector     // Where to report statistics (optional)
 	ReadTimeout        time.Duration
@@ -71,15 +71,15 @@ type Conn struct {
 	serialNumber       uint32
 }
 
-var connNextSerialNumber uint32
+var muxerNextSerialNumber uint32
 
-func (c *Conn) String() string {
-	return fmt.Sprintf("[Conn %x]", c.serialNumber)
+func (mux *Muxer) String() string {
+	return fmt.Sprintf("[Conn %x]", mux.serialNumber)
 }
 
-// NewConn creates a new Conn and initializes it.
-func NewConn(rwc io.ReadWriteCloser) *Conn {
-	c := &Conn{
+// NewMuxer creates a new Muxer and initializes it.
+func NewMuxer(rwc io.ReadWriteCloser) *Muxer {
+	mux := &Muxer{
 		ReadWriteCloser: rwc,
 		ReadTimeout:     DefaultReadTimeout,
 		WriteTimeout:    DefaultWriteTimeout,
@@ -88,37 +88,37 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
 		doneChan:        make(chan struct{}),
 		readerWaitGroup: sync.WaitGroup{},
-		serialNumber:    atomic.AddUint32(&connNextSerialNumber, 1),
+		serialNumber:    atomic.AddUint32(&muxerNextSerialNumber, 1),
 	}
 
-	for idx := range c.exchangeLookup {
-		c.exchangeLookup[idx] = NewExchange(c, ExchangeID(idx))
+	for idx := range mux.exchangeLookup {
+		mux.exchangeLookup[idx] = NewExchange(mux, ExchangeID(idx))
 	}
-	return c
+	return mux
 }
 
-func muxerControlPingHandler(c *Conn, fd FrameData) (err error) {
+func muxerControlPingHandler(mux *Muxer, fd FrameData) (err error) {
 	fd.Header().SetConnControl(MuxerControlPong)
 	select {
-	case c.writeCh <- fd:
-	case <-c.doneChan:
+	case mux.writeCh <- fd:
+	case <-mux.doneChan:
 		return errors.WithStack(serverClosedError{})
 	}
 	return
 }
 
-func muxerControlPongHandler(c *Conn, fd FrameData) (err error) {
+func muxerControlPongHandler(mux *Muxer, fd FrameData) (err error) {
 	defer FrameDataFree(fd)
 	var now = time.Now().UnixNano()
-	atomic.StoreInt64(&c.lastPongRcvd, now)
+	atomic.StoreInt64(&mux.lastPongRcvd, now)
 	if fd.Header().HasPayload() {
 		fp := NewFrameParser(fd)
-		atomic.StoreInt64(&c.latency, now-fp.ReadInt64())
+		atomic.StoreInt64(&mux.latency, now-fp.ReadInt64())
 	}
 	return
 }
 
-func muxerControlPanicHandler(c *Conn, fd FrameData) error {
+func muxerControlPanicHandler(mux *Muxer, fd FrameData) error {
 	defer FrameDataFree(fd)
 	var msg string
 	if fd.Header().HasPayload() {
@@ -128,31 +128,31 @@ func muxerControlPanicHandler(c *Conn, fd FrameData) error {
 	return errors.Wrap(PanicError{}, msg)
 }
 
-func muxerControlReservedHandler(c *Conn, fd FrameData) error {
+func muxerControlReservedHandler(mux *Muxer, fd FrameData) error {
 	defer FrameDataFree(fd)
 	return errors.Wrapf(ProtocolError{}, "unknown conn control frame %v", fd.Header())
 }
 
 // Ping sends a ping frame and returns without waiting for response.
-func (c *Conn) Ping() {
+func (mux *Muxer) Ping() {
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(MuxerControlPing)
-	atomic.StoreInt64(&c.lastPingSent, time.Now().UnixNano())
-	fd.WriteInt64(c.lastPingSent)
+	atomic.StoreInt64(&mux.lastPingSent, time.Now().UnixNano())
+	fd.WriteInt64(mux.lastPingSent)
 	fd.SetSizeValue()
 	select {
-	case c.writeCh <- fd:
-	case <-c.doneChan:
+	case mux.writeCh <- fd:
+	case <-mux.doneChan:
 		FrameDataFree(fd)
 	}
 }
 
 // Latency returns the result of the last successful ping/pong measurement,
 // or the zero value if there is no current valid measurement.
-func (c *Conn) Latency() (d time.Duration) {
-	ping := atomic.LoadInt64(&c.lastPingSent)
+func (mux *Muxer) Latency() (d time.Duration) {
+	ping := atomic.LoadInt64(&mux.lastPingSent)
 	if ping > 0 {
-		pong := atomic.LoadInt64(&c.lastPongRcvd)
+		pong := atomic.LoadInt64(&mux.lastPongRcvd)
 		if ping <= pong {
 			d = time.Nanosecond * time.Duration(pong-ping)
 		}
@@ -161,21 +161,21 @@ func (c *Conn) Latency() (d time.Duration) {
 }
 
 // ReadFrom implements io.ReaderFrom.
-func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
+func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 	var unreported int64
 
-	hasCollector := c.StatsCollector != nil
+	hasCollector := mux.StatsCollector != nil
 
-	c.mu.Lock()
+	mux.mu.Lock()
 	select {
-	case <-c.doneChan:
-		c.mu.Unlock()
+	case <-mux.doneChan:
+		mux.mu.Unlock()
 		return
 	default:
-		c.readerWaitGroup.Add(1)
-		defer c.readerWaitGroup.Done()
+		mux.readerWaitGroup.Add(1)
+		defer mux.readerWaitGroup.Done()
 	}
-	c.mu.Unlock()
+	mux.mu.Unlock()
 
 	for {
 		var m int64
@@ -187,7 +187,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		if hasCollector {
 			unreported += m
 			if unreported > int64(FrameMaxSize) {
-				c.StatsCollector.AddBytesRead(unreported)
+				mux.StatsCollector.AddBytesRead(unreported)
 				unreported = 0
 			}
 		}
@@ -199,29 +199,29 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		}
 
 		if fd.Header().IsConnControl() {
-			if err = muxerControlHandlers[fd.Header().ConnControl()](c, fd); err != nil {
+			if err = muxerControlHandlers[fd.Header().ConnControl()](mux, fd); err != nil {
 				return
 			}
 			continue
 		}
 
-		e := c.exchangeLookup[fd.Header().ExchangeID()]
+		e := mux.exchangeLookup[fd.Header().ExchangeID()]
 
 		// log.Print("READ ", e, fd)
 
 		if e.starting() {
-			if c.ReadTimeout != 0 {
-				e.SetReadDeadline(time.Now().Add(c.ReadTimeout))
+			if mux.ReadTimeout != 0 {
+				e.SetReadDeadline(time.Now().Add(mux.ReadTimeout))
 			} else {
 				e.SetReadDeadline(time.Time{})
 			}
-			if c.WriteTimeout != 0 {
-				e.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
+			if mux.WriteTimeout != 0 {
+				e.SetWriteDeadline(time.Now().Add(mux.WriteTimeout))
 			} else {
 				e.SetWriteDeadline(time.Time{})
 			}
-			if c.Handler != nil {
-				go e.Serve(c.Handler)
+			if mux.Handler != nil {
+				go e.Serve(mux.Handler)
 			}
 		}
 
@@ -237,26 +237,26 @@ type flusher interface {
 // WriteTo implements io.WriterTo. FrameData arriving on the write channel
 // are buffered and written to w until the write channel is closed or
 // an error occurs.
-func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
+func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 	var unreported int64
 	var written int64
 	f, hasFlusher := w.(flusher)
-	hasCollector := c.StatsCollector != nil
+	hasCollector := mux.StatsCollector != nil
 
 	for err == nil {
 		var fd FrameData // fd starts out nil on each iteration
 
 		select {
-		case <-c.doneChan:
+		case <-mux.doneChan:
 			return 0, errors.WithStack(serverClosedError{})
-		case fd = <-c.writeCh:
+		case fd = <-mux.writeCh:
 		default:
 			// no immediately available FrameData, flush the output
 			if hasFlusher {
 				err = f.Flush()
 				if err == nil {
 					if hasCollector && unreported > 0 {
-						c.StatsCollector.AddBytesWritten(unreported)
+						mux.StatsCollector.AddBytesWritten(unreported)
 						unreported = 0
 					}
 				}
@@ -267,8 +267,8 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			// do a blocking read if we didn't get a fd
 			if fd == nil {
 				select {
-				case fd = <-c.writeCh:
-				case <-c.doneChan:
+				case fd = <-mux.writeCh:
+				case <-mux.doneChan:
 					err = errors.WithStack(serverClosedError{})
 				}
 				if fd == nil {
@@ -287,7 +287,7 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 			if hasCollector {
 				unreported += written
 				if unreported > int64(FrameMaxSize) {
-					c.StatsCollector.AddBytesWritten(unreported)
+					mux.StatsCollector.AddBytesWritten(unreported)
 					unreported = 0
 				}
 			}
@@ -304,24 +304,24 @@ func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 // ServeHTTP processes incoming and outgoing frames for the Conn until closed.
-func (c *Conn) ServeHTTP(h http.Handler) (err error) {
-	c.Handler = h
+func (mux *Muxer) ServeHTTP(h http.Handler) (err error) {
+	mux.Handler = h
 
 	errCh := make(chan error, 2)
 	defer close(errCh)
 
 	go func() {
-		_, err := c.ReadFrom(bufio.NewReaderSize(c.ReadWriteCloser, 64*1024))
+		_, err := mux.ReadFrom(bufio.NewReaderSize(mux.ReadWriteCloser, 64*1024))
 		errCh <- err
 	}()
 	go func() {
-		_, err := c.WriteTo(bufio.NewWriterSize(c.ReadWriteCloser, 64*1024))
+		_, err := mux.WriteTo(bufio.NewWriterSize(mux.ReadWriteCloser, 64*1024))
 		errCh <- err
 	}()
 
 	err = <-errCh
 
-	if closeErr := c.Close(); closeErr != nil && (err == nil || isClosedError(err)) {
+	if closeErr := mux.Close(); closeErr != nil && (err == nil || isClosedError(err)) {
 		err = closeErr
 	}
 
@@ -333,40 +333,40 @@ func (c *Conn) ServeHTTP(h http.Handler) (err error) {
 }
 
 // returns true if doneChan was closed now, false if already closed
-func (c *Conn) closeDoneChanLocked() bool {
+func (mux *Muxer) closeDoneChanLocked() bool {
 	select {
-	case <-c.doneChan:
+	case <-mux.doneChan:
 		return false
 	default:
-		close(c.doneChan)
+		close(mux.doneChan)
 		return true
 	}
 }
 
 // Close closes the Conn immediately.
-func (c *Conn) Close() (err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (mux *Muxer) Close() (err error) {
+	mux.mu.Lock()
+	defer mux.mu.Unlock()
 
-	if c.closeDoneChanLocked() {
+	if mux.closeDoneChanLocked() {
 		// closing the I/O stream will cause the reader goroutine to stop with an error
-		err = c.ReadWriteCloser.Close()
+		err = mux.ReadWriteCloser.Close()
 
-		c.readerWaitGroup.Wait()
+		mux.readerWaitGroup.Wait()
 
 		// Drain the unused exchange channel
-		for len(c.exchanges) > 0 {
-			if e := <-c.exchanges; e != nil {
+		for len(mux.exchanges) > 0 {
+			if e := <-mux.exchanges; e != nil {
 				e.OnRecycle(nil)
-				c.exchangeLookup[e.ID] = nil
+				mux.exchangeLookup[e.ID] = nil
 			}
 		}
 
 		// Close all exchanges we know of (in the lookup table)
 		// those will be in-progress exchanges
-		for i, e := range c.exchangeLookup {
+		for i, e := range mux.exchangeLookup {
 			if e != nil {
-				c.exchangeLookup[i] = nil
+				mux.exchangeLookup[i] = nil
 				eerr := e.Close()
 				if err == nil && !isClosedError(eerr) {
 					err = eerr
@@ -391,13 +391,13 @@ func isClosedError(err error) bool {
 }
 
 // NewExchangeWait returns the next available Exchange, or nil if timed out.
-func (c *Conn) NewExchangeWait(d time.Duration) (e *Exchange) {
-	e = c.NewExchange()
+func (mux *Muxer) NewExchangeWait(d time.Duration) (e *Exchange) {
+	e = mux.NewExchange()
 	if e == nil {
 		timer := time.NewTimer(d)
 		defer timer.Stop()
 		select {
-		case e = <-c.exchanges:
+		case e = <-mux.exchanges:
 		case <-timer.C:
 		}
 	}
@@ -408,9 +408,9 @@ func (c *Conn) NewExchangeWait(d time.Duration) (e *Exchange) {
 // currently able to be returned from NewExchange(). Note that
 // the value may not be exact if there are other goroutines using
 // the Conn.
-func (c *Conn) AvailableExchanges() (exchangeCount int) {
-	exchangeCount = len(c.exchanges)
-	lastID := atomic.LoadInt32(&c.exchangeLastID)
+func (mux *Muxer) AvailableExchanges() (exchangeCount int) {
+	exchangeCount = len(mux.exchanges)
+	lastID := atomic.LoadInt32(&mux.exchangeLastID)
 	if lastID < int32(MaxExchangeID) {
 		exchangeCount += int(int32(MaxExchangeID) - lastID)
 	}
@@ -418,49 +418,49 @@ func (c *Conn) AvailableExchanges() (exchangeCount int) {
 }
 
 // NewExchange returns the next available Exchange, or nil if none are available.
-func (c *Conn) NewExchange() *Exchange {
+func (mux *Muxer) NewExchange() *Exchange {
 	select {
-	case e := <-c.exchanges:
+	case e := <-mux.exchanges:
 		return e
 	default:
 	}
 	for {
-		lastID := atomic.LoadInt32(&c.exchangeLastID)
+		lastID := atomic.LoadInt32(&mux.exchangeLastID)
 		if lastID >= int32(MaxExchangeID) {
 			return nil
 		}
 		nextID := lastID + 1
-		if atomic.CompareAndSwapInt32(&c.exchangeLastID, lastID, nextID) {
-			e := NewExchange(c, ExchangeID(nextID))
-			e.OnRecycle(c.ExchangeRelease)
-			c.exchangeLookup[nextID] = e
+		if atomic.CompareAndSwapInt32(&mux.exchangeLastID, lastID, nextID) {
+			e := NewExchange(mux, ExchangeID(nextID))
+			e.OnRecycle(mux.ExchangeRelease)
+			mux.exchangeLookup[nextID] = e
 			return e
 		}
 	}
 }
 
 // ExchangeWrite allows an Exchange to write a FrameData
-func (c *Conn) ExchangeWrite(fd FrameData) error {
+func (mux *Muxer) ExchangeWrite(fd FrameData) error {
 	select {
-	case c.writeCh <- fd:
+	case mux.writeCh <- fd:
 		return nil
-	case <-c.doneChan:
+	case <-mux.doneChan:
 		return errors.WithStack(serverClosedError{})
 	}
 }
 
 // ExchangeRelease returns the Exchange to the Conn, allowing it to
 // be re-used for other requests.
-func (c *Conn) ExchangeRelease(e *Exchange) {
+func (mux *Muxer) ExchangeRelease(e *Exchange) {
 	select {
-	case c.exchanges <- e:
+	case mux.exchanges <- e:
 	default:
-		panic(fmt.Sprint("can't release exchange, len(s.exchanges) ", len(c.exchanges), " cap(s.exchanges) ", cap(c.exchanges), " max ", MaxExchangeID))
+		panic(fmt.Sprint("can't release exchange, len(s.exchanges) ", len(mux.exchanges), " cap(s.exchanges) ", cap(mux.exchanges), " max ", MaxExchangeID))
 	}
 	return
 }
 
 // ExchangeAbortChannel returns the abort signalling channel
-func (c *Conn) ExchangeAbortChannel() <-chan struct{} {
-	return c.doneChan
+func (mux *Muxer) ExchangeAbortChannel() <-chan struct{} {
+	return mux.doneChan
 }

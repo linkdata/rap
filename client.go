@@ -20,12 +20,12 @@ type Client struct {
 	DialTimeout  time.Duration // dialing timeout
 	ReadTimeout  time.Duration // read timeout (reading the request)
 	WriteTimeout time.Duration // write timeout (writing the response)
-	conn         *Conn         // the current active connection (atomic access only)
+	conn         *Muxer        // the current active connection (atomic access only)
 	mu           sync.Mutex    // protects those below
 	lastError    error
 	lastAttempt  time.Time
 	firstAttempt time.Time
-	conns        []*Conn
+	conns        []*Muxer
 }
 
 // NewClient starts a new RAP Client. The Client will make establish Conn's
@@ -35,7 +35,7 @@ func NewClient(addr string) *Client {
 	return &Client{
 		Addr:        addr,
 		DialTimeout: time.Second * 60,
-		conns:       make([]*Conn, 0),
+		conns:       make([]*Muxer, 0),
 	}
 }
 
@@ -57,7 +57,7 @@ func (c *Client) Close() (err error) {
 
 // dialLocked creates a new RAP Conn to the server.
 // Must run with the mutex locked.
-func (c *Client) dialLocked() *Conn {
+func (c *Client) dialLocked() *Muxer {
 	rwc, err := net.DialTimeout("tcp", c.Addr, c.DialTimeout)
 	if err != nil {
 		c.lastError = err
@@ -71,7 +71,7 @@ func (c *Client) dialLocked() *Conn {
 	c.lastError = nil
 	c.lastAttempt = time.Time{}
 	c.firstAttempt = time.Time{}
-	conn := NewConn(rwc)
+	conn := NewMuxer(rwc)
 	go conn.ServeHTTP(nil)
 	c.conns = append(c.conns, conn)
 	return conn
@@ -80,7 +80,7 @@ func (c *Client) dialLocked() *Conn {
 // selectBestConn returns an existing Conn that have free Exchanges,
 // or nil if none were found.
 // Must run with the mutex locked.
-func (c *Client) selectBestConn() (bestConn *Conn) {
+func (c *Client) selectBestConn() (bestConn *Muxer) {
 	bestLength := 0
 	for _, conn := range c.conns {
 		avail := conn.AvailableExchanges()
@@ -93,12 +93,12 @@ func (c *Client) selectBestConn() (bestConn *Conn) {
 }
 
 // non-racy "return c.conn"
-func (c *Client) getConn() *Conn {
-	return (*Conn)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.conn))))
+func (c *Client) getConn() *Muxer {
+	return (*Muxer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.conn))))
 }
 
 // non-racy "c.conn = conn"
-func (c *Client) setConn(conn *Conn) {
+func (c *Client) setConn(conn *Muxer) {
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.conn)), unsafe.Pointer(conn))
 }
 

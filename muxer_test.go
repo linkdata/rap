@@ -56,11 +56,11 @@ func newRwcPipes() (a, b *rwcPipe) {
 	return
 }
 
-type connTester struct {
+type muxerTester struct {
 	t                      *testing.T
 	a, b                   *rwcPipe
-	conn                   *Conn
-	server                 *Conn
+	muxClient              *Muxer
+	muxServer              *Muxer
 	isClosed               int32
 	injectFramesAtClose    bool
 	expectServerError      error
@@ -71,7 +71,7 @@ type connTester struct {
 	connDone               chan struct{}
 }
 
-func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (mt *muxerTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
 	if req.Body != nil {
 		if req.ContentLength > 0 {
@@ -82,12 +82,12 @@ func (ct *connTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (ct *connTester) Start() {
+func (mt *muxerTester) Start() {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go func(ct *connTester) {
+	go func(ct *muxerTester) {
 		wg.Done()
-		err := ct.server.ServeHTTP(ct)
+		err := ct.muxServer.ServeHTTP(ct)
 		if ct.expectServerError != nil {
 			assert.Equal(ct.t, ct.expectServerError.Error(), errors.Cause(err).Error())
 			assert.NotNil(ct.t, err)
@@ -106,13 +106,13 @@ func (ct *connTester) Start() {
 			}
 		}
 		close(ct.serverDone)
-	}(ct)
+	}(mt)
 	wg.Wait()
 
 	wg.Add(1)
-	go func(ct *connTester) {
+	go func(ct *muxerTester) {
 		wg.Done()
-		err := ct.conn.ServeHTTP(nil)
+		err := ct.muxClient.ServeHTTP(nil)
 		if ct.expectConnError != nil {
 			assert.NotNil(ct.t, err)
 			assert.Equal(ct.t, ct.expectConnError.Error(), errors.Cause(err).Error())
@@ -126,86 +126,86 @@ func (ct *connTester) Start() {
 			}
 		}
 		close(ct.connDone)
-	}(ct)
+	}(mt)
 	wg.Wait()
 }
 
-func (ct *connTester) Close() {
-	if atomic.CompareAndSwapInt32(&ct.isClosed, 0, 1) {
+func (mt *muxerTester) Close() {
+	if atomic.CompareAndSwapInt32(&mt.isClosed, 0, 1) {
 		for i := 0; i < 100; i++ {
 			time.Sleep(10 * time.Millisecond)
-			if len(ct.conn.writeCh) == 0 && len(ct.server.writeCh) == 0 {
+			if len(mt.muxClient.writeCh) == 0 && len(mt.muxServer.writeCh) == 0 {
 				break
 			}
 		}
-		if ct.injectFramesAtClose {
-			ct.conn.ExchangeWrite(nil)
-			ct.conn.ExchangeWrite(nil)
+		if mt.injectFramesAtClose {
+			mt.muxClient.ExchangeWrite(nil)
+			mt.muxClient.ExchangeWrite(nil)
 		}
-		err := ct.a.WriteCloser.Close()
-		if ct.expectConnCloseError != nil {
-			assert.Equal(ct.t, ct.expectConnCloseError.Error(), errors.Cause(err).Error())
-			assert.Error(ct.t, err)
+		err := mt.a.WriteCloser.Close()
+		if mt.expectConnCloseError != nil {
+			assert.Equal(mt.t, mt.expectConnCloseError.Error(), errors.Cause(err).Error())
+			assert.Error(mt.t, err)
 		} else {
-			assert.NoError(ct.t, err)
+			assert.NoError(mt.t, err)
 		}
-		err = ct.b.WriteCloser.Close()
-		if ct.expectServerCloseError != nil {
-			assert.Equal(ct.t, ct.expectServerCloseError.Error(), errors.Cause(err).Error())
-			assert.Error(ct.t, err)
+		err = mt.b.WriteCloser.Close()
+		if mt.expectServerCloseError != nil {
+			assert.Equal(mt.t, mt.expectServerCloseError.Error(), errors.Cause(err).Error())
+			assert.Error(mt.t, err)
 		} else {
-			assert.NoError(ct.t, err)
+			assert.NoError(mt.t, err)
 		}
-		<-ct.serverDone
-		<-ct.connDone
+		<-mt.serverDone
+		<-mt.connDone
 	}
 }
 
-func newConnTesterNotStarted(t *testing.T) (ct *connTester) {
+func newMuxerTesterNotStarted(t *testing.T) (mt *muxerTester) {
 	a, b := newRwcPipes()
-	ct = &connTester{
+	mt = &muxerTester{
 		t:          t,
 		a:          a,
 		b:          b,
-		conn:       NewConn(a),
-		server:     NewConn(b),
+		muxClient:  NewMuxer(a),
+		muxServer:  NewMuxer(b),
 		serverDone: make(chan struct{}),
 		connDone:   make(chan struct{}),
 	}
-	ct.conn.StatsCollector = a
-	ct.server.StatsCollector = b
+	mt.muxClient.StatsCollector = a
+	mt.muxServer.StatsCollector = b
 	return
 }
 
-func newConnTester(t *testing.T) (ct *connTester) {
-	ct = newConnTesterNotStarted(t)
-	ct.Start()
+func newMuxerTester(t *testing.T) (mt *muxerTester) {
+	mt = newMuxerTesterNotStarted(t)
+	mt.Start()
 	return
 }
 
-func (ct *connTester) InjectRequestNoErrors(r *http.Request) {
-	requestErr, responseErr := ct.InjectRequest(r)
+func (mt *muxerTester) InjectRequestNoErrors(r *http.Request) {
+	requestErr, responseErr := mt.InjectRequest(r)
 	if errors.Cause(responseErr) == io.EOF {
 		responseErr = nil
 	}
-	assert.NoError(ct.t, requestErr)
-	assert.NoError(ct.t, responseErr)
+	assert.NoError(mt.t, requestErr)
+	assert.NoError(mt.t, responseErr)
 }
 
-func (ct *connTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
+func (mt *muxerTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
 	w := httptest.NewRecorder()
-	e := ct.conn.NewExchangeWait(time.Second * 10)
+	e := mt.muxClient.NewExchangeWait(time.Second * 10)
 	defer e.Close()
 	requestErr = e.WriteRequest(r)
 	_, responseErr = e.ProxyResponse(w)
 	return
 }
 
-func (ct *connTester) FillExchanges() (gotten int) {
+func (mt *muxerTester) FillExchanges() (gotten int) {
 	for {
-		if e := ct.conn.NewExchange(); e != nil {
+		if e := mt.muxClient.NewExchange(); e != nil {
 			gotten++
-			e.OnRecycle(ct.conn.ExchangeRelease)
+			e.OnRecycle(mt.muxClient.ExchangeRelease)
 			defer e.Close()
 		} else {
 			return
@@ -213,26 +213,26 @@ func (ct *connTester) FillExchanges() (gotten int) {
 	}
 }
 
-func Test_Conn_String(t *testing.T) {
+func Test_Muxer_String(t *testing.T) {
 	if leaktestEnabled {
 		defer leaktest.Check(t)()
 	}
-	ct := newConnTester(t)
-	defer ct.Close()
-	expected := fmt.Sprintf("[Conn %x]", ct.conn.serialNumber)
-	assert.Equal(t, expected, ct.conn.String())
-	assert.Equal(t, int(MaxExchangeID)+1, len(ct.conn.exchangeLookup))
-	assert.Equal(t, int(MaxExchangeID), cap(ct.conn.exchanges))
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	expected := fmt.Sprintf("[Conn %x]", mt.muxClient.serialNumber)
+	assert.Equal(t, expected, mt.muxClient.String())
+	assert.Equal(t, int(MaxExchangeID)+1, len(mt.muxClient.exchangeLookup))
+	assert.Equal(t, int(MaxExchangeID), cap(mt.muxClient.exchanges))
 }
 
-func Test_Conn_exchanges_exhausted(t *testing.T) {
-	ct := newConnTester(t)
-	defer ct.Close()
+func Test_Muxer_exchanges_exhausted(t *testing.T) {
+	mt := newMuxerTester(t)
+	defer mt.Close()
 
 	var firstExchange *Exchange
 
 	for {
-		if e := ct.conn.NewExchange(); e != nil {
+		if e := mt.muxClient.NewExchange(); e != nil {
 			if firstExchange == nil {
 				firstExchange = e
 			} else {
@@ -242,147 +242,147 @@ func Test_Conn_exchanges_exhausted(t *testing.T) {
 			break
 		}
 	}
-	assert.Nil(t, ct.conn.NewExchangeWait(time.Millisecond*10))
+	assert.Nil(t, mt.muxClient.NewExchangeWait(time.Millisecond*10))
 	firstExchange.Close()
-	e2 := ct.conn.NewExchangeWait(time.Second * 10)
+	e2 := mt.muxClient.NewExchangeWait(time.Second * 10)
 	assert.NotNil(t, e2)
 	e2.Close()
 }
 
-func Test_Conn_ReleaseExchange(t *testing.T) {
-	ct := newConnTester(t)
-	defer ct.Close()
-	e := ct.conn.NewExchange()
+func Test_Muxer_ReleaseExchange(t *testing.T) {
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	e := mt.muxClient.NewExchange()
 	assert.NotNil(t, e)
 	e.Close()
 }
 
-func Test_Conn_exchange_overflow(t *testing.T) {
-	ct := newConnTester(t)
-	defer ct.Close()
-	gotten := ct.FillExchanges()
+func Test_Muxer_exchange_overflow(t *testing.T) {
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	gotten := mt.FillExchanges()
 	assert.Equal(t, int(MaxExchangeID), gotten)
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
-	for len(ct.conn.exchanges) != int(MaxExchangeID) {
+	for len(mt.muxClient.exchanges) != int(MaxExchangeID) {
 		select {
 		case <-timer.C:
-			assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
+			assert.Equal(t, int(MaxExchangeID), len(mt.muxClient.exchanges))
 		default:
 		}
 	}
-	assert.Equal(t, int(MaxExchangeID), len(ct.conn.exchanges))
-	e := NewExchange(ct.conn, 1)
-	e.OnRecycle(ct.conn.ExchangeRelease)
+	assert.Equal(t, int(MaxExchangeID), len(mt.muxClient.exchanges))
+	e := NewExchange(mt.muxClient, 1)
+	e.OnRecycle(mt.muxClient.ExchangeRelease)
 	assert.True(t, e.remoteSendingFinal())
 	assert.Panics(t, func() { e.Close() })
 }
 
-func Test_Conn_empty_request_response(t *testing.T) {
+func Test_Muxer_empty_request_response(t *testing.T) {
 	if leaktestEnabled {
 		defer leaktest.Check(t)()
 	}
-	ct := newConnTester(t)
-	defer ct.Close()
-	ct.InjectRequestNoErrors(httptest.NewRequest("GET", "/", nil))
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	mt.InjectRequestNoErrors(httptest.NewRequest("GET", "/", nil))
 }
 
-func Test_Conn_big_request_response(t *testing.T) {
+func Test_Muxer_big_request_response(t *testing.T) {
 	if leaktestEnabled {
 		defer leaktest.Check(t)()
 	}
-	ct := newConnTester(t)
-	defer ct.Close()
-	ct.InjectRequestNoErrors(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	mt.InjectRequestNoErrors(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
 }
 
-func Test_Conn_conncontrol_ping_pong(t *testing.T) {
-	ct := newConnTester(t)
-	defer ct.Close()
-	assert.Zero(t, ct.conn.lastPingSent)
-	assert.Zero(t, ct.conn.lastPongRcvd)
-	assert.Zero(t, ct.server.lastPingSent)
-	assert.Zero(t, ct.server.lastPongRcvd)
-	assert.Zero(t, ct.conn.Latency())
-	ct.conn.Ping()
-	for i := 0; i < 10 && atomic.LoadInt64(&ct.conn.lastPongRcvd) == 0; i++ {
+func Test_Muxer_conncontrol_ping_pong(t *testing.T) {
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	assert.Zero(t, mt.muxClient.lastPingSent)
+	assert.Zero(t, mt.muxClient.lastPongRcvd)
+	assert.Zero(t, mt.muxServer.lastPingSent)
+	assert.Zero(t, mt.muxServer.lastPongRcvd)
+	assert.Zero(t, mt.muxClient.Latency())
+	mt.muxClient.Ping()
+	for i := 0; i < 10 && atomic.LoadInt64(&mt.muxClient.lastPongRcvd) == 0; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
-	assert.NotZero(t, ct.conn.lastPingSent)
-	assert.NotZero(t, ct.conn.lastPongRcvd)
-	assert.Zero(t, ct.server.lastPingSent)
-	assert.Zero(t, ct.server.lastPongRcvd)
-	assert.True(t, ct.conn.lastPingSent <= ct.conn.lastPongRcvd)
-	if ct.conn.lastPingSent < ct.conn.lastPongRcvd {
-		assert.NotZero(t, ct.conn.Latency())
+	assert.NotZero(t, mt.muxClient.lastPingSent)
+	assert.NotZero(t, mt.muxClient.lastPongRcvd)
+	assert.Zero(t, mt.muxServer.lastPingSent)
+	assert.Zero(t, mt.muxServer.lastPongRcvd)
+	assert.True(t, mt.muxClient.lastPingSent <= mt.muxClient.lastPongRcvd)
+	if mt.muxClient.lastPingSent < mt.muxClient.lastPongRcvd {
+		assert.NotZero(t, mt.muxClient.Latency())
 	} else {
-		assert.Zero(t, ct.conn.Latency())
+		assert.Zero(t, mt.muxClient.Latency())
 	}
 }
 
-func Test_Conn_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
-	ct := newConnTester(t)
-	defer ct.Close()
-	ct.expectServerError = serverClosedError{}
+func Test_Muxer_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
+	mt := newMuxerTester(t)
+	defer mt.Close()
+	mt.expectServerError = serverClosedError{}
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(MuxerControlPing)
 	fd.WriteInt64(time.Now().UnixNano())
 	fd.SetSizeValue()
-	close(ct.server.doneChan)
-	err := muxerControlPingHandler(ct.server, fd)
+	close(mt.muxServer.doneChan)
+	err := muxerControlPingHandler(mt.muxServer, fd)
 	assert.Equal(t, serverClosedError{}, errors.Cause(err))
 }
 
-func Test_Conn_conncontrol_reserved(t *testing.T) {
-	ct := newConnTesterNotStarted(t)
-	defer ct.Close()
-	ct.expectServerError = ProtocolError{}
-	ct.expectConnError = io.EOF
-	ct.Start()
+func Test_Muxer_conncontrol_reserved(t *testing.T) {
+	mt := newMuxerTesterNotStarted(t)
+	defer mt.Close()
+	mt.expectServerError = ProtocolError{}
+	mt.expectConnError = io.EOF
+	mt.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(muxerControlReserved001)
-	ct.conn.ExchangeWrite(fd)
-	<-ct.serverDone
+	mt.muxClient.ExchangeWrite(fd)
+	<-mt.serverDone
 }
 
-func Test_Conn_conncontrol_panic(t *testing.T) {
-	ct := newConnTesterNotStarted(t)
-	defer ct.Close()
-	ct.expectConnError = io.EOF
-	ct.expectServerError = PanicError{}
-	ct.Start()
+func Test_Muxer_conncontrol_panic(t *testing.T) {
+	mt := newMuxerTesterNotStarted(t)
+	defer mt.Close()
+	mt.expectConnError = io.EOF
+	mt.expectServerError = PanicError{}
+	mt.Start()
 	fd := FrameDataAlloc()
 	fd.WriteConnControl(MuxerControlPanic)
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
-	ct.conn.ExchangeWrite(fd)
-	<-ct.serverDone
+	mt.muxClient.ExchangeWrite(fd)
+	<-mt.serverDone
 }
 
-func Test_Conn_ServeHTTP_write_error(t *testing.T) {
-	ct := newConnTesterNotStarted(t)
-	defer ct.Close()
-	ct.a.WriteCloser = &failWriter{
+func Test_Muxer_ServeHTTP_write_error(t *testing.T) {
+	mt := newMuxerTesterNotStarted(t)
+	defer mt.Close()
+	mt.a.WriteCloser = &failWriter{
 		failAtCount: 1,
 		failOnWrite: true,
-		WriteCloser: ct.a.WriteCloser,
+		WriteCloser: mt.a.WriteCloser,
 	}
-	ct.expectConnError = errFailWriter
-	ct.expectServerError = io.ErrUnexpectedEOF
-	ct.Start()
-	ct.conn.Ping()
-	<-ct.serverDone
+	mt.expectConnError = errFailWriter
+	mt.expectServerError = io.ErrUnexpectedEOF
+	mt.Start()
+	mt.muxClient.Ping()
+	<-mt.serverDone
 }
 
-func Test_Conn_ServeHTTP_write_close_error(t *testing.T) {
-	ct := newConnTesterNotStarted(t)
-	ct.a.WriteCloser = &failWriter{
+func Test_Muxer_ServeHTTP_write_close_error(t *testing.T) {
+	mt := newMuxerTesterNotStarted(t)
+	mt.a.WriteCloser = &failWriter{
 		failOnClose: true,
-		WriteCloser: ct.a.WriteCloser,
+		WriteCloser: mt.a.WriteCloser,
 	}
-	ct.expectConnCloseError = errFailWriter
-	ct.expectConnError = errFailWriter
-	ct.Start()
-	ct.conn.Ping()
-	ct.Close()
+	mt.expectConnCloseError = errFailWriter
+	mt.expectConnError = errFailWriter
+	mt.Start()
+	mt.muxClient.Ping()
+	mt.Close()
 }

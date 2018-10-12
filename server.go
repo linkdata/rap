@@ -30,7 +30,7 @@ type Server struct {
 	serveErrors    map[string]int
 	connLimiter    chan struct{}
 	doneChan       chan struct{}
-	activeConn     map[*Conn]struct{}
+	activeConn     map[*Muxer]struct{}
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -136,7 +136,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		tempDelay = 0
 		srv.getConnLimiter() <- struct{}{}
 		go func(rwc io.ReadWriteCloser) {
-			conn := NewConn(rwc)
+			conn := NewMuxer(rwc)
 			conn.StatsCollector = srv
 			conn.ReadTimeout = srv.ReadTimeout
 			conn.WriteTimeout = srv.WriteTimeout
@@ -184,11 +184,11 @@ func (srv *Server) trackListenerLocked(ln net.Listener, add bool) {
 	}
 }
 
-func (srv *Server) trackConn(c *Conn) {
+func (srv *Server) trackConn(c *Muxer) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	if srv.activeConn == nil {
-		srv.activeConn = make(map[*Conn]struct{})
+		srv.activeConn = make(map[*Muxer]struct{})
 	}
 	srv.activeConn[c] = struct{}{}
 }

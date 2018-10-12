@@ -654,8 +654,8 @@ func (e *Exchange) getSendWindow() int {
 	return int(atomic.LoadInt32(&e.sendWindow))
 }
 
-func (e *Exchange) getConn() *Conn {
-	if c, ok := e.conn.(*Conn); ok {
+func (e *Exchange) getConn() *Muxer {
+	if c, ok := e.conn.(*Muxer); ok {
 		return c
 	}
 	return nil

@@ -884,12 +884,12 @@ func makeExchangePipe() (e1, e2 *Exchange, stop func(), err error) {
 
 	wg := sync.WaitGroup{}
 
-	c1 := NewConn(p1)
+	c1 := NewMuxer(p1)
 	wg.Add(2)
 	go func() { defer wg.Done(); c1.WriteTo(p1) }()
 	go func() { defer wg.Done(); c1.ReadFrom(p1) }()
 
-	c2 := NewConn(p2)
+	c2 := NewMuxer(p2)
 	wg.Add(2)
 	go func() { defer wg.Done(); c2.WriteTo(p2) }()
 	go func() { defer wg.Done(); c2.ReadFrom(p2) }()
