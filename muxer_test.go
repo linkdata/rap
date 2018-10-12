@@ -325,7 +325,7 @@ func Test_Muxer_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
 	defer mt.Close()
 	mt.expectServerError = serverClosedError{}
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(MuxerControlPing)
+	fd.WriteMuxerControl(MuxerControlPing)
 	fd.WriteInt64(time.Now().UnixNano())
 	fd.SetSizeValue()
 	close(mt.muxServer.doneChan)
@@ -340,7 +340,7 @@ func Test_Muxer_conncontrol_reserved(t *testing.T) {
 	mt.expectConnError = io.EOF
 	mt.Start()
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(muxerControlReserved001)
+	fd.WriteMuxerControl(muxerControlReserved001)
 	mt.muxClient.ExchangeWrite(fd)
 	<-mt.serverDone
 }
@@ -352,7 +352,7 @@ func Test_Muxer_conncontrol_panic(t *testing.T) {
 	mt.expectServerError = PanicError{}
 	mt.Start()
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(MuxerControlPanic)
+	fd.WriteMuxerControl(MuxerControlPanic)
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
 	mt.muxClient.ExchangeWrite(fd)

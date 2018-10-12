@@ -236,7 +236,7 @@ func (e *Exchange) String() string {
 
 // NewExchange creates a new exchange
 func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
-	if exchangeID >= ConnExchangeID {
+	if exchangeID >= MuxerExchangeID {
 		panic(fmt.Sprintf("illegal exchange ID %d", int(exchangeID)))
 	}
 	e = &Exchange{

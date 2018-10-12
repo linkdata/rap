@@ -4,10 +4,10 @@ package rap
 import "time"
 
 const (
-	// ConnExchangeID is the Exchange ID used to mark Conn control frames.
-	ConnExchangeID = ExchangeID((0xff & (^ExchangeID(FrameFlagMask)) << 8) | 0xff)
+	// MuxerExchangeID is the Exchange ID used to mark Muxer control frames.
+	MuxerExchangeID = ExchangeID((0xff & (^ExchangeID(FrameFlagMask)) << 8) | 0xff)
 	// ProtocolMaxExchangeID is the maximum value allowed for MaxExchangeID.
-	ProtocolMaxExchangeID = ConnExchangeID - 1
+	ProtocolMaxExchangeID = MuxerExchangeID - 1
 	// ProtocolMaxConcurrentExchanges is an artifical limit on maximum concurrent exchanges.
 	ProtocolMaxConcurrentExchanges = 10 * 1000000
 	// MaxSendWindowSize is the maximum value allowed for SendWindowSize.

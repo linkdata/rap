@@ -15,22 +15,22 @@ type serverClosedError struct{}
 
 func (serverClosedError) Error() string { return "server closed" }
 
-// Server listens for incoming RAP connections and creates Conn's for them.
+// Server listens for incoming RAP connections and creates Muxers for them.
 type Server struct {
-	Addr           string        // TCP address to listen on, ":10111" if empty
-	Handler        http.Handler  // HTTP handler to invoke
-	MaxConnections int           // maximum number of RAP Conn's to allow
-	ReadTimeout    time.Duration // read timeout (reading the request)
-	WriteTimeout   time.Duration // write timeout (writing the response)
-	listeners      map[net.Listener]struct{}
-	bytesWritten   int64
-	bytesRead      int64
-	mu             sync.Mutex
-	serveErrorsMu  sync.Mutex
-	serveErrors    map[string]int
-	connLimiter    chan struct{}
-	doneChan       chan struct{}
-	activeConn     map[*Muxer]struct{}
+	Addr          string        // TCP address to listen on, ":10111" if empty
+	Handler       http.Handler  // HTTP handler to invoke
+	MaxMuxers     int           // maximum number of RAP Muxers to allow
+	ReadTimeout   time.Duration // read timeout (reading the request)
+	WriteTimeout  time.Duration // write timeout (writing the response)
+	listeners     map[net.Listener]struct{}
+	bytesWritten  int64
+	bytesRead     int64
+	mu            sync.Mutex
+	serveErrorsMu sync.Mutex
+	serveErrors   map[string]int
+	muxerLimiter  chan struct{}
+	doneChan      chan struct{}
+	activeMuxer   map[*Muxer]struct{}
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -134,19 +134,19 @@ func (srv *Server) Serve(l net.Listener) error {
 			return e
 		}
 		tempDelay = 0
-		srv.getConnLimiter() <- struct{}{}
+		srv.getMuxerLimiter() <- struct{}{}
 		go func(rwc io.ReadWriteCloser) {
-			conn := NewMuxer(rwc)
-			conn.StatsCollector = srv
-			conn.ReadTimeout = srv.ReadTimeout
-			conn.WriteTimeout = srv.WriteTimeout
-			srv.trackConn(conn)
-			if err := conn.ServeHTTP(srv.Handler); err != nil {
+			mux := NewMuxer(rwc)
+			mux.StatsCollector = srv
+			mux.ReadTimeout = srv.ReadTimeout
+			mux.WriteTimeout = srv.WriteTimeout
+			srv.trackMuxer(mux)
+			if err := mux.ServeHTTP(srv.Handler); err != nil {
 				srv.serveErrorsMu.Lock()
 				defer srv.serveErrorsMu.Unlock()
 				srv.serveErrors[err.Error()]++
 			}
-			<-srv.getConnLimiter()
+			<-srv.getMuxerLimiter()
 		}(rwc)
 	}
 }
@@ -175,7 +175,7 @@ func (srv *Server) trackListenerLocked(ln net.Listener, add bool) {
 	if add {
 		// If the *Server is being reused after a previous
 		// Close or Shutdown, reset its doneChan:
-		if len(srv.listeners) == 0 && len(srv.activeConn) == 0 {
+		if len(srv.listeners) == 0 && len(srv.activeMuxer) == 0 {
 			srv.doneChan = nil
 		}
 		srv.listeners[ln] = struct{}{}
@@ -184,13 +184,13 @@ func (srv *Server) trackListenerLocked(ln net.Listener, add bool) {
 	}
 }
 
-func (srv *Server) trackConn(c *Muxer) {
+func (srv *Server) trackMuxer(c *Muxer) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	if srv.activeConn == nil {
-		srv.activeConn = make(map[*Muxer]struct{})
+	if srv.activeMuxer == nil {
+		srv.activeMuxer = make(map[*Muxer]struct{})
 	}
-	srv.activeConn[c] = struct{}{}
+	srv.activeMuxer[c] = struct{}{}
 }
 
 func (srv *Server) getDoneChan() <-chan struct{} {
@@ -215,21 +215,21 @@ func (srv *Server) closeDoneChanLocked() {
 	}
 }
 
-func (srv *Server) getConnLimiter() chan struct{} {
+func (srv *Server) getMuxerLimiter() chan struct{} {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	return srv.getConnLimiterLocked()
+	return srv.getMuxerLimiterLocked()
 }
 
-func (srv *Server) getConnLimiterLocked() chan struct{} {
-	if srv.connLimiter == nil {
-		maxConns := srv.MaxConnections
-		if maxConns < 1 {
-			maxConns = 1 + (ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1))
+func (srv *Server) getMuxerLimiterLocked() chan struct{} {
+	if srv.muxerLimiter == nil {
+		maxMuxers := srv.MaxMuxers
+		if maxMuxers < 1 {
+			maxMuxers = 1 + (ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1))
 		}
-		srv.connLimiter = make(chan struct{}, maxConns)
+		srv.muxerLimiter = make(chan struct{}, maxMuxers)
 	}
-	return srv.connLimiter
+	return srv.muxerLimiter
 }
 
 func (srv *Server) closeListenersLocked() error {
@@ -249,16 +249,16 @@ func (srv *Server) Close() error {
 	defer srv.mu.Unlock()
 	srv.closeDoneChanLocked()
 	err := srv.closeListenersLocked()
-	for c := range srv.activeConn {
+	for c := range srv.activeMuxer {
 		c.Close()
-		delete(srv.activeConn, c)
+		delete(srv.activeMuxer, c)
 	}
 	return err
 }
 
-// ActiveConns returns the number of active RAP connections.
-func (srv *Server) ActiveConns() int {
-	return len(srv.getConnLimiter())
+// ActiveMuxers returns the number of active RAP muxers.
+func (srv *Server) ActiveMuxers() int {
+	return len(srv.getMuxerLimiter())
 }
 
 // AddBytesWritten adds n to the number of bytes written statistic.

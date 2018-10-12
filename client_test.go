@@ -73,9 +73,9 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	defer c.Close()
 	c.DialTimeout = time.Second
 
-	grabbed := make(chan *Exchange, int(ConnExchangeID)*2+1)
+	grabbed := make(chan *Exchange, int(MuxerExchangeID)*2+1)
 	e, err := c.NewExchangeMayDial()
-	firstConn := c.getConn()
+	firstConn := c.getMux()
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
 	assert.Equal(t, int(MaxExchangeID)-1, firstConn.AvailableExchanges())
@@ -94,7 +94,7 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	e, err = c.NewExchangeMayDial()
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
-	secondConn := c.getConn()
+	secondConn := c.getMux()
 	assert.NotEqual(t, firstConn.serialNumber, secondConn.serialNumber)
 	assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
 	assert.Equal(t, int(MaxExchangeID)-1, secondConn.AvailableExchanges())

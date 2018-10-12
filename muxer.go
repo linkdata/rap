@@ -98,7 +98,7 @@ func NewMuxer(rwc io.ReadWriteCloser) *Muxer {
 }
 
 func muxerControlPingHandler(mux *Muxer, fd FrameData) (err error) {
-	fd.Header().SetConnControl(MuxerControlPong)
+	fd.Header().SetMuxerControl(MuxerControlPong)
 	select {
 	case mux.writeCh <- fd:
 	case <-mux.doneChan:
@@ -136,7 +136,7 @@ func muxerControlReservedHandler(mux *Muxer, fd FrameData) error {
 // Ping sends a ping frame and returns without waiting for response.
 func (mux *Muxer) Ping() {
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(MuxerControlPing)
+	fd.WriteMuxerControl(MuxerControlPing)
 	atomic.StoreInt64(&mux.lastPingSent, time.Now().UnixNano())
 	fd.WriteInt64(mux.lastPingSent)
 	fd.SetSizeValue()
@@ -198,8 +198,8 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 			break
 		}
 
-		if fd.Header().IsConnControl() {
-			if err = muxerControlHandlers[fd.Header().ConnControl()](mux, fd); err != nil {
+		if fd.Header().IsMuxerControl() {
+			if err = muxerControlHandlers[fd.Header().MuxerControl()](mux, fd); err != nil {
 				return
 			}
 			continue

@@ -24,7 +24,7 @@ func Test_FrameHeader_IsBlank(t *testing.T) {
 	assert.False(t, h.HasHead())
 	assert.False(t, h.HasPayload())
 	assert.False(t, h.HasFlow())
-	assert.False(t, h.IsConnControl())
+	assert.False(t, h.IsMuxerControl())
 }
 
 func Test_FrameHeader_ExchangeIDRange(t *testing.T) {
@@ -35,7 +35,7 @@ func Test_FrameHeader_ExchangeIDRange(t *testing.T) {
 	assert.Equal(t, ExchangeID(1), h.ExchangeID())
 	h.SetExchangeID(MaxExchangeID)
 	assert.Equal(t, MaxExchangeID, h.ExchangeID())
-	assert.Panics(t, func() { h.SetExchangeID(ConnExchangeID + 1) })
+	assert.Panics(t, func() { h.SetExchangeID(MuxerExchangeID + 1) })
 }
 
 func Test_FrameHeader_String(t *testing.T) {
@@ -48,8 +48,8 @@ func Test_FrameHeader_String(t *testing.T) {
 	h.SetExchangeID(1)
 	assert.Equal(t, "[FrameHeader [ID 0001] FBH 12 (4)]", h.String())
 	assert.Equal(t, 0, h.PayloadSize()) // zero since Flow is set
-	h.SetConnControl(MuxerControlPing)
-	expected := fmt.Sprintf("[FrameHeader %v Ping 12 (4)]", ExchangeID(ConnExchangeID))
+	h.SetMuxerControl(MuxerControlPing)
+	expected := fmt.Sprintf("[FrameHeader %v Ping 12 (4)]", ExchangeID(MuxerExchangeID))
 	assert.Equal(t, expected, h.String())
 	assert.Equal(t, 12, h.PayloadSize())
 }

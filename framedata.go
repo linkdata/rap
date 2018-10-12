@@ -130,10 +130,10 @@ func (fd *FrameData) WriteHeader(exchangeID ExchangeID) {
 	return
 }
 
-// WriteConnControl initializes the frame with the given control code.
-func (fd *FrameData) WriteConnControl(sc MuxerControl) {
+// WriteMuxerControl initializes the frame with the given control code.
+func (fd *FrameData) WriteMuxerControl(mc MuxerControl) {
 	*fd = (*fd)[:FrameHeaderSize]
-	FrameHeader(*fd).SetConnControl(sc)
+	FrameHeader(*fd).SetMuxerControl(mc)
 	return
 }
 

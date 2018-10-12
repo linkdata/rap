@@ -118,8 +118,8 @@ var muxerFlagTexts = map[FrameFlag]string{
 
 func (fh FrameHeader) String() string {
 	var midText string
-	if fh.IsConnControl() {
-		midText = muxerControlTexts[fh.ConnControl()]
+	if fh.IsMuxerControl() {
+		midText = muxerControlTexts[fh.MuxerControl()]
 	} else {
 		midText = muxerFlagTexts[fh.FrameControl()]
 	}
@@ -169,7 +169,7 @@ func (fh FrameHeader) ExchangeID() ExchangeID {
 // SetExchangeID sets the exchange ID.
 // This is valid for both ConnControl frames and data frames.
 func (fh FrameHeader) SetExchangeID(exchangeID ExchangeID) {
-	if exchangeID > ConnExchangeID {
+	if exchangeID > MuxerExchangeID {
 		panic("SetExchangeID(): exchangeID > MaxExchangeID")
 	}
 	fh.setSmallValue(uint16(exchangeID))
@@ -208,14 +208,14 @@ func (fh FrameHeader) PayloadSize() (n int) {
 	return
 }
 
-// IsConnControl returns true if the Exchange ID indicates this is a conn control frame.
-func (fh FrameHeader) IsConnControl() bool {
-	return fh.ExchangeID() == ConnExchangeID
+// IsMuxerControl returns true if the Exchange ID indicates this is a conn control frame.
+func (fh FrameHeader) IsMuxerControl() bool {
+	return fh.ExchangeID() == MuxerExchangeID
 }
 
-// ConnControl returns the frame control bits as a ConnControl value.
+// MuxerControl returns the frame control bits as a MuxerControl value.
 // Only valid for conn control frames where IsConnControl() returns true.
-func (fh FrameHeader) ConnControl() MuxerControl {
+func (fh FrameHeader) MuxerControl() MuxerControl {
 	return MuxerControl(fh[2] & FrameFlagMask)
 }
 
@@ -225,11 +225,11 @@ func (fh FrameHeader) FrameControl() FrameFlag {
 	return FrameFlag(fh[2] & FrameFlagMask)
 }
 
-// SetConnControl sets the frame header to a conn control frame.
+// SetMuxerControl sets the frame header to a conn control frame.
 // This sets the control bits and also sets the Exchange ID to ConnExchangeID.
-func (fh FrameHeader) SetConnControl(sc MuxerControl) {
+func (fh FrameHeader) SetMuxerControl(sc MuxerControl) {
 	fh[2] = (fh[2] & (^FrameFlagMask)) | byte(sc)
-	fh.SetExchangeID(ConnExchangeID)
+	fh.SetExchangeID(MuxerExchangeID)
 }
 
 // HasFlow returns true if the Flow bit is set in the frame header.

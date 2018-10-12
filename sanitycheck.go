@@ -13,8 +13,8 @@ func init() {
 	if SendWindowSize > MaxSendWindowSize {
 		panic("SendWindowSize > MaxSendWindowSize")
 	}
-	if ConnExchangeID < 1 {
-		panic("ConnExchangeID < 1")
+	if MuxerExchangeID < 1 {
+		panic("MuxerExchangeID < 1")
 	}
 	if ProtocolMaxExchangeID < 1 {
 		panic("ProtocolMaxExchangeID < 1")

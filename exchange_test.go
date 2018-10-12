@@ -65,7 +65,7 @@ func newExchangeTesterWriter(et *exchangeTester) *exchangeTesterWriter {
 			if fd == nil {
 				break
 			}
-			if !fd.Header().IsConnControl() {
+			if !fd.Header().IsMuxerControl() {
 				if fd.Header().HasFlow() {
 					isFinal := fd.Header().IsFinal()
 					needsAck := !fd.Header().IsFinalAck()
