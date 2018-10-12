@@ -14,10 +14,10 @@ func Test_FramePool_FrameDataAlloc(t *testing.T) {
 }
 
 func Test_FramePool_FrameDataAllocID(t *testing.T) {
-	fd1 := FrameDataAllocID(MaxExchangeID)
-	assert.Equal(t, ExchangeID(MaxExchangeID), fd1.Header().ExchangeID())
-	fd2 := FrameDataAllocID(MaxExchangeID - 1)
-	assert.Equal(t, ExchangeID(MaxExchangeID-1), fd2.Header().ExchangeID())
+	fd1 := FrameDataAllocID(MaxConnID)
+	assert.Equal(t, ConnID(MaxConnID), fd1.Header().ConnID())
+	fd2 := FrameDataAllocID(MaxConnID - 1)
+	assert.Equal(t, ConnID(MaxConnID-1), fd2.Header().ConnID())
 	FrameDataFree(fd1)
 	FrameDataFree(fd2)
 }

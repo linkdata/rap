@@ -4,12 +4,12 @@ package rap
 import "time"
 
 const (
-	// ConnExchangeID is the Exchange ID used to mark Conn control frames.
-	ConnExchangeID = ExchangeID((0xff & (^ExchangeID(FrameFlagMask)) << 8) | 0xff)
-	// ProtocolMaxExchangeID is the maximum value allowed for MaxExchangeID.
-	ProtocolMaxExchangeID = ConnExchangeID - 1
-	// ProtocolMaxConcurrentExchanges is an artifical limit on maximum concurrent exchanges.
-	ProtocolMaxConcurrentExchanges = 10 * 1000000
+	// MuxerConnID is the Conn ID used to mark Muxer control frames.
+	MuxerConnID = ConnID((0xff & (^ConnID(FrameFlagMask)) << 8) | 0xff)
+	// ProtocolMaxConnID is the maximum value allowed for MaxConnID.
+	ProtocolMaxConnID = MuxerConnID - 1
+	// ProtocolMaxConcurrentConns is an artifical limit on maximum concurrent Conns.
+	ProtocolMaxConcurrentConns = 10 * 1000000
 	// MaxSendWindowSize is the maximum value allowed for SendWindowSize.
 	MaxSendWindowSize = 8
 	// FrameHeaderSize is the number of bytes in a frame header.
@@ -25,8 +25,8 @@ const (
 )
 
 var (
-	// MaxExchangeID is the highest allowable ExchangeID (configurable).
-	MaxExchangeID = ExchangeID(ProtocolMaxExchangeID) // usually ProtocolMaxExchangeID
+	// MaxConnID is the highest allowable ConnID (configurable).
+	MaxConnID = ConnID(ProtocolMaxConnID) // usually ProtocolMaxConnID
 	// SendWindowSize is the maximum number of frames allowed in flight.
 	SendWindowSize = MaxSendWindowSize // usually MaxSendWindowSize
 )

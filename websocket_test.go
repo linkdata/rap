@@ -16,7 +16,7 @@ import (
 
 func Test_Websocket_Simple(t *testing.T) {
 	pipedAutobahnServer(t, func(addr string) {
-		// Connect to the server
+		// dial the server
 		u := "ws://" + addr + "/c"
 		ws, _, err := websocket.DefaultDialer.Dial(u, nil)
 		if err != nil {

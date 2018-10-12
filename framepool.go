@@ -4,7 +4,7 @@ package rap
 var frameDataPool chan FrameData
 
 func init() {
-	frameDataPool = make(chan FrameData, MaxExchangeID)
+	frameDataPool = make(chan FrameData, MaxConnID)
 }
 
 // FrameDataAlloc allocates an empty FrameData, without a FrameHeader.
@@ -18,8 +18,8 @@ func FrameDataAlloc() FrameData {
 	}
 }
 
-// FrameDataAllocID allocates a FrameData with a FrameHeader and the given ExchangeID set.
-func FrameDataAllocID(id ExchangeID) FrameData {
+// FrameDataAllocID allocates a FrameData with a FrameHeader and the given Conn ID set.
+func FrameDataAllocID(id ConnID) FrameData {
 	select {
 	case fd := <-frameDataPool:
 		fd.ClearID(id)

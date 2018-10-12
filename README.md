@@ -6,27 +6,27 @@ The REST Aggregation Protocol, or *RAP* for short, is an asymmetric HTTP and Web
 
 ## Motivation
 
-Parsing HTTP and correctly implementing all the features of a HTTP server uses up significant resources on the server. Simply handling the TCP protocol requirements for tens of thousands of connections can consume significant CPU resources on the server.
+Parsing HTTP and correctly implementing all the features of a HTTP server uses up significant resources on the server. Simply handling the TCP protocol requirements for tens of thousands of network connections can consume significant CPU resources on the server.
 
 Traditional web applications simply accept this as an unavoidable fact and focus on finding ways to add more servers. But that brings it's own set of problems and isn't a viable solution for a CPU-bound server where scaling out isn't an option.
 
 In some architectures it may not be possible to decouple the application code that processes HTTP requests from the database that holds the data. So everything that runs on the same machine must be as efficient as possible. Unfortunately, even the most efficient web servers today use far too much CPU.
 
-This project aims to move the web server to other machine(s) and to simplify the request-response scheme to support only what we need while making sure that receiving and routing the incoming requests use as few resources as possible. Where HTTP tries to be very generic in it's design, RAP focuses on handling large amounts of small request-reply exchanges.
+This project aims to move the web server to other machine(s) and to simplify the request-response scheme to support only what we need while making sure that receiving and routing the incoming requests use as few resources as possible. Where HTTP tries to be very generic in it's design, RAP focuses on handling large amounts of small request-response exchanges.
 
 I looked to HTTP/2 as a likely candidate for multiplexing HTTP requests, but found that it used too much CPU and that the HPACK algorithm made the stream stateful, which meant synchronization mechanisms would be needed in order to use more than one thread per stream on the upstream server.
 
 ## Overview
 
-One or more RAP *gateways* are connected to a single upstream server. The gateways receive incoming requests using any protocol it supports (HTTP(S), HTTP/2, SPDY etc) and multiplexes these onto one or more RAP *connections*. The gateways need no configuration data except for the upstream destination address.
+One or more RAP *gateways* are connected to a single upstream server. The gateways receive incoming requests using any protocol it supports (HTTP(S), HTTP/2, SPDY etc) and multiplexes these onto one or more RAP *muxers*. The gateways need no configuration data except for the upstream destination address.
 
-A RAP *connection* multiplexes concurrent requests-response *exchanges*, identified by a (small) unsigned integer. The gateway maintains a set of which exchange identifiers are free and may use them in any order. A gateway may open as many connections as it needs, but should strive to keep as few as possible.
+A RAP *muxer* multiplexes concurrent requests-response connections (*conn*), identified by a (small) unsigned integer. The gateway maintains a set of which identifiers are free and may use them in any order. A gateway may open as many muxers as it needs, but should strive to keep as few as possible.
 
-A RAP *exchange* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-exchange flow control mechanism, which is a simple transmission window with ACKs from the receiver. Exchanges inject *frames* into the *connection* for transmission.
+A RAP *conn* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-conn flow control mechanism, which is a simple transmission window with ACKs from the receiver. Conns inject *frames* into the *muxer* for transmission.
 
-A RAP *frame* is the basic structure within a connection. It consists of a *frame header* followed by the *frame body* data bytes.
+A RAP *frame* is the basic structure within a *muxer* data stream. It consists of a *frame header* followed by the *frame body* data bytes.
 
-A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a connection control frame and the control field is a 3-bit MSB value specifying the frame type:
+A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit *conn* ID. If the ID is 0x1fff (highest possible), the frame is a *muxer* control frame and the control field is a 3-bit MSB value specifying the frame type:
 * 000 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
 * 001 - reserved, but expect Size to reflect payload size
 * 010 - Ping, Size is bytes of payload data to return in a Pong
@@ -36,7 +36,7 @@ A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit contr
 * 110 - reserved, ignore the Size value
 * 111 - reserved, ignore the Size value
 
-If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and the control field is mapped to three flags: Flow, Body and Head. The following table lists the valid flag combinations and their meaning:
+If ID is 0..0x1ffe (inclusive), the frame applies to that *conn*, and the control field is mapped to three flags: Flow, Body and Head. The following table lists the valid flag combinations and their meaning:
 * 000 - () *reserved*, expect Size to reflect payload size
 * 001 - (Head) the data bytes starts with a RAP *record*, without any body bytes
 * 010 - (Body) data bytes form body data, no RAP *record* present
@@ -53,11 +53,11 @@ A RAP *record* type defines how the data bytes are encoded. The records have fie
 
 ### Invalid record (0x00)
 
-Never a valid record to send. If received, the connection is terminated immediately.
+Never a valid record to send. If received, the *muxer* is terminated immediately.
 
 ### Set string record (0x01)
 
-Set one or more string lookups for a connection. Once set, a string lookup value must not be changed. Note that each side maintains both it's own lookup table and the peer's lookup table. Receiving this record adds to the table used when sending strings to the peer. When receiving strings, each side must be able to resolve lookups that has previously been sent.
+Set one or more string lookups for a *muxer*. Once set, a string lookup value must not be changed. Note that each side maintains both it's own lookup table and the peer's lookup table. Receiving this record adds to the table used when sending strings to the peer. When receiving strings, each side must be able to resolve lookups that has previously been sent.
 * One or more of:
   * `length` Lookup index. Must be a value greater than 1. Must not previously have been set.
   * `string` Lookup string. Must not be a zero-length string.
@@ -65,7 +65,7 @@ Set one or more string lookups for a connection. Once set, a string lookup value
 
 ### Set route record (0x02)
 
-Set one or more route lookups for a connection. Once set, a route lookup value must not be changed. Only the upstream server may send this message to a connected gateway.
+Set one or more route lookups for a *muxer*. Once set, a route lookup value must not be changed. This message may only be sent from the upstream server to a gateway.
 * One or more of:
   * `length` Lookup index. Must be a value greater than zero. Must not previously have been set.
   * `string` Host name. If the empty string (`0x00 0x01`), route applies to all host names.
@@ -74,7 +74,7 @@ Set one or more route lookups for a connection. Once set, a route lookup value m
 
 ### HTTP request record (0x03)
 
-Sent from the gateway to start a new HTTP exchange. The record structure contains enough information to transparently carry a HTTP/1.1 request. Since the gateway must validate incoming requests and format them into request records, the upstream server receiving them may rely on the structure being correct.
+Sent from the gateway to start a new HTTP request. The record structure contains enough information to transparently carry a HTTP/1.1 request. Since the gateway must validate incoming requests and format them into request records, the upstream server receiving them may rely on the structure being correct.
 * `string` HTTP method, e.g. `GET`.
 * `string` HTTP scheme, e.g. `http`.
 * `route` The route information or URI path.
@@ -92,7 +92,7 @@ Sent from the upstream server in response to a HTTP request record.
 
 ### Service pause record (0x05)
 
-Sent from the upstream server to signal that no new requests may be initiated. New requests that cannot be served from cache will have the status code and reason provided. If a record body is provided, it should be provided as the response body. Note that this record applies to all connections from the client until a *service resume* record is received.
+Sent from the upstream server to signal that no new requests may be initiated. New requests that cannot be served from cache will have the status code and reason provided. If a record body is provided, it should be provided as the response body. Note that this record applies to all *muxers* from that client until a *service resume* record is received.
 This record has the same definition as the *HTTP response* record, and is parsed the same.
 
 ### Service resume record (0x06)
@@ -101,7 +101,7 @@ Sent to resume service again after a *service pause* record.
 
 ### Hijacked record (0x07)
 
-Sent when an exchange has been hijacked and will now act as a dumb data pipe. For example, by a HTTP `Connection: Upgrade` request such as a WebSockets upgrade request.
+Sent when a *conn* has been hijacked and will now act as a dumb data pipe. For example, by a HTTP `Connection: Upgrade` request such as a WebSockets upgrade request.
 
 ### User defined record (0x80)
 
@@ -140,7 +140,7 @@ A string encoding starts with a `length`. If the length is nonzero, then that ma
 A zero length signals special case handling and is followed by another `length` value, interpreted as follows:
 * `0x00` Null string. Used to mark the end of a list of strings or signal other special cases.
 * `0x01` Empty string, i.e. `""`.
-* Other values refer to entries in the connection string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the connection must be closed.
+* Other values refer to entries in the *muxer* string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the *muxer* must be closed.
 
 ### `kvv`
 
@@ -165,15 +165,15 @@ Or:
 
 ## Flow control
 
-Each side of an *exchange* maintains a count of *frames* with payload (where the *flow* bit is clear) sent but not acknowledged. Frames sent with the exchange id set to `0x1FFF` or flow control frames (those with the *flow* bit set) does not count.
+Each side of a *conn* maintains a count of *frames* with payload (where the *flow* bit is clear) sent but not acknowledged. Frames sent with the conn ID set to `0x1FFF` or flow control frames (those with the *flow* bit set) does not count.
 
-A receiver *exchange* must be able to buffer the full window size count of *frames*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *exchange id*, control bits set to `000` (not flow, no body data, no head data) and the size value set to zero. This is called a *flow control frame*.
+A receiver *conn* must be able to buffer the full window size count of *frames*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *conn id*, control bits set to `000` (not flow, no body data, no head data) and the size value set to zero. This is called a *flow control frame*.
 
 ## Closing
 
-Before an *exchange* is done and it's id may be reused, both sides must send and receive a empty *frame* with the *flow* and *body* control bits set. These are known as the *final frames*. After the *final frame* is sent, no more non-flow-control frames may be sent. Upon receiving a *final frame*, we must send a *final frame ack* in response if we haven't already (known as a *final frame ack*).
+Before a *conn* is done and it's id may be reused, both sides must send and receive a empty *frame* with the *flow* and *body* control bits set. These are known as the *final frames*. After the *final frame* is sent, no more non-flow-control frames may be sent. Upon receiving a *final frame*, we must send a *final frame ack* in response if we haven't already (known as a *final frame ack*).
 
-Once an *exchange* has both sent and received *final frames* it may be recycled and re-used.
+Once a *conn* has both sent and received *final frames* it may be recycled and re-used.
 
 ## License
 

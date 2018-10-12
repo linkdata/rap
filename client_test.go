@@ -21,7 +21,7 @@ const noSrvAddr string = "192.0.2.1:1"
 func Test_Client_NewClient(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	assert.NotNil(t, c)
-	assert.Zero(t, c.AvailableExchanges())
+	assert.Zero(t, c.AvailableConns())
 	defer c.Close()
 }
 
@@ -29,7 +29,7 @@ func Test_Client_no_answer(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	defer c.Close()
 	c.DialTimeout = time.Millisecond * 10
-	e, err := c.NewExchangeMayDial()
+	e, err := c.NewConnMayDial()
 	assert.Nil(t, e)
 	assert.Error(t, err)
 }
@@ -40,32 +40,32 @@ func Test_Client_server_seems_offline(t *testing.T) {
 	assert.Error(t, c.offlineError())
 	c.DialTimeout = time.Millisecond * 10
 	c.firstAttempt = time.Now().Add(-time.Second)
-	e, err := c.NewExchangeMayDial()
+	e, err := c.NewConnMayDial()
 	assert.Nil(t, e)
 	assert.Error(t, err)
 }
 
-func Test_Client_connect_and_close(t *testing.T) {
+func Test_Client_dial_and_close(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
 	defer c.Close()
 	assert.NotNil(t, c)
 	c.DialTimeout = time.Second
-	e1, err := c.NewExchangeMayDial()
+	c1, err := c.NewConnMayDial()
 	assert.NoError(t, err)
-	assert.NotNil(t, e1)
-	defer e1.Close()
-	e2 := c.NewExchange()
-	assert.NotNil(t, e2)
-	assert.NotZero(t, c.AvailableExchanges())
-	defer e2.Close()
-	if e1 != nil && e2 != nil {
-		assert.Equal(t, e1.conn, e2.conn)
+	assert.NotNil(t, c1)
+	defer c1.Close()
+	c2 := c.NewConn()
+	assert.NotNil(t, c2)
+	assert.NotZero(t, c.AvailableConns())
+	defer c2.Close()
+	if c1 != nil && c2 != nil {
+		assert.Equal(t, c1.mux, c2.mux)
 	}
 }
 
-func Test_Client_exhaust_conn(t *testing.T) {
+func Test_Client_exhaust_muxer(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
@@ -73,74 +73,74 @@ func Test_Client_exhaust_conn(t *testing.T) {
 	defer c.Close()
 	c.DialTimeout = time.Second
 
-	grabbed := make(chan *Exchange, int(ConnExchangeID)*2+1)
-	e, err := c.NewExchangeMayDial()
-	firstConn := c.getConn()
+	grabbed := make(chan *Conn, int(MuxerConnID)*2+1)
+	conn, err := c.NewConnMayDial()
+	firstMux := c.getMux()
 	assert.NoError(t, err)
-	assert.NotNil(t, e)
-	assert.Equal(t, int(MaxExchangeID)-1, firstConn.AvailableExchanges())
-	for e != nil {
-		grabbed <- e
-		e = c.NewExchange()
+	assert.NotNil(t, conn)
+	assert.Equal(t, int(MaxConnID)-1, firstMux.AvailableConns())
+	for conn != nil {
+		grabbed <- conn
+		conn = c.NewConn()
 	}
-	assert.Equal(t, int(MaxExchangeID), cap(firstConn.exchanges))
-	assert.Equal(t, 0, len(firstConn.exchanges))
-	assert.Equal(t, 0, firstConn.AvailableExchanges())
-	assert.Equal(t, int(MaxExchangeID), len(grabbed))
-	e = c.NewExchange()
-	assert.Nil(t, e)
+	assert.Equal(t, int(MaxConnID), cap(firstMux.conns))
+	assert.Equal(t, 0, len(firstMux.conns))
+	assert.Equal(t, 0, firstMux.AvailableConns())
+	assert.Equal(t, int(MaxConnID), len(grabbed))
+	conn = c.NewConn()
+	assert.Nil(t, conn)
 
-	// This will create a new conn since the old is all in use
-	e, err = c.NewExchangeMayDial()
+	// This will create a new Muxer since the old is all in use
+	conn, err = c.NewConnMayDial()
 	assert.NoError(t, err)
-	assert.NotNil(t, e)
-	secondConn := c.getConn()
-	assert.NotEqual(t, firstConn.serialNumber, secondConn.serialNumber)
-	assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
-	assert.Equal(t, int(MaxExchangeID)-1, secondConn.AvailableExchanges())
+	assert.NotNil(t, conn)
+	secondMux := c.getMux()
+	assert.NotEqual(t, firstMux.serialNumber, secondMux.serialNumber)
+	assert.Equal(t, int(MaxConnID), cap(secondMux.conns))
+	assert.Equal(t, int(MaxConnID)-1, secondMux.AvailableConns())
 
-	// close the exchange, should go back to the secondConn
-	e.Close()
+	// close the Conn, should go back to the secondMux
+	conn.Close()
 	timer1 := time.NewTimer(time.Second * 5)
 	defer timer1.Stop()
-	for secondConn.AvailableExchanges() != int(MaxExchangeID) {
+	for secondMux.AvailableConns() != int(MaxConnID) {
 		select {
 		case <-timer1.C:
-			assert.FailNow(t, "exchange did not release in time")
+			assert.FailNow(t, "Conn did not release in time")
 		default:
 			time.Sleep(time.Millisecond)
 		}
 	}
-	assert.Equal(t, int(MaxExchangeID), secondConn.AvailableExchanges())
+	assert.Equal(t, int(MaxConnID), secondMux.AvailableConns())
 
-	// Now free all the Exchanges in the old conn
+	// Now free all the Conns in the old mux
 	for len(grabbed) > 0 {
-		e = <-grabbed
-		e.Close()
-		assert.NotNil(t, e)
-		assert.Equal(t, firstConn.serialNumber, e.getConn().serialNumber)
+		conn = <-grabbed
+		conn.Close()
+		assert.NotNil(t, conn)
+		assert.Equal(t, firstMux.serialNumber, conn.getMux().serialNumber)
 	}
 
-	// Grab all available exchanges, should be two conn's worth available eventually
-	e = c.NewExchange()
-	assert.NotNil(t, e)
+	// Grab all available conns, should be two Muxers worth available eventually
+	conn = c.NewConn()
+	assert.NotNil(t, conn)
 	timer2 := time.NewTimer(time.Second * 5)
 	defer timer2.Stop()
-	for len(grabbed) < int(MaxExchangeID)*2 {
-		if e != nil {
-			grabbed <- e
+	for len(grabbed) < int(MaxConnID)*2 {
+		if conn != nil {
+			grabbed <- conn
 		} else {
 			select {
 			case <-timer2.C:
-				assert.FailNow(t, fmt.Sprint("unable to grab ", int(MaxExchangeID)*2, " exchanges, got ", len(grabbed)))
+				assert.FailNow(t, fmt.Sprint("unable to grab ", int(MaxConnID)*2, " conns, got ", len(grabbed)))
 			default:
 			}
 		}
-		e = c.NewExchange()
+		conn = c.NewConn()
 		// log.Print("grabbed ", len(grabbed), " e=", e)
 	}
 
-	assert.Equal(t, int(MaxExchangeID)*2, len(grabbed))
+	assert.Equal(t, int(MaxConnID)*2, len(grabbed))
 	for len(grabbed) > 0 {
 		(<-grabbed).Close()
 	}
@@ -242,7 +242,7 @@ func Test_Client_parallel_queries(t *testing.T) {
 
 	// race detector limit is 8192 goroutines
 	parallelism := int32((8192 - runtime.NumGoroutine()) / 3)
-	factor := int32(MaxExchangeID*4) / parallelism
+	factor := int32(MaxConnID*4) / parallelism
 	queryCount := parallelism * factor
 	serveCount := int32(0)
 

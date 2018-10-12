@@ -227,7 +227,7 @@ func Test_Server_support_functions(t *testing.T) {
 	em := st.srv.ServeErrors()
 	assert.NotNil(t, em)
 	assert.Zero(t, len(em))
-	assert.Zero(t, st.srv.ActiveConns())
+	assert.Zero(t, st.srv.ActiveMuxers())
 	assert.Zero(t, st.srv.BytesWritten())
 	assert.Zero(t, st.srv.BytesRead())
 	st.srv.AddBytesRead(1)

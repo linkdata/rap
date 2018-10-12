@@ -17,7 +17,7 @@ func Test_ReverseProxy_NewReverseProxy(t *testing.T) {
 }
 
 func Test_ReverseProxy_ServeHTTP(t *testing.T) {
-	et := newExchangeTester(t)
+	et := newConnTester(t)
 	defer et.Close()
 	hs := httptest.NewUnstartedServer(et)
 	hs.Config.Addr = "127.0.0.1:"

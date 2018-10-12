@@ -14,50 +14,50 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Client connects to a RAP server, maintaining one or more Conns.
+// Client dials a RAP server, maintaining one or more Muxers.
 type Client struct {
-	Addr         string        // where to connect
+	Addr         string        // the address to dial
 	DialTimeout  time.Duration // dialing timeout
 	ReadTimeout  time.Duration // read timeout (reading the request)
 	WriteTimeout time.Duration // write timeout (writing the response)
-	conn         *Conn         // the current active connection (atomic access only)
+	mux          *Muxer        // the current active Muxer (atomic access only)
 	mu           sync.Mutex    // protects those below
 	lastError    error
 	lastAttempt  time.Time
 	firstAttempt time.Time
-	conns        []*Conn
+	muxers       []*Muxer
 }
 
-// NewClient starts a new RAP Client. The Client will make establish Conn's
+// NewClient starts a new RAP Client. The Client will establish network connections
 // to the RAP Server at the given address as needed. This implies that no
-// connection will be made immediately.
+// network connection will be made immediately.
 func NewClient(addr string) *Client {
 	return &Client{
 		Addr:        addr,
 		DialTimeout: time.Second * 60,
-		conns:       make([]*Conn, 0),
+		muxers:      make([]*Muxer, 0),
 	}
 }
 
-// Close closes all connections.
+// Close closes all Muxers.
 func (c *Client) Close() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for i, conn := range c.conns {
-		c.conns[i] = nil
-		if conn != nil {
-			if connerr := conn.Close(); err == nil {
-				err = connerr
+	for i, mux := range c.muxers {
+		c.muxers[i] = nil
+		if mux != nil {
+			if muxerr := mux.Close(); err == nil {
+				err = muxerr
 			}
 		}
 	}
-	c.conns = nil
+	c.muxers = nil
 	return
 }
 
-// dialLocked creates a new RAP Conn to the server.
+// dialLocked creates a new RAP Muxer to the server.
 // Must run with the mutex locked.
-func (c *Client) dialLocked() *Conn {
+func (c *Client) dialLocked() *Muxer {
 	rwc, err := net.DialTimeout("tcp", c.Addr, c.DialTimeout)
 	if err != nil {
 		c.lastError = err
@@ -71,35 +71,35 @@ func (c *Client) dialLocked() *Conn {
 	c.lastError = nil
 	c.lastAttempt = time.Time{}
 	c.firstAttempt = time.Time{}
-	conn := NewConn(rwc)
-	go conn.ServeHTTP(nil)
-	c.conns = append(c.conns, conn)
-	return conn
+	mux := NewMuxer(rwc)
+	go mux.ServeHTTP(nil)
+	c.muxers = append(c.muxers, mux)
+	return mux
 }
 
-// selectBestConn returns an existing Conn that have free Exchanges,
+// selectBestMux returns an existing Muxer that have free Conns,
 // or nil if none were found.
 // Must run with the mutex locked.
-func (c *Client) selectBestConn() (bestConn *Conn) {
+func (c *Client) selectBestMux() (bestMux *Muxer) {
 	bestLength := 0
-	for _, conn := range c.conns {
-		avail := conn.AvailableExchanges()
+	for _, mux := range c.muxers {
+		avail := mux.AvailableConns()
 		if avail > bestLength {
 			bestLength = avail
-			bestConn = conn
+			bestMux = mux
 		}
 	}
 	return
 }
 
-// non-racy "return c.conn"
-func (c *Client) getConn() *Conn {
-	return (*Conn)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.conn))))
+// non-racy "return c.mux"
+func (c *Client) getMux() *Muxer {
+	return (*Muxer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.mux))))
 }
 
-// non-racy "c.conn = conn"
-func (c *Client) setConn(conn *Conn) {
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.conn)), unsafe.Pointer(conn))
+// non-racy "c.mux = mux"
+func (c *Client) setMux(mux *Muxer) {
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.mux)), unsafe.Pointer(mux))
 }
 
 func (c *Client) offlineError() (err error) {
@@ -113,69 +113,69 @@ func (c *Client) offlineError() (err error) {
 	return
 }
 
-// NewExchange returns a new Exchange for use, or nil if none available.
-func (c *Client) NewExchange() (e *Exchange) {
-	if conn := c.getConn(); conn != nil {
-		e = conn.NewExchange()
+// NewConn returns a new Conn for use, or nil if none available.
+func (c *Client) NewConn() (e *Conn) {
+	if mux := c.getMux(); mux != nil {
+		e = mux.NewConn()
 	}
 	if e == nil {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		bestConn := c.selectBestConn()
-		if bestConn != nil {
-			if e = bestConn.NewExchange(); e != nil {
-				c.setConn(bestConn)
+		bestMux := c.selectBestMux()
+		if bestMux != nil {
+			if e = bestMux.NewConn(); e != nil {
+				c.setMux(bestMux)
 			}
 		}
 	}
 	return
 }
 
-// AvailableExchanges returns the number of Exchanges currently not
-// serving a request. They may be distributed across many Conn's.
-func (c *Client) AvailableExchanges() int {
+// AvailableConns returns the number of Conns currently not
+// serving a request. They may be distributed across many Muxers.
+func (c *Client) AvailableConns() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.availableExchangesLocked()
+	return c.availableConnsLocked()
 }
 
-func (c *Client) availableExchangesLocked() (exchangeCount int) {
-	for _, conn := range c.conns {
-		exchangeCount += conn.AvailableExchanges()
+func (c *Client) availableConnsLocked() (connCount int) {
+	for _, mux := range c.muxers {
+		connCount += mux.AvailableConns()
 	}
 	return
 }
 
-// NewExchangeMayDial will find a Conn with free Exchanges or
+// NewConnMayDial will find a Muxer with free Conns or
 // create a new one if needed.
-func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
+func (c *Client) NewConnMayDial() (conn *Conn, err error) {
 	startTime := time.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for e == nil {
-		bestConn := c.selectBestConn()
-		if bestConn == nil {
-			// not enough free, make a new connection
+	for conn == nil {
+		bestMux := c.selectBestMux()
+		if bestMux == nil {
+			// not enough free, dial a new one
 			if c.lastAttempt.Before(startTime) {
-				bestConn = c.dialLocked()
+				bestMux = c.dialLocked()
 			}
-			if bestConn == nil {
+			if bestMux == nil {
 				return nil, c.offlineError()
 			}
 		}
-		// grab an exchange before we publish the new conn
-		if e = bestConn.NewExchangeWait(time.Second * 5); e != nil {
-			c.setConn(bestConn)
+		// grab a Conn before we publish the new Muxer
+		if conn = bestMux.NewConnWait(c.DialTimeout); conn != nil {
+			c.setMux(bestMux)
 		}
 	}
-	return e, nil
+	return conn, nil
 }
 
 func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	e := c.NewExchange()
+	e := c.NewConn()
 	if e == nil {
 		var err error
-		e, err = c.NewExchangeMayDial()
+		e, err = c.NewConnMayDial()
 		if e == nil {
 			http.Error(w, err.Error(), http.StatusGatewayTimeout)
 			return
@@ -184,7 +184,7 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.serveHTTP(w, r, e)
 }
 
-func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Exchange) {
+func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Conn) {
 	defer e.Close()
 
 	var requestErr error
@@ -262,5 +262,5 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Exchange) 
 		return
 	}
 
-	panic(fmt.Sprintf("rap.Client.ServeHTTP(): uri=\"%s\"\nrequest error: %+v\nresponse error: %+v\nexchange: %+v\n", r.RequestURI, requestErr, responseErr, e))
+	panic(fmt.Sprintf("rap.Client.ServeHTTP(): uri=\"%s\"\nrequest error: %+v\nresponse error: %+v\nconn: %+v\n", r.RequestURI, requestErr, responseErr, e))
 }

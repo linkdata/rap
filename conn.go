@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -12,455 +13,966 @@ import (
 	"github.com/pkg/errors"
 )
 
-// StatsCollector is the interface required to collect statistics
-type StatsCollector interface {
-	AddBytesWritten(int64)
-	AddBytesRead(int64)
+// ConnID identifies a in-progress request/response.
+type ConnID uint16
+
+func (e ConnID) String() string {
+	return fmt.Sprintf("[ID %04x]", uint16(e))
 }
 
-// ErrTimeoutWaitingForReader means the reader timed out when closing the connection.
-type ErrTimeoutWaitingForReader struct{}
+// ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
+type ErrUnhandledRecordType struct{}
 
-func (ErrTimeoutWaitingForReader) Error() string { return "timeout waiting for reader at close" }
+func (ErrUnhandledRecordType) Error() string { return "unhandled record type" }
 
-// ProtocolError is the error type used for reporting protocol errors,
-// all of which are fatal to a connection.
-type ProtocolError struct{}
+// ErrMissingFrameHead is returned when an RAP frame was expected to have the HEAD bit set and contain a RAP record.
+type ErrMissingFrameHead struct{}
 
-func (e ProtocolError) Error() string { return "protocol error" }
+func (ErrMissingFrameHead) Error() string { return "missing frame head" }
 
-// PanicError is the error type used for reporting peer panic errors,
-// all of which are fatal to a connection.
-type PanicError struct{}
-
-func (e PanicError) Error() string { return "peer panic" }
-
-type connControlHandler func(*Conn, FrameData) error
-
-var connControlHandlers = map[ConnControl]connControlHandler{
-	ConnControlPanic:       connControlPanicHandler,
-	connControlReserved001: connControlReservedHandler,
-	ConnControlPing:        connControlPingHandler,
-	ConnControlPong:        connControlPongHandler,
-	connControlReserved100: connControlReservedHandler,
-	connControlReserved101: connControlReservedHandler,
-	connControlReserved110: connControlReservedHandler,
-	connControlReserved111: connControlReservedHandler,
+// ConnMuxer is the interface that a Conn needs in order to
+// communicate with the outside world and clean up.
+type ConnMuxer interface {
+	// ConnWrite allows a Conn to write a FrameData
+	ConnWrite(fd FrameData) error
+	// ConnAbortChannel returns the channel that is closed when owner is closing
+	ConnAbortChannel() <-chan struct{}
 }
 
-// Conn multiplexes concurrent requests-response Exchanges.
-// It maintains the set of ExchangeID's that free and may use them in any order.
+// connDeadline is an abstraction for handling timeouts.
+type connDeadline struct {
+	mu     sync.Mutex // Guards timer and cancel
+	timer  *time.Timer
+	cancel chan struct{} // Must be non-nil
+}
+
+func makeConnDeadline() connDeadline {
+	return connDeadline{cancel: make(chan struct{})}
+}
+
+// set sets the point in time when the deadline will time out.
+// A timeout event is signaled by closing the channel returned by waiter.
+// Once a timeout has occurred, the deadline can be refreshed by specifying a
+// t value in the future.
+//
+// A zero value for t prevents timeout.
+func (d *connDeadline) set(t time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.timer != nil && !d.timer.Stop() {
+		<-d.cancel // Wait for the timer callback to finish and close cancel
+	}
+	d.timer = nil
+
+	// Time is zero, then there is no deadline.
+	closed := isClosedChan(d.cancel)
+	if t.IsZero() {
+		if closed {
+			d.cancel = make(chan struct{})
+		}
+		return
+	}
+
+	// Time in the future, setup a timer to cancel in the future.
+	if dur := time.Until(t); dur > 0 {
+		if closed {
+			d.cancel = make(chan struct{})
+		}
+		d.timer = time.AfterFunc(dur, func() {
+			close(d.cancel)
+		})
+		return
+	}
+
+	// Time in the past, so close immediately.
+	if !closed {
+		close(d.cancel)
+	}
+}
+
+// wait returns a channel that is closed when the deadline is exceeded.
+func (d *connDeadline) wait() chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cancel
+}
+
+func isClosedChan(c <-chan struct{}) bool {
+	select {
+	case <-c:
+		return true
+	default:
+		return false
+	}
+}
+
+type runState int32
+
+const (
+	runStateUnused  = runState(0) // idle
+	runStateActive  = runState(1) // sent or received frame that needs ack
+	runStateWaitFin = runState(2) // sent local final, needs remote final or final-ack
+	runStateRecycle = runState(3) // recycling
+)
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "deadline exceeded" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+// Conn is essentially a pipe. It maintains the state of a request-response
+// or WebSocket connection, moves data between the RAP and HTTP connections and
+// handles the flow control mechanism, which is a simple transmission
+// window with intermittent ACKs from the receiver.
 type Conn struct {
-	io.ReadWriteCloser // The I/O endpoint, usually a TCP connection
-	StatsCollector     // Where to report statistics (optional)
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
-	Handler            http.Handler
-	writeCh            chan FrameData
-	exchanges          chan *Exchange
-	exchangeLookup     []*Exchange
-	exchangeLastID     int32
-	mu                 sync.Mutex
-	doneChan           chan struct{}
-	readerWaitGroup    sync.WaitGroup
-	lastPingSent       int64 // Unix nanoseconds
-	lastPongRcvd       int64 // Unix nanoseconds
-	latency            int64 // Unix nanoseconds
-	isReadClosed       bool
-	isWriteClosed      bool
-	serialNumber       uint32
+	ID          ConnID         // Conn ID
+	mux         ConnMuxer      // the Muxer that owns us
+	onRecycle   func(*Conn)    // function to call when Conn is recycled
+	ackCh       chan struct{}  // ack's from peer go in this
+	readCh      chan FrameData // data frames from peer go in this
+	cmu         sync.Mutex     // guards localClosed and remoteClosed
+	localClosed chan struct{}  // closed when Close() has been called
+
+	// these are atomic to allow Conn.String() to print the state without causing races
+	localSentFinal  int32    // nonzero if local has sent it's final frame
+	remoteSentFinal int32    // nonzero if remote has sent it's final frame
+	sendWindow      int32    // number of frames still allowed to be in flight
+	state           runState // nonzero if a header frame has been sent or received
+	hijacked        int32    // nonzero if Hijack() was called
+
+	wmu           sync.Mutex  // guards fdw
+	fdw           FrameData   // FrameData being written to, nil after final frame sent
+	rmu           sync.Mutex  // guards fdr
+	fdr           FrameData   // FrameData being read from by fr
+	fp            FrameParser // Frame parser (into fdr)
+	readDeadline  connDeadline
+	writeDeadline connDeadline
+	serialNumber  uint32
 }
 
 var connNextSerialNumber uint32
 
-func (c *Conn) String() string {
-	return fmt.Sprintf("[Conn %x]", c.serialNumber)
+func (conn *Conn) isHijacked() bool {
+	return atomic.LoadInt32(&conn.hijacked) != 0
 }
 
-// NewConn creates a new Conn and initializes it.
-func NewConn(rwc io.ReadWriteCloser) *Conn {
-	c := &Conn{
-		ReadWriteCloser: rwc,
-		ReadTimeout:     DefaultReadTimeout,
-		WriteTimeout:    DefaultWriteTimeout,
-		writeCh:         make(chan FrameData),
-		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
-		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
-		doneChan:        make(chan struct{}),
-		readerWaitGroup: sync.WaitGroup{},
-		serialNumber:    atomic.AddUint32(&connNextSerialNumber, 1),
-	}
-
-	for idx := range c.exchangeLookup {
-		c.exchangeLookup[idx] = NewExchange(c, ExchangeID(idx))
-	}
-	return c
+func (conn *Conn) hijacking() bool {
+	return atomic.CompareAndSwapInt32(&conn.hijacked, 0, 1)
 }
 
-func connControlPingHandler(c *Conn, fd FrameData) (err error) {
-	fd.Header().SetConnControl(ConnControlPong)
-	select {
-	case c.writeCh <- fd:
-	case <-c.doneChan:
-		return errors.WithStack(serverClosedError{})
-	}
-	return
+func (conn *Conn) starting() bool {
+	return atomic.CompareAndSwapInt32((*int32)(&conn.state), int32(runStateUnused), int32(runStateActive))
 }
 
-func connControlPongHandler(c *Conn, fd FrameData) (err error) {
-	defer FrameDataFree(fd)
-	var now = time.Now().UnixNano()
-	atomic.StoreInt64(&c.lastPongRcvd, now)
-	if fd.Header().HasPayload() {
-		fp := NewFrameParser(fd)
-		atomic.StoreInt64(&c.latency, now-fp.ReadInt64())
-	}
-	return
+func (conn *Conn) setRunState(state runState) {
+	atomic.StoreInt32((*int32)(&conn.state), int32(state))
 }
 
-func connControlPanicHandler(c *Conn, fd FrameData) error {
-	defer FrameDataFree(fd)
-	var msg string
-	if fd.Header().HasPayload() {
-		fp := NewFrameParser(fd)
-		msg, _ = fp.ReadString()
-	}
-	return errors.Wrap(PanicError{}, msg)
+func (conn *Conn) getRunState() runState {
+	return runState(atomic.LoadInt32((*int32)(&conn.state)))
 }
 
-func connControlReservedHandler(c *Conn, fd FrameData) error {
-	defer FrameDataFree(fd)
-	return errors.Wrapf(ProtocolError{}, "unknown conn control frame %v", fd.Header())
+func (conn *Conn) hasRemoteSentFinal() bool {
+	return atomic.LoadInt32(&conn.remoteSentFinal) != 0
 }
 
-// Ping sends a ping frame and returns without waiting for response.
-func (c *Conn) Ping() {
-	fd := FrameDataAlloc()
-	fd.WriteConnControl(ConnControlPing)
-	atomic.StoreInt64(&c.lastPingSent, time.Now().UnixNano())
-	fd.WriteInt64(c.lastPingSent)
-	fd.SetSizeValue()
-	select {
-	case c.writeCh <- fd:
-	case <-c.doneChan:
-		FrameDataFree(fd)
-	}
-}
-
-// Latency returns the result of the last successful ping/pong measurement,
-// or the zero value if there is no current valid measurement.
-func (c *Conn) Latency() (d time.Duration) {
-	ping := atomic.LoadInt64(&c.lastPingSent)
-	if ping > 0 {
-		pong := atomic.LoadInt64(&c.lastPongRcvd)
-		if ping <= pong {
-			d = time.Nanosecond * time.Duration(pong-ping)
-		}
-	}
-	return
-}
-
-// ReadFrom implements io.ReaderFrom.
-func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
-	var unreported int64
-
-	hasCollector := c.StatsCollector != nil
-
-	c.mu.Lock()
-	select {
-	case <-c.doneChan:
-		c.mu.Unlock()
-		return
-	default:
-		c.readerWaitGroup.Add(1)
-		defer c.readerWaitGroup.Done()
-	}
-	c.mu.Unlock()
-
-	for {
-		var m int64
-		fd := FrameDataAlloc()
-
-		m, err = fd.ReadFrom(r)
-		n += m
-
-		if hasCollector {
-			unreported += m
-			if unreported > int64(FrameMaxSize) {
-				c.StatsCollector.AddBytesRead(unreported)
-				unreported = 0
-			}
-		}
-
-		if err != nil {
-			// log.Print("Conn.ReadFrom(): fd.ReadFrom(): ", err.Error())
-			FrameDataFree(fd)
-			break
-		}
-
-		if fd.Header().IsConnControl() {
-			if err = connControlHandlers[fd.Header().ConnControl()](c, fd); err != nil {
-				return
-			}
-			continue
-		}
-
-		e := c.exchangeLookup[fd.Header().ExchangeID()]
-
-		// log.Print("READ ", e, fd)
-
-		if e.starting() {
-			if c.ReadTimeout != 0 {
-				e.SetReadDeadline(time.Now().Add(c.ReadTimeout))
-			} else {
-				e.SetReadDeadline(time.Time{})
-			}
-			if c.WriteTimeout != 0 {
-				e.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
-			} else {
-				e.SetWriteDeadline(time.Time{})
-			}
-			if c.Handler != nil {
-				go e.Serve(c.Handler)
-			}
-		}
-
-		e.SubmitFrame(fd)
-	}
-	return
-}
-
-type flusher interface {
-	Flush() error
-}
-
-// WriteTo implements io.WriterTo. FrameData arriving on the write channel
-// are buffered and written to w until the write channel is closed or
-// an error occurs.
-func (c *Conn) WriteTo(w io.Writer) (n int64, err error) {
-	var unreported int64
-	var written int64
-	f, hasFlusher := w.(flusher)
-	hasCollector := c.StatsCollector != nil
-
-	for err == nil {
-		var fd FrameData // fd starts out nil on each iteration
-
-		select {
-		case <-c.doneChan:
-			return 0, errors.WithStack(serverClosedError{})
-		case fd = <-c.writeCh:
-		default:
-			// no immediately available FrameData, flush the output
-			if hasFlusher {
-				err = f.Flush()
-				if err == nil {
-					if hasCollector && unreported > 0 {
-						c.StatsCollector.AddBytesWritten(unreported)
-						unreported = 0
-					}
-				}
-			}
-		}
-
-		if err == nil {
-			// do a blocking read if we didn't get a fd
-			if fd == nil {
-				select {
-				case fd = <-c.writeCh:
-				case <-c.doneChan:
-					err = errors.WithStack(serverClosedError{})
-				}
-				if fd == nil {
-					// c.writeCh is closed
-					break
-				}
-			}
-
-			// do the actual write
-			// log.Print("WRIT ", c.getExchangeForID(fd.Header().ExchangeID()), fd)
-			written, err = fd.WriteTo(w)
-			n += written
-			FrameDataFree(fd)
-
-			// handle statistics reporting
-			if hasCollector {
-				unreported += written
-				if unreported > int64(FrameMaxSize) {
-					c.StatsCollector.AddBytesWritten(unreported)
-					unreported = 0
-				}
-			}
-		}
-	}
-
-	if hasFlusher {
-		if flusherr := f.Flush(); err == nil {
-			err = flusherr
-		}
-	}
-
-	return
-}
-
-// ServeHTTP processes incoming and outgoing frames for the Conn until closed.
-func (c *Conn) ServeHTTP(h http.Handler) (err error) {
-	c.Handler = h
-
-	errCh := make(chan error, 2)
-	defer close(errCh)
-
-	go func() {
-		_, err := c.ReadFrom(bufio.NewReaderSize(c.ReadWriteCloser, 64*1024))
-		errCh <- err
-	}()
-	go func() {
-		_, err := c.WriteTo(bufio.NewWriterSize(c.ReadWriteCloser, 64*1024))
-		errCh <- err
-	}()
-
-	err = <-errCh
-
-	if closeErr := c.Close(); closeErr != nil && (err == nil || isClosedError(err)) {
-		err = closeErr
-	}
-
-	if otherErr := <-errCh; otherErr != nil && err == nil {
-		err = otherErr
-	}
-
-	return err
-}
-
-// returns true if doneChan was closed now, false if already closed
-func (c *Conn) closeDoneChanLocked() bool {
-	select {
-	case <-c.doneChan:
-		return false
-	default:
-		close(c.doneChan)
-		return true
-	}
-}
-
-// Close closes the Conn immediately.
-func (c *Conn) Close() (err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closeDoneChanLocked() {
-		// closing the I/O stream will cause the reader goroutine to stop with an error
-		err = c.ReadWriteCloser.Close()
-
-		c.readerWaitGroup.Wait()
-
-		// Drain the unused exchange channel
-		for len(c.exchanges) > 0 {
-			if e := <-c.exchanges; e != nil {
-				e.OnRecycle(nil)
-				c.exchangeLookup[e.ID] = nil
-			}
-		}
-
-		// Close all exchanges we know of (in the lookup table)
-		// those will be in-progress exchanges
-		for i, e := range c.exchangeLookup {
-			if e != nil {
-				c.exchangeLookup[i] = nil
-				eerr := e.Close()
-				if err == nil && !isClosedError(eerr) {
-					err = eerr
-				}
-			}
-		}
-	}
-
-	return
-}
-
-func isClosedError(err error) bool {
-	switch errors.Cause(err) {
-	case serverClosedError{}:
-		return true
-	case io.ErrClosedPipe:
-		return true
-	case io.EOF:
+func (conn *Conn) remoteSendingFinal() bool {
+	if atomic.CompareAndSwapInt32(&conn.remoteSentFinal, 0, 1) {
+		close(conn.readCh)
 		return true
 	}
 	return false
 }
 
-// NewExchangeWait returns the next available Exchange, or nil if timed out.
-func (c *Conn) NewExchangeWait(d time.Duration) (e *Exchange) {
-	e = c.NewExchange()
-	if e == nil {
-		timer := time.NewTimer(d)
-		defer timer.Stop()
-		select {
-		case e = <-c.exchanges:
-		case <-timer.C:
+func (conn *Conn) hasLocalSentFinal() bool {
+	return atomic.LoadInt32(&conn.localSentFinal) != 0
+}
+
+func (conn *Conn) localSendingFinal() bool {
+	return atomic.CompareAndSwapInt32(&conn.localSentFinal, 0, 1)
+}
+
+// Serial returns a string identifying the Conn, containing the
+// owning Muxers serial number, a colon, and this Conn's serial number.
+// Note that the serial number is unrelated to the Conn ID.
+func (conn *Conn) Serial() string {
+	muxSerial := uint32(0)
+	if c := conn.getMux(); c != nil {
+		muxSerial = c.serialNumber
+	}
+	return fmt.Sprintf("%x:%x", muxSerial, conn.serialNumber)
+}
+
+func (conn *Conn) String() string {
+	state := ""
+	switch conn.getRunState() {
+	case runStateUnused:
+		state = "IDLE  "
+	case runStateActive:
+		state = " RUN  "
+	case runStateWaitFin:
+		state = "  FIN "
+	case runStateRecycle:
+		state = "    RC"
+	}
+	hijacked := "  "
+	if conn.isHijacked() {
+		hijacked = " HJ"
+	}
+	locF := "  "
+	if conn.hasLocalSentFinal() {
+		locF = "LF"
+	}
+	remF := "  "
+	if conn.hasRemoteSentFinal() {
+		remF = "RF"
+	}
+
+	return fmt.Sprintf("[Conn %v %v %s %s %s %s (%d+%d)]",
+		conn.Serial(), conn.ID, state, hijacked, locF, remF, conn.getSendWindow(), len(conn.ackCh))
+}
+
+// NewConn creates a new Conn
+func NewConn(mux ConnMuxer, connID ConnID) (conn *Conn) {
+	if connID >= MuxerConnID {
+		panic(fmt.Sprintf("illegal Conn ID %d", int(connID)))
+	}
+	conn = &Conn{
+		ID:            connID,
+		mux:           mux,
+		sendWindow:    int32(SendWindowSize),
+		ackCh:         make(chan struct{}, MaxSendWindowSize),
+		readCh:        make(chan FrameData, MaxSendWindowSize),
+		localClosed:   make(chan struct{}),
+		readDeadline:  makeConnDeadline(),
+		writeDeadline: makeConnDeadline(),
+		serialNumber:  atomic.AddUint32(&connNextSerialNumber, 1),
+	}
+	return
+}
+
+// SubmitFrame gives the Conn an incoming FrameData.
+// None of the frames seen may be muxer control frames.
+// A fd of nil indicates an EOF condition.
+// If this function blocks, it will block all Conns on
+// the Muxer.
+func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
+	// log.Print("SubmitFrame() ", e, fd)
+
+	if fd.Header().HasFlow() {
+		if fd.Header().IsAck() {
+			FrameDataFree(fd)
+			select {
+			case conn.ackCh <- struct{}{}:
+			default:
+				panic(fmt.Sprint("ACK would block"))
+			}
+		} else if fd.Header().IsFinal() {
+			// a final frame
+			conn.receivedFinal(fd)
 		}
+		return
 	}
-	return
-}
 
-// AvailableExchanges returns the number of Exchanges that are
-// currently able to be returned from NewExchange(). Note that
-// the value may not be exact if there are other goroutines using
-// the Conn.
-func (c *Conn) AvailableExchanges() (exchangeCount int) {
-	exchangeCount = len(c.exchanges)
-	lastID := atomic.LoadInt32(&c.exchangeLastID)
-	if lastID < int32(MaxExchangeID) {
-		exchangeCount += int(int32(MaxExchangeID) - lastID)
+	if conn.hasRemoteSentFinal() {
+		panic(fmt.Sprint(conn, " received frame after final: ", fd))
 	}
-	return
-}
 
-// NewExchange returns the next available Exchange, or nil if none are available.
-func (c *Conn) NewExchange() *Exchange {
 	select {
-	case e := <-c.exchanges:
-		return e
+	case conn.readCh <- fd:
 	default:
+		panic(fmt.Sprint("DATA would block: ", fd))
 	}
-	for {
-		lastID := atomic.LoadInt32(&c.exchangeLastID)
-		if lastID >= int32(MaxExchangeID) {
-			return nil
+
+	return
+}
+
+func (conn *Conn) receivedFinal(fd FrameData) {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	// log.Print(" FIN ", e, fd)
+
+	if fd != nil {
+		if fd.Header().SizeValue() != 0 {
+			panic("final frame has size value set")
 		}
-		nextID := lastID + 1
-		if atomic.CompareAndSwapInt32(&c.exchangeLastID, lastID, nextID) {
-			e := NewExchange(c, ExchangeID(nextID))
-			e.OnRecycle(c.ExchangeRelease)
-			c.exchangeLookup[nextID] = e
-			return e
-		}
+		FrameDataFree(fd)
+	}
+
+	if !conn.remoteSendingFinal() {
+		panic("received multiple final frames")
+	}
+
+	if conn.hasLocalSentFinal() {
+		conn.recycle()
 	}
 }
 
-// ExchangeWrite allows an Exchange to write a FrameData
-func (c *Conn) ExchangeWrite(fd FrameData) error {
+// readFrame reads data frames from the read channel.
+// None of the frames seen may be muxer control frames.
+// Also writes acknowledgement frames.
+func (conn *Conn) readFrame() (err error) {
+	// log.Print("Conn.readFrame(): len(e.fdr)=", len(e.fdr), " e=", e)
+	if conn.fdr != nil {
+		FrameDataFree(conn.fdr)
+		conn.fdr = nil
+		conn.fp = nil
+	}
+
 	select {
-	case c.writeCh <- fd:
+	case conn.fdr = <-conn.readCh:
+		if conn.fdr != nil {
+			conn.fp = NewFrameParser(conn.fdr)
+			conn.writeAckFrame()
+		} else {
+			err = errors.WithStack(io.EOF)
+		}
+	case <-conn.readDeadline.wait():
+		err = errors.WithStack(timeoutError{})
+	case <-conn.mux.ConnAbortChannel():
+		err = errors.WithStack(serverClosedError{})
+	case <-conn.localClosed:
+		err = errors.WithStack(io.ErrClosedPipe)
+	}
+
+	return
+}
+
+func (conn *Conn) writeAckFrame() {
+	fd := FrameDataAllocID(conn.ID)
+	fd.Header().SetFlow()
+	conn.mux.ConnWrite(fd)
+}
+
+// LoadFrameReader ensures the frame reader has payload data or an error.
+func (conn *Conn) LoadFrameReader() (err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	return conn.loadFrameReader()
+}
+
+func (conn *Conn) loadFrameReader() (err error) {
+	for len(conn.fp) == 0 && err == nil {
+		err = conn.readFrame()
+		// log.Print("Conn.loadFrameReader(): ", e.ID, " readFrame() len(fr)=", len(e.fp), " err=", err, "  ", e)
+	}
+	return
+}
+
+// WriteStart prepares a new frame for writing.
+func (conn *Conn) WriteStart() error {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.writeStart()
+}
+
+func (conn *Conn) writeStart() error {
+	if conn.hasRemoteSentFinal() {
+		return errors.WithStack(io.EOF)
+	}
+	select {
+	case <-conn.localClosed:
+		return errors.WithStack(io.ErrClosedPipe)
+	case <-conn.writeDeadline.wait():
+		return errors.WithStack(timeoutError{})
+	default:
+		if conn.fdw == nil {
+			// log.Print("Conn.writeStart() (new fd)", e)
+			conn.fdw = FrameDataAllocID(conn.ID)
+		}
 		return nil
-	case <-c.doneChan:
-		return errors.WithStack(serverClosedError{})
 	}
 }
 
-// ExchangeRelease returns the Exchange to the Conn, allowing it to
-// be re-used for other requests.
-func (c *Conn) ExchangeRelease(e *Exchange) {
-	select {
-	case c.exchanges <- e:
-	default:
-		panic(fmt.Sprint("can't release exchange, len(s.exchanges) ", len(c.exchanges), " cap(s.exchanges) ", cap(c.exchanges), " max ", MaxExchangeID))
+// Available returns number of free bytes in the current frame.
+func (conn *Conn) Available() int {
+	return conn.fdw.Available()
+}
+
+// Buffered returns the number of bytes that have been written to the
+// current frame, including the header size.
+func (conn *Conn) Buffered() int {
+	return conn.fdw.Buffered()
+}
+
+// Implements io.Reader for Conn.
+// Used when copying data from a Muxer to a HTTP body.
+func (conn *Conn) Read(p []byte) (n int, err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	return conn.read(p)
+}
+
+func (conn *Conn) read(p []byte) (n int, err error) {
+	if err = conn.loadFrameReader(); err == nil {
+		n, err = conn.fp.Read(p)
 	}
 	return
 }
 
-// ExchangeAbortChannel returns the abort signalling channel
-func (c *Conn) ExchangeAbortChannel() <-chan struct{} {
-	return c.doneChan
+// ReadFrom implements io.ReaderFrom for Conn body data.
+// Used when copying data from a HTTP body to a Muxer.
+func (conn *Conn) ReadFrom(r io.Reader) (n int64, err error) {
+	if r == nil {
+		return 0, errors.WithStack(io.EOF)
+	}
+	for err == nil {
+		var m int64
+		m, err = conn.readFromHelper(r)
+		n += m
+	}
+	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
+	if errors.Cause(err) == io.EOF {
+		err = nil
+	}
+	return
+}
+
+func (conn *Conn) readFrom(r io.Reader) (n int64, err error) {
+	for err == nil {
+		var m int64
+		m, err = conn.readFromHelperLocked(r)
+		n += m
+	}
+	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
+	if errors.Cause(err) == io.EOF {
+		err = nil
+	}
+	return
+}
+
+func (conn *Conn) readFromHelper(r io.Reader) (n int64, err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.readFromHelperLocked(r)
+}
+
+func (conn *Conn) readFromHelperLocked(r io.Reader) (n int64, err error) {
+	var count int
+	if err = conn.writeStart(); err == nil {
+		maxCount := conn.fdw.Available()
+		if count, err = r.Read(conn.fdw[len(conn.fdw) : len(conn.fdw)+maxCount]); count > 0 {
+			if err != nil {
+				err = errors.WithStack(err)
+			}
+			conn.fdw.Header().SetBody()
+			n += int64(count)
+			conn.fdw = conn.fdw[:len(conn.fdw)+count]
+			if flushErr := conn.flushLocked(); flushErr != nil {
+				if err == nil {
+					err = flushErr
+				}
+			}
+		}
+	}
+	return
+}
+
+// TODO: func (b *Writer) Reset(w io.Writer)
+
+// Write implements io.Writer for Conn, and is used to write body data.
+func (conn *Conn) Write(p []byte) (n int, err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	// log.Print("Conn.Write() len(p)=", len(p), " avail=", e.Available())
+	if n, err = conn.write(p); err == nil {
+		if err = conn.flushLocked(); err != nil {
+			n = 0
+		}
+	}
+	return
+}
+
+func (conn *Conn) write(p []byte) (n int, err error) {
+	err = conn.writeStart()
+
+	for err == nil && len(p) > conn.fdw.Available() {
+		var m int
+		if m = conn.fdw.Available(); m > 0 {
+			conn.fdw.Header().SetBody()
+			conn.fdw = append(conn.fdw, p[:m]...)
+			p = p[m:]
+		}
+		if err = conn.flushLocked(); err == nil {
+			n += m
+			err = conn.writeStart()
+		}
+	}
+
+	if err == nil {
+		conn.fdw.Header().SetBody()
+		conn.fdw = append(conn.fdw, p...)
+		n += len(p)
+	}
+
+	return
+}
+
+// WriteTo writes the body payload of the Conn to a io.Writer.
+func (conn *Conn) WriteTo(w io.Writer) (n int64, err error) {
+	for err == nil {
+		var m int64
+		m, err = conn.writeToHelper(w)
+		n += m
+	}
+	if errors.Cause(err) == io.EOF {
+		err = nil
+	}
+	return
+}
+
+func (conn *Conn) writeToHelper(w io.Writer) (n int64, err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	if err = conn.loadFrameReader(); err != nil {
+		return
+	}
+	for len(conn.fp) > 0 {
+		var count int
+		count, err = w.Write(conn.fp)
+		conn.fp = conn.fp[count:]
+		n += int64(count)
+		if err != nil && err != io.ErrShortWrite {
+			return
+		}
+	}
+	return
+}
+
+// WriteByte implements io.ByteWriter for Conn.
+func (conn *Conn) WriteByte(c byte) (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	if err = conn.writeByte(c); err == nil {
+		err = conn.flushLocked()
+	}
+	return
+}
+
+func (conn *Conn) writeByte(c byte) (err error) {
+	err = conn.writeStart()
+
+	if err == nil && conn.fdw.Available() <= 0 {
+		if err = conn.flushLocked(); err == nil {
+			err = conn.writeStart()
+		}
+	}
+
+	if err == nil {
+		conn.fdw.Header().SetBody()
+		err = conn.fdw.WriteByte(c)
+	}
+
+	return
+}
+
+// TODO: func (b *Writer) WriteRune(r rune) (size int, err error)
+// TODO: func (b *Writer) WriteString(s string) (int, error)
+
+// Flush handles write flow control and injects the current frame into the Muxer.
+// Note that the current write frame is expected to be a regular data frame,
+// such that e.fdw.Header() returns false for IsMuxerControl() and true for
+// HasPayload().
+func (conn *Conn) Flush() (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.flushLocked()
+}
+
+func (conn *Conn) flushLocked() (err error) {
+	if fd := conn.fdw; fd != nil {
+		conn.fdw = nil
+		err = conn.writeFrame(fd)
+	}
+	return
+}
+
+func (conn *Conn) writeFrame(fd FrameData) (err error) {
+	if fd.Header().HasFlow() {
+		panic(fmt.Sprint("attempt to send flow control frame: ", conn, fd))
+	}
+
+	if !fd.Header().HasBodyOrHead() {
+		if len(fd) > FrameHeaderSize {
+			panic(fmt.Sprint("missing head or body flag: ", conn, fd))
+		}
+		// empty blank frame
+		FrameDataFree(fd)
+		return
+	}
+
+	if len(fd) > FrameMaxSize {
+		return ErrFrameTooBig{}
+	}
+
+	fd.Header().SetSizeValue(len(fd) - FrameHeaderSize)
+
+	// Consume ACKs and check for close conditions
+	for err == nil {
+		select {
+		case <-conn.ackCh:
+			conn.consumeAck()
+		case <-conn.localClosed:
+			err = errors.WithStack(io.ErrClosedPipe)
+		case <-conn.mux.ConnAbortChannel():
+			err = errors.WithStack(serverClosedError{})
+		case <-conn.writeDeadline.wait():
+			err = errors.WithStack(timeoutError{})
+		default:
+			if conn.hasRemoteSentFinal() {
+				err = errors.WithStack(io.EOF)
+			} else if conn.getSendWindow() > 0 {
+				// if the send window allows, go ahead and send it
+				if atomic.AddInt32(&conn.sendWindow, -1) < 0 {
+					panic(fmt.Sprintf("sendWindow went negative: %+v\n", conn))
+				}
+				conn.starting()
+				return conn.mux.ConnWrite(fd)
+			} else {
+				// SendWindow is empty, so do a blocking wait for an ACK
+				select {
+				case <-conn.ackCh:
+					conn.consumeAck()
+				case <-conn.localClosed:
+					err = errors.WithStack(io.ErrClosedPipe)
+				case <-conn.mux.ConnAbortChannel():
+					err = errors.WithStack(serverClosedError{})
+				case <-conn.writeDeadline.wait():
+					err = errors.WithStack(timeoutError{})
+				}
+			}
+		}
+	}
+
+	FrameDataFree(fd)
+	return
+}
+
+func (conn *Conn) getSendWindow() int {
+	return int(atomic.LoadInt32(&conn.sendWindow))
+}
+
+func (conn *Conn) getMux() *Muxer {
+	if c, ok := conn.mux.(*Muxer); ok {
+		return c
+	}
+	return nil
+}
+
+// recycle restores an Conn to it's initial state and calls the onRecycle handler.
+// Before calling, the local end must be closed. If the Conn is started,
+// then remote must be closed as well. If it is not started, the remote must not be closed.
+func (conn *Conn) recycle() {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	conn.recycleLocked()
+}
+
+func (conn *Conn) recycleLocked() {
+	// log.Print("  RC ", e)
+
+	conn.setRunState(runStateRecycle)
+
+	if !isClosedChan(conn.localClosed) {
+		panic(fmt.Sprintf("recycle(): local not closed\n%v\n", conn))
+	}
+	if len(conn.fdw) > 0 {
+		panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", conn, conn.fdw))
+	}
+	if !conn.hasLocalSentFinal() {
+		panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", conn))
+	}
+	if !conn.hasRemoteSentFinal() {
+		panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", conn))
+	}
+
+	// drain ack and read channels
+	for len(conn.ackCh) > 0 {
+		<-conn.ackCh
+	}
+	for len(conn.readCh) > 0 {
+		FrameDataFree(<-conn.readCh)
+	}
+
+	conn.readCh = make(chan FrameData, MaxSendWindowSize)
+	conn.localClosed = make(chan struct{})
+	atomic.StoreInt32(&conn.localSentFinal, 0)
+	atomic.StoreInt32(&conn.remoteSentFinal, 0)
+	atomic.StoreInt32(&conn.sendWindow, int32(SendWindowSize))
+	atomic.StoreInt32(&conn.hijacked, 0)
+	conn.fdw = nil
+	conn.fdr = nil
+	conn.fp = nil
+	conn.writeDeadline.set(time.Time{})
+	conn.readDeadline.set(time.Time{})
+
+	conn.setRunState(runStateUnused)
+
+	if conn.onRecycle != nil {
+		conn.onRecycle(conn)
+	}
+}
+
+func (conn *Conn) makeFinalFrame(isAck bool) (fd FrameData) {
+	if fd = FrameDataAllocID(conn.ID); fd != nil {
+		fd.Header().SetFlow()
+		fd.Header().SetBody()
+		if isAck {
+			fd.Header().SetHead()
+		}
+	}
+	return
+}
+
+func (conn *Conn) writeFinalLocked(isAck bool) {
+	if conn.localSendingFinal() {
+		conn.flushLocked()
+		if fd := conn.makeFinalFrame(isAck); fd != nil {
+			conn.mux.ConnWrite(fd)
+		}
+	}
+}
+
+func (conn *Conn) consumeAck() {
+	if atomic.AddInt32(&conn.sendWindow, 1) > int32(SendWindowSize) {
+		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", conn.getSendWindow(), int32(SendWindowSize), conn))
+	}
+}
+
+// Close unblocks all blocked calls to Read and Write, sends the final frame and
+// discards any pending data in the receive queue.
+// If the remote is closed, it recycles the Conn.
+func (conn *Conn) Close() error {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+
+	// log.Print("  CL ", e)
+
+	select {
+	case <-conn.localClosed:
+		// already closed
+		return errors.WithStack(io.ErrClosedPipe)
+	default:
+		close(conn.localClosed)
+	}
+
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+
+	if !conn.hasRemoteSentFinal() {
+		// will be recycled when remote is closed
+		conn.writeFinalLocked(false)
+		conn.setRunState(runStateWaitFin)
+		return nil
+	}
+
+	conn.writeFinalLocked(true)
+	conn.recycleLocked()
+
+	return nil
+}
+
+func (conn *Conn) closeIfNotHijacked() error {
+	if conn.isHijacked() {
+		return nil
+	}
+	return conn.Close()
+}
+
+// OnRecycle sets the callback to be invoked when the Conn is being recycled.
+// Set to nil to disable the callback. You may *not* call this function from the
+// callback itself, as that will deadlock.
+func (conn *Conn) OnRecycle(onRecycle func(*Conn)) {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	conn.onRecycle = onRecycle
+}
+
+// WriteUserRecordType writes a user record marker and sets the head bit.
+func (conn *Conn) WriteUserRecordType(c byte) (err error) {
+	if c < 0x80 {
+		return ErrUnhandledRecordType{}
+	}
+	if err = conn.WriteStart(); err == nil {
+		conn.fdw.WriteRecordType(RecordType(c))
+	}
+	return
+}
+
+// WriteRequest writes a http.Request to the Conn, including it's Body.
+func (conn *Conn) WriteRequest(r *http.Request) (err error) {
+	if err = conn.WriteStart(); err == nil {
+		if err = conn.fdw.WriteRequest(r); err == nil {
+			if r.ContentLength > 0 {
+				if _, err = io.CopyN(conn, r.Body, r.ContentLength); err != nil {
+					err = errors.WithStack(err)
+				}
+			} else {
+				_, err = conn.ReadFrom(r.Body)
+			}
+			if flushErr := conn.Flush(); err == nil {
+				err = flushErr
+			}
+		}
+	}
+	return
+}
+
+// ProxyResponse reads a HTTP response but not it's body from the Conn data
+// and writes it to the given http.ResponseWriter.
+func (conn *Conn) ProxyResponse(w http.ResponseWriter) (statusCode int, err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+
+	if err = conn.loadFrameReader(); err != nil {
+		return 0, err
+	}
+
+	if conn.fdr.Header().HasHead() {
+		switch conn.fp.ReadRecordType() {
+		case RecordTypeHTTPResponse:
+			statusCode = conn.fp.ProxyResponse(w)
+		case RecordTypeHijacked:
+			statusCode = 101
+		default:
+			return 0, errors.WithStack(ErrUnhandledRecordType{})
+		}
+	}
+
+	return
+}
+
+// WriteResponse writes a http.Response to the Conn.
+func (conn *Conn) WriteResponse(r *http.Response) (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	if err = conn.writeResponseDataLocked(r.StatusCode, r.ContentLength, r.Header); err == nil {
+		if err == nil && r.Body != nil {
+			if r.ContentLength > 0 {
+				_, err = io.CopyN(conn, r.Body, r.ContentLength)
+			} else {
+				_, err = conn.readFrom(r.Body)
+			}
+		}
+		if flushErr := conn.flushLocked(); err == nil {
+			err = flushErr
+		}
+	}
+	return
+}
+
+// WriteResponseData writes a RAP response header.
+func (conn *Conn) WriteResponseData(code int, contentLength int64, header http.Header) (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.writeResponseDataLocked(code, contentLength, header)
+}
+
+func (conn *Conn) writeResponseDataLocked(code int, contentLength int64, header http.Header) (err error) {
+	if err = conn.writeStart(); err == nil {
+		err = conn.fdw.WriteResponse(code, contentLength, header)
+	}
+	return
+}
+
+// Serve waits for a start frame and then invokes the given http.Handler.
+func (conn *Conn) Serve(h http.Handler) (err error) {
+	defer conn.closeIfNotHijacked()
+	if err = conn.LoadFrameReader(); err == nil {
+		if conn.fdr.Header().HasHead() {
+			switch rt := conn.fp.ReadRecordType(); rt {
+			case RecordTypeHTTPRequest:
+				var req *http.Request
+				req, err = conn.fp.ReadRequest()
+				if err == nil {
+					// log.Printf("rap.Conn.Serve(): %+v\n", req)
+					req.Body = conn
+					h.ServeHTTP(&ResponseWriter{Conn: conn}, req)
+					// if the handler left things in the buffer, flush it
+					if flushErr := conn.Flush(); err == nil {
+						err = flushErr
+					}
+				}
+			case RecordTypeHijacked:
+				conn.hijacking()
+			default:
+				err = errors.Wrapf(ErrUnhandledRecordType{}, "type code '%02x'", int(rt))
+			}
+		} else {
+			err = errors.Wrapf(ErrMissingFrameHead{}, "%v", conn.fdr)
+		}
+	}
+	return
+}
+
+// Hijack lets the caller take over the connection.
+// After a call to Hijack the HTTP server library
+// will not do anything else with the connection.
+func (conn *Conn) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	if conn.hijacking() {
+		conn.starting()
+		fd := NewFrameDataID(conn.ID)
+		fd.WriteRecordType(RecordTypeHijacked)
+		return conn, bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)), conn.writeFrame(fd)
+	}
+	return nil, nil, errors.Errorf("already hijacked")
+}
+
+type connAddr struct{}
+
+func (connAddr) Network() string { return "rap" }
+func (connAddr) String() string  { return "rap" }
+
+// LocalAddr returns the local network address stub.
+func (conn *Conn) LocalAddr() net.Addr {
+	return connAddr{}
+}
+
+// RemoteAddr returns remote network address stub.
+func (conn *Conn) RemoteAddr() net.Addr {
+	return connAddr{}
+}
+
+// SetDeadline sets the read and write deadlines associated
+// with the connection. It is equivalent to calling both
+// SetReadDeadline and SetWriteDeadline.
+func (conn *Conn) SetDeadline(t time.Time) error {
+	if conn.hasLocalSentFinal() {
+		return errors.WithStack(io.ErrClosedPipe)
+	}
+	conn.readDeadline.set(t)
+	conn.writeDeadline.set(t)
+	return nil
+}
+
+// SetReadDeadline sets the deadline for future Read calls
+// and any currently-blocked Read call.
+// A zero value for t means Read will not time out.
+func (conn *Conn) SetReadDeadline(t time.Time) error {
+	if conn.hasLocalSentFinal() {
+		return errors.WithStack(io.ErrClosedPipe)
+	}
+	conn.readDeadline.set(t)
+	return nil
+}
+
+// SetWriteDeadline sets the deadline for future Write calls
+// and any currently-blocked Write call.
+// Even if write times out, it may return n > 0, indicating that
+// some of the data was successfully written.
+// A zero value for t means Write will not time out.
+func (conn *Conn) SetWriteDeadline(t time.Time) error {
+	if conn.hasLocalSentFinal() {
+		return errors.WithStack(io.ErrClosedPipe)
+	}
+	conn.writeDeadline.set(t)
+	return nil
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ReverseProxy accepts incoming RAP connections and forwards them to a HTTP server.
+// ReverseProxy accepts incoming RAP Muxer clients and forwards them to a HTTP server.
 type ReverseProxy struct {
 	*url.URL                        // Upstream server URL
 	transports chan *http.Transport // available http.Transports
