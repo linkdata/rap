@@ -67,45 +67,45 @@ const (
 	FrameFlagMask = byte(FrameFlagFlow | FrameFlagBody | FrameFlagHead)
 )
 
-// ConnControl enumerates the different types of conn control frames.
-type ConnControl byte
+// MuxerControl enumerates the different types of conn control frames.
+type MuxerControl byte
 
 const (
-	// ConnControlPanic means sender is shutting down due to error,
+	// MuxerControlPanic means sender is shutting down due to error,
 	// Size is bytes of optional technical information. Abort all active requests
 	// and log the technical information, if available.
-	ConnControlPanic ConnControl = ConnControl(0)
+	MuxerControlPanic MuxerControl = MuxerControl(0)
 	// Unused but reserved for future use, Size contains payload size.
-	connControlReserved001 ConnControl = ConnControl(FrameFlagHead)
-	// ConnControlPing requests a Pong in response with the same payload
+	muxerControlReserved001 MuxerControl = MuxerControl(FrameFlagHead)
+	// MuxerControlPing requests a Pong in response with the same payload
 	// as this Ping message. Note that the other side may choose to
 	// not respond to all Pings.
-	ConnControlPing ConnControl = ConnControl(FrameFlagBody)
-	// ConnControlPong is in response to a Ping. The Size value must be the
+	MuxerControlPing MuxerControl = MuxerControl(FrameFlagBody)
+	// MuxerControlPong is in response to a Ping. The Size value must be the
 	// same as the Size value for last received Ping.
-	ConnControlPong ConnControl = ConnControl(FrameFlagBody | FrameFlagHead)
+	MuxerControlPong MuxerControl = MuxerControl(FrameFlagBody | FrameFlagHead)
 	// Unused but reserved for future use, ignore Size value
-	connControlReserved100 ConnControl = ConnControl(FrameFlagFlow)
+	muxerControlReserved100 MuxerControl = MuxerControl(FrameFlagFlow)
 	// Unused but reserved for future use, ignore Size value
-	connControlReserved101 ConnControl = ConnControl(FrameFlagFlow | FrameFlagHead)
+	muxerControlReserved101 MuxerControl = MuxerControl(FrameFlagFlow | FrameFlagHead)
 	// Unused but reserved for future use, ignore Size value
-	connControlReserved110 ConnControl = ConnControl(FrameFlagFlow | FrameFlagBody)
+	muxerControlReserved110 MuxerControl = MuxerControl(FrameFlagFlow | FrameFlagBody)
 	// Unused but reserved for future use, ignore Size value
-	connControlReserved111 ConnControl = ConnControl(FrameFlagFlow | FrameFlagBody | FrameFlagHead)
+	muxerControlReserved111 MuxerControl = MuxerControl(FrameFlagFlow | FrameFlagBody | FrameFlagHead)
 )
 
-var connControlTexts = map[ConnControl]string{
-	ConnControlPanic:       "Panic",
-	connControlReserved001: "Rsvd001",
-	ConnControlPing:        "Ping",
-	ConnControlPong:        "Pong",
-	connControlReserved100: "Rsvd100",
-	connControlReserved101: "Rsvd101",
-	connControlReserved110: "Rsvd110",
-	connControlReserved111: "Rsvd111",
+var muxerControlTexts = map[MuxerControl]string{
+	MuxerControlPanic:       "Panic",
+	muxerControlReserved001: "Rsvd001",
+	MuxerControlPing:        "Ping",
+	MuxerControlPong:        "Pong",
+	muxerControlReserved100: "Rsvd100",
+	muxerControlReserved101: "Rsvd101",
+	muxerControlReserved110: "Rsvd110",
+	muxerControlReserved111: "Rsvd111",
 }
 
-var connFlagTexts = map[FrameFlag]string{
+var muxerFlagTexts = map[FrameFlag]string{
 	(0):                             "...",
 	(FrameFlagHead):                 "..H",
 	(FrameFlagBody):                 ".B.",
@@ -119,9 +119,9 @@ var connFlagTexts = map[FrameFlag]string{
 func (fh FrameHeader) String() string {
 	var midText string
 	if fh.IsConnControl() {
-		midText = connControlTexts[fh.ConnControl()]
+		midText = muxerControlTexts[fh.ConnControl()]
 	} else {
-		midText = connFlagTexts[fh.FrameControl()]
+		midText = muxerFlagTexts[fh.FrameControl()]
 	}
 	return fmt.Sprintf("[FrameHeader %s %s %d (%d)]", fh.ExchangeID(), midText, fh.SizeValue(), len(fh))
 }
@@ -215,8 +215,8 @@ func (fh FrameHeader) IsConnControl() bool {
 
 // ConnControl returns the frame control bits as a ConnControl value.
 // Only valid for conn control frames where IsConnControl() returns true.
-func (fh FrameHeader) ConnControl() ConnControl {
-	return ConnControl(fh[2] & FrameFlagMask)
+func (fh FrameHeader) ConnControl() MuxerControl {
+	return MuxerControl(fh[2] & FrameFlagMask)
 }
 
 // FrameControl returns the frame control bits as a FrameControl bitmask.
@@ -227,7 +227,7 @@ func (fh FrameHeader) FrameControl() FrameFlag {
 
 // SetConnControl sets the frame header to a conn control frame.
 // This sets the control bits and also sets the Exchange ID to ConnExchangeID.
-func (fh FrameHeader) SetConnControl(sc ConnControl) {
+func (fh FrameHeader) SetConnControl(sc MuxerControl) {
 	fh[2] = (fh[2] & (^FrameFlagMask)) | byte(sc)
 	fh.SetExchangeID(ConnExchangeID)
 }

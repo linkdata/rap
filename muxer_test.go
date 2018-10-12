@@ -325,11 +325,11 @@ func Test_Conn_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
 	defer ct.Close()
 	ct.expectServerError = serverClosedError{}
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(ConnControlPing)
+	fd.WriteConnControl(MuxerControlPing)
 	fd.WriteInt64(time.Now().UnixNano())
 	fd.SetSizeValue()
 	close(ct.server.doneChan)
-	err := connControlPingHandler(ct.server, fd)
+	err := muxerControlPingHandler(ct.server, fd)
 	assert.Equal(t, serverClosedError{}, errors.Cause(err))
 }
 
@@ -340,7 +340,7 @@ func Test_Conn_conncontrol_reserved(t *testing.T) {
 	ct.expectConnError = io.EOF
 	ct.Start()
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(connControlReserved001)
+	fd.WriteConnControl(muxerControlReserved001)
 	ct.conn.ExchangeWrite(fd)
 	<-ct.serverDone
 }
@@ -352,7 +352,7 @@ func Test_Conn_conncontrol_panic(t *testing.T) {
 	ct.expectServerError = PanicError{}
 	ct.Start()
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(ConnControlPanic)
+	fd.WriteConnControl(MuxerControlPanic)
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
 	ct.conn.ExchangeWrite(fd)

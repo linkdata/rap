@@ -428,12 +428,12 @@ func Test_FrameData_WriteResponse(t *testing.T) {
 
 func Test_FrameData_SetSizeValue(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteConnControl(ConnControlPing)
+	fd.WriteConnControl(MuxerControlPing)
 	n := time.Now().UnixNano()
 	fd.WriteInt64(n)
 	fd.SetSizeValue()
 	assert.True(t, fd.Header().IsConnControl())
-	assert.Equal(t, ConnControlPing, fd.Header().ConnControl())
+	assert.Equal(t, MuxerControlPing, fd.Header().ConnControl())
 	assert.True(t, fd.Header().HasPayload())
 	assert.NotZero(t, fd.Header().SizeValue())
 }

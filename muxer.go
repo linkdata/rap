@@ -35,17 +35,17 @@ type PanicError struct{}
 
 func (e PanicError) Error() string { return "peer panic" }
 
-type connControlHandler func(*Conn, FrameData) error
+type muxerControlHandler func(*Conn, FrameData) error
 
-var connControlHandlers = map[ConnControl]connControlHandler{
-	ConnControlPanic:       connControlPanicHandler,
-	connControlReserved001: connControlReservedHandler,
-	ConnControlPing:        connControlPingHandler,
-	ConnControlPong:        connControlPongHandler,
-	connControlReserved100: connControlReservedHandler,
-	connControlReserved101: connControlReservedHandler,
-	connControlReserved110: connControlReservedHandler,
-	connControlReserved111: connControlReservedHandler,
+var muxerControlHandlers = map[MuxerControl]muxerControlHandler{
+	MuxerControlPanic:       muxerControlPanicHandler,
+	muxerControlReserved001: muxerControlReservedHandler,
+	MuxerControlPing:        muxerControlPingHandler,
+	MuxerControlPong:        muxerControlPongHandler,
+	muxerControlReserved100: muxerControlReservedHandler,
+	muxerControlReserved101: muxerControlReservedHandler,
+	muxerControlReserved110: muxerControlReservedHandler,
+	muxerControlReserved111: muxerControlReservedHandler,
 }
 
 // Conn multiplexes concurrent requests-response Exchanges.
@@ -97,8 +97,8 @@ func NewConn(rwc io.ReadWriteCloser) *Conn {
 	return c
 }
 
-func connControlPingHandler(c *Conn, fd FrameData) (err error) {
-	fd.Header().SetConnControl(ConnControlPong)
+func muxerControlPingHandler(c *Conn, fd FrameData) (err error) {
+	fd.Header().SetConnControl(MuxerControlPong)
 	select {
 	case c.writeCh <- fd:
 	case <-c.doneChan:
@@ -107,7 +107,7 @@ func connControlPingHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlPongHandler(c *Conn, fd FrameData) (err error) {
+func muxerControlPongHandler(c *Conn, fd FrameData) (err error) {
 	defer FrameDataFree(fd)
 	var now = time.Now().UnixNano()
 	atomic.StoreInt64(&c.lastPongRcvd, now)
@@ -118,7 +118,7 @@ func connControlPongHandler(c *Conn, fd FrameData) (err error) {
 	return
 }
 
-func connControlPanicHandler(c *Conn, fd FrameData) error {
+func muxerControlPanicHandler(c *Conn, fd FrameData) error {
 	defer FrameDataFree(fd)
 	var msg string
 	if fd.Header().HasPayload() {
@@ -128,7 +128,7 @@ func connControlPanicHandler(c *Conn, fd FrameData) error {
 	return errors.Wrap(PanicError{}, msg)
 }
 
-func connControlReservedHandler(c *Conn, fd FrameData) error {
+func muxerControlReservedHandler(c *Conn, fd FrameData) error {
 	defer FrameDataFree(fd)
 	return errors.Wrapf(ProtocolError{}, "unknown conn control frame %v", fd.Header())
 }
@@ -136,7 +136,7 @@ func connControlReservedHandler(c *Conn, fd FrameData) error {
 // Ping sends a ping frame and returns without waiting for response.
 func (c *Conn) Ping() {
 	fd := FrameDataAlloc()
-	fd.WriteConnControl(ConnControlPing)
+	fd.WriteConnControl(MuxerControlPing)
 	atomic.StoreInt64(&c.lastPingSent, time.Now().UnixNano())
 	fd.WriteInt64(c.lastPingSent)
 	fd.SetSizeValue()
@@ -199,7 +199,7 @@ func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 		}
 
 		if fd.Header().IsConnControl() {
-			if err = connControlHandlers[fd.Header().ConnControl()](c, fd); err != nil {
+			if err = muxerControlHandlers[fd.Header().ConnControl()](c, fd); err != nil {
 				return
 			}
 			continue
