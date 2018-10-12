@@ -175,6 +175,10 @@ Before a *conn* is done and it's id may be reused, both sides must send and rece
 
 Once a *conn* has both sent and received *final frames* it may be recycled and re-used.
 
+## API documentation
+
+https://godoc.org/github.com/linkdata/rap
+
 ## License
 
 MIT, for details see the contents of `LICENSE`.
