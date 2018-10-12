@@ -24,13 +24,13 @@ func Test_NewFrameData(t *testing.T) {
 	assert.Equal(t, FrameMaxSize-FrameHeaderSize, fd.Available())
 }
 
-func Test_NewFrameData_exchange_ID_range(t *testing.T) {
+func Test_NewFrameData_conn_ID_range(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteHeader(ExchangeID(1))
-	assert.Equal(t, ExchangeID(1), fd.Header().ExchangeID())
-	fd.WriteHeader(MaxExchangeID)
-	assert.Equal(t, MaxExchangeID, fd.Header().ExchangeID())
-	assert.Panics(t, func() { fd.WriteHeader(ExchangeID(0xFFFF)) })
+	fd.WriteHeader(ConnID(1))
+	assert.Equal(t, ConnID(1), fd.Header().ConnID())
+	fd.WriteHeader(MaxConnID)
+	assert.Equal(t, MaxConnID, fd.Header().ConnID())
+	assert.Panics(t, func() { fd.WriteHeader(ConnID(0xFFFF)) })
 }
 
 func Test_FrameData_String(t *testing.T) {
@@ -274,7 +274,7 @@ func pipeFrame(t *testing.T, fd1 FrameData) (fd2 FrameData, err error) {
 
 func Test_FrameData_ReadFrom(t *testing.T) {
 	fd1 := NewFrameData()
-	fd1.WriteHeader(MaxExchangeID)
+	fd1.WriteHeader(MaxConnID)
 	fd1.Header().SetBody()
 	fd1.WriteByte(0)
 	fd1.WriteInt64(-0x123456789)
@@ -287,7 +287,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	pipeFrame(t, fd1)
 
 	// Test underflow
-	fd1 = NewFrameDataID(MaxExchangeID)
+	fd1 = NewFrameDataID(MaxConnID)
 	fd1.Header().SetBody()
 	fd1.Header().SetSizeValue(0)
 	fd1.WriteString("Meh")
@@ -296,7 +296,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 	assert.Zero(t, n)
 
 	// Test overflow
-	fd1 = NewFrameDataID(MaxExchangeID)
+	fd1 = NewFrameDataID(MaxConnID)
 	fd1.Header().SetBody()
 	fd1.Header().SetSizeValue(FrameMaxPayloadSize + 1)
 	n, err = fd1.ReadFrom(bytes.NewBuffer(make([]byte, FrameMaxPayloadSize+1)))
@@ -307,7 +307,7 @@ func Test_FrameData_ReadFrom(t *testing.T) {
 func pipeRequest(t *testing.T, req *http.Request, checkEqual bool) (req2 *http.Request, err error) {
 	var fd2 FrameData
 	fd1 := NewFrameData()
-	fd1.WriteHeader(MaxExchangeID)
+	fd1.WriteHeader(MaxConnID)
 	fd1.WriteRequest(req)
 	if req.Body != nil {
 		var bodyCopy bytes.Buffer
@@ -403,12 +403,12 @@ func Test_FrameData_WriteRequest(t *testing.T) {
 
 func Test_FrameData_WriteResponse(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteHeader(MaxExchangeID)
+	fd.WriteHeader(MaxConnID)
 	fd.WriteResponse(200, 0, nil)
 
 	h := http.Header{}
 
-	fd.ClearID(MaxExchangeID)
+	fd.ClearID(MaxConnID)
 	h.Add("Status", "Meh")
 	h.Add("Foo", "bar")
 	h.Add("Foo", "quux")
@@ -416,7 +416,7 @@ func Test_FrameData_WriteResponse(t *testing.T) {
 	assert.NoError(t, err)
 
 	fd.Clear()
-	fd.WriteHeader(MaxExchangeID)
+	fd.WriteHeader(MaxConnID)
 	h = http.Header{}
 	const valueTemplate = "foobarquux-%d"
 	for i := 0; i < FrameMaxSize/len(valueTemplate); i++ {

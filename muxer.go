@@ -48,8 +48,8 @@ var muxerControlHandlers = map[MuxerControl]muxerControlHandler{
 	muxerControlReserved111: muxerControlReservedHandler,
 }
 
-// Muxer multiplexes concurrent requests-response Exchanges.
-// It maintains the set of ExchangeID's that free and may use them in any order.
+// Muxer multiplexes concurrent requests-response Conns.
+// It maintains the set of ConnID's that free and may use them in any order.
 type Muxer struct {
 	io.ReadWriteCloser // The I/O endpoint
 	StatsCollector     // Where to report statistics (optional)
@@ -57,9 +57,9 @@ type Muxer struct {
 	WriteTimeout       time.Duration
 	Handler            http.Handler
 	writeCh            chan FrameData
-	exchanges          chan *Exchange
-	exchangeLookup     []*Exchange
-	exchangeLastID     int32
+	conns              chan *Conn
+	connLookup         []*Conn
+	connLastID         int32
 	mu                 sync.Mutex
 	doneChan           chan struct{}
 	readerWaitGroup    sync.WaitGroup
@@ -84,15 +84,15 @@ func NewMuxer(rwc io.ReadWriteCloser) *Muxer {
 		ReadTimeout:     DefaultReadTimeout,
 		WriteTimeout:    DefaultWriteTimeout,
 		writeCh:         make(chan FrameData),
-		exchanges:       make(chan *Exchange, int(MaxExchangeID)),
-		exchangeLookup:  make([]*Exchange, int(MaxExchangeID)+1),
+		conns:           make(chan *Conn, int(MaxConnID)),
+		connLookup:      make([]*Conn, int(MaxConnID)+1),
 		doneChan:        make(chan struct{}),
 		readerWaitGroup: sync.WaitGroup{},
 		serialNumber:    atomic.AddUint32(&muxerNextSerialNumber, 1),
 	}
 
-	for idx := range mux.exchangeLookup {
-		mux.exchangeLookup[idx] = NewExchange(mux, ExchangeID(idx))
+	for idx := range mux.connLookup {
+		mux.connLookup[idx] = NewConn(mux, ConnID(idx))
 	}
 	return mux
 }
@@ -205,7 +205,7 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 			continue
 		}
 
-		e := mux.exchangeLookup[fd.Header().ExchangeID()]
+		e := mux.connLookup[fd.Header().ConnID()]
 
 		// log.Print("READ ", e, fd)
 
@@ -278,7 +278,7 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", c.getExchangeForID(fd.Header().ExchangeID()), fd)
+			// log.Print("WRIT ", c.getConnForID(fd.Header().ConnID()), fd)
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)
@@ -354,20 +354,20 @@ func (mux *Muxer) Close() (err error) {
 
 		mux.readerWaitGroup.Wait()
 
-		// Drain the unused exchange channel
-		for len(mux.exchanges) > 0 {
-			if e := <-mux.exchanges; e != nil {
-				e.OnRecycle(nil)
-				mux.exchangeLookup[e.ID] = nil
+		// Drain the unused Conn channel
+		for len(mux.conns) > 0 {
+			if conn := <-mux.conns; conn != nil {
+				conn.OnRecycle(nil)
+				mux.connLookup[conn.ID] = nil
 			}
 		}
 
-		// Close all exchanges we know of (in the lookup table)
-		// those will be in-progress exchanges
-		for i, e := range mux.exchangeLookup {
-			if e != nil {
-				mux.exchangeLookup[i] = nil
-				eerr := e.Close()
+		// Close all Conns we know of (in the lookup table)
+		// those will be in-progress Conns
+		for i, conn := range mux.connLookup {
+			if conn != nil {
+				mux.connLookup[i] = nil
+				eerr := conn.Close()
 				if err == nil && !isClosedError(eerr) {
 					err = eerr
 				}
@@ -390,57 +390,57 @@ func isClosedError(err error) bool {
 	return false
 }
 
-// NewExchangeWait returns the next available Exchange, or nil if timed out.
-func (mux *Muxer) NewExchangeWait(d time.Duration) (e *Exchange) {
-	e = mux.NewExchange()
-	if e == nil {
+// NewConnWait returns the next available Conn, or nil if timed out.
+func (mux *Muxer) NewConnWait(d time.Duration) (conn *Conn) {
+	conn = mux.NewConn()
+	if conn == nil {
 		timer := time.NewTimer(d)
 		defer timer.Stop()
 		select {
-		case e = <-mux.exchanges:
+		case conn = <-mux.conns:
 		case <-timer.C:
 		}
 	}
 	return
 }
 
-// AvailableExchanges returns the number of Exchanges that are
-// currently able to be returned from NewExchange(). Note that
+// AvailableConns returns the number of Conns that are
+// currently able to be returned from NewConn(). Note that
 // the value may not be exact if there are other goroutines using
 // the Muxer.
-func (mux *Muxer) AvailableExchanges() (exchangeCount int) {
-	exchangeCount = len(mux.exchanges)
-	lastID := atomic.LoadInt32(&mux.exchangeLastID)
-	if lastID < int32(MaxExchangeID) {
-		exchangeCount += int(int32(MaxExchangeID) - lastID)
+func (mux *Muxer) AvailableConns() (connCount int) {
+	connCount = len(mux.conns)
+	lastID := atomic.LoadInt32(&mux.connLastID)
+	if lastID < int32(MaxConnID) {
+		connCount += int(int32(MaxConnID) - lastID)
 	}
 	return
 }
 
-// NewExchange returns the next available Exchange, or nil if none are available.
-func (mux *Muxer) NewExchange() *Exchange {
+// NewConn returns the next available Conn, or nil if none are available.
+func (mux *Muxer) NewConn() (conn *Conn) {
 	select {
-	case e := <-mux.exchanges:
-		return e
+	case conn = <-mux.conns:
+		return
 	default:
 	}
 	for {
-		lastID := atomic.LoadInt32(&mux.exchangeLastID)
-		if lastID >= int32(MaxExchangeID) {
-			return nil
+		lastID := atomic.LoadInt32(&mux.connLastID)
+		if lastID >= int32(MaxConnID) {
+			return
 		}
 		nextID := lastID + 1
-		if atomic.CompareAndSwapInt32(&mux.exchangeLastID, lastID, nextID) {
-			e := NewExchange(mux, ExchangeID(nextID))
-			e.OnRecycle(mux.ExchangeRelease)
-			mux.exchangeLookup[nextID] = e
-			return e
+		if atomic.CompareAndSwapInt32(&mux.connLastID, lastID, nextID) {
+			conn = NewConn(mux, ConnID(nextID))
+			conn.OnRecycle(mux.ConnRelease)
+			mux.connLookup[nextID] = conn
+			return
 		}
 	}
 }
 
-// ExchangeWrite allows an Exchange to write a FrameData
-func (mux *Muxer) ExchangeWrite(fd FrameData) error {
+// ConnWrite allows an Conn to write a FrameData
+func (mux *Muxer) ConnWrite(fd FrameData) error {
 	select {
 	case mux.writeCh <- fd:
 		return nil
@@ -449,18 +449,18 @@ func (mux *Muxer) ExchangeWrite(fd FrameData) error {
 	}
 }
 
-// ExchangeRelease returns the Exchange to the Muxer, allowing it to
+// ConnRelease returns the Conn to the Muxer, allowing it to
 // be re-used for other requests.
-func (mux *Muxer) ExchangeRelease(e *Exchange) {
+func (mux *Muxer) ConnRelease(conn *Conn) {
 	select {
-	case mux.exchanges <- e:
+	case mux.conns <- conn:
 	default:
-		panic(fmt.Sprint("can't release exchange, len(s.exchanges) ", len(mux.exchanges), " cap(s.exchanges) ", cap(mux.exchanges), " max ", MaxExchangeID))
+		panic(fmt.Sprint("can't release Conn, len(s.conns) ", len(mux.conns), " cap(s.conns) ", cap(mux.conns), " max ", MaxConnID))
 	}
 	return
 }
 
-// ExchangeAbortChannel returns the abort signalling channel
-func (mux *Muxer) ExchangeAbortChannel() <-chan struct{} {
+// ConnAbortChannel returns the abort signalling channel
+func (mux *Muxer) ConnAbortChannel() <-chan struct{} {
 	return mux.doneChan
 }

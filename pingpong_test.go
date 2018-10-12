@@ -88,9 +88,9 @@ func init() {
 */
 
 func Benchmark_100k_small_queries(b *testing.B) {
-	exchangeCount := 100000
+	connCount := 100000
 	parallelism := 20000
-	queryCount := int32(exchangeCount)
+	queryCount := int32(connCount)
 	serveCount := int32(0)
 
 	s := &Server{
@@ -109,18 +109,6 @@ func Benchmark_100k_small_queries(b *testing.B) {
 
 	c := NewClient(s.Addr)
 	defer c.Close()
-
-	/*
-		// warmup by making sure all the needed TCP links are up
-		exchanges := make(chan *Exchange, exchangeCount)
-		for i := 0; i < exchangeCount; i++ {
-			if e, err := c.NewExchangeMayDial(); err == nil {
-				exchanges <- e
-			} else {
-				log.Fatal(err)
-			}
-		}
-	*/
 
 	wg := sync.WaitGroup{}
 	b.ResetTimer()

@@ -14,9 +14,9 @@ func Test_ResponseWriter_Header(t *testing.T) {
 }
 
 func Test_ResponseWriter_Write_WriteHeader(t *testing.T) {
-	et := newExchangeTester(t)
+	et := newConnTester(t)
 	defer et.Close()
-	rw := NewResponseWriter(et.Exchange)
+	rw := NewResponseWriter(et.Conn)
 	rw.HeaderMap.Add("Content-Length", "Foo")
 	n, err := rw.Write([]byte{0x00})
 	assert.Equal(t, 1, n)
@@ -24,9 +24,9 @@ func Test_ResponseWriter_Write_WriteHeader(t *testing.T) {
 }
 
 func Test_ResponseWriter_Flush_Reset(t *testing.T) {
-	et := newExchangeTester(t)
+	et := newConnTester(t)
 	defer et.Close()
-	rw := NewResponseWriter(et.Exchange)
+	rw := NewResponseWriter(et.Conn)
 	rw.Flush()
 	rw.Reset()
 }

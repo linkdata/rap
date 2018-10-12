@@ -39,12 +39,12 @@ func (ErrInvalidRouteIndex) Error() string { return "invalid route index" }
 
 // FrameDataReader is the interface that wraps the ReadFrameData() method.
 type FrameDataReader interface {
-	ReadFrameData(ExchangeID) (FrameData, error)
+	ReadFrameData(ConnID) (FrameData, error)
 }
 
 // FrameDataWriter is the interface that wraps the WriteFrameData() method.
 type FrameDataWriter interface {
-	WriteFrameData(ExchangeID, FrameData) error
+	WriteFrameData(ConnID, FrameData) error
 }
 
 // FrameData is a byte array used as a network data frame.
@@ -55,10 +55,10 @@ func NewFrameData() FrameData {
 	return FrameData(make([]byte, 0, FrameMaxSize))
 }
 
-// NewFrameDataID allocates a new FrameData with a header and ExchangeID set.
-func NewFrameDataID(exchangeID ExchangeID) (fd FrameData) {
+// NewFrameDataID allocates a new FrameData with a header and ConnID set.
+func NewFrameDataID(connID ConnID) (fd FrameData) {
 	fd = NewFrameData()
-	fd.WriteHeader(exchangeID)
+	fd.WriteHeader(connID)
 	return
 }
 
@@ -68,10 +68,10 @@ func (fd *FrameData) Clear() {
 }
 
 // ClearID removes everything in a frame except the header,
-// which is zeroed out and has the ExchangeID set.
-func (fd *FrameData) ClearID(id ExchangeID) {
+// which is zeroed out and has the ConnID set.
+func (fd *FrameData) ClearID(connID ConnID) {
 	*fd = (*fd)[:FrameHeaderSize]
-	FrameHeader(*fd).ClearID(id)
+	FrameHeader(*fd).ClearID(connID)
 }
 
 func (fd FrameData) String() string {
@@ -124,9 +124,9 @@ func (fd *FrameData) Write(p []byte) (n int, err error) {
 }
 
 // WriteHeader initializes the frame header.
-func (fd *FrameData) WriteHeader(exchangeID ExchangeID) {
+func (fd *FrameData) WriteHeader(connID ConnID) {
 	*fd = (*fd)[:FrameHeaderSize]
-	FrameHeader(*fd).ClearID(exchangeID)
+	FrameHeader(*fd).ClearID(connID)
 	return
 }
 

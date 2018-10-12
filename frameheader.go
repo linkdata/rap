@@ -2,14 +2,14 @@
 
 // A frame header consists of four bytes. First byte is the flow-control bit
 // and high seven bits of the size data. Second byte is low eight bits of the
-// size data. Third byte is high eight bits of Exchange ID, and fourth byte
-// is the low eight bits of the Exchange ID.
+// size data. Third byte is high eight bits of Conn ID, and fourth byte
+// is the low eight bits of the Conn ID.
 //
 // If the flow-control bit is set, the frame has no actual payload, but is
 // simply acknowledging receipt of the given number of bytes.
 //
 // Flow control is implemented by allowing up to FrameMaxSize bytes in
-// transit per exchange. If the limit would be exceeded, block on sending.
+// transit per Conn. If the limit would be exceeded, block on sending.
 // Before sending, increment the counter with the frame size. On receipt of a
 // control flow frame, decrement the counter with the indicated number of
 // bytes.
@@ -21,7 +21,7 @@ import "fmt"
 /*
 
 FrameHeader is 32 bits, divided into a 16-bit Size value, a 3-bit
-control field and a 13-bit exchange Index. If Index is 0x1fff (highest
+control field and a 13-bit Conn ID. If the ID is 0x1fff (highest
 possible), the frame is a *Muxer* control frame and the control field
 is a 3-bit MSB value specifying the frame type:
 
@@ -34,7 +34,7 @@ is a 3-bit MSB value specifying the frame type:
 * 110 - reserved, ignore the Size value
 * 111 - reserved, ignore the Size value
 
-If Index is 0..0x1ffe (inclusive), the frame applies to that exchange, and
+If Index is 0..0x1ffe (inclusive), the frame applies to that Conn, and
 the control field is mapped to three flags: Flow, Body and Head. The following
 table lists the valid flag combinations and their meaning:
 
@@ -61,7 +61,7 @@ const (
 	// when the FLow flag is not set If the frame payload also has a Head record,
 	// the body data starts after it.
 	FrameFlagBody FrameFlag = 0x40
-	// FrameFlagFlow signals the final frame for an exchange.
+	// FrameFlagFlow signals the final frame for a Conn.
 	FrameFlagFlow FrameFlag = 0x80
 	// FrameFlagMask is a byte mask of the bits used in the third header byte.
 	FrameFlagMask = byte(FrameFlagFlow | FrameFlagBody | FrameFlagHead)
@@ -123,7 +123,7 @@ func (fh FrameHeader) String() string {
 	} else {
 		midText = muxerFlagTexts[fh.FrameControl()]
 	}
-	return fmt.Sprintf("[FrameHeader %s %s %d (%d)]", fh.ExchangeID(), midText, fh.SizeValue(), len(fh))
+	return fmt.Sprintf("[FrameHeader %s %s %d (%d)]", fh.ConnID(), midText, fh.SizeValue(), len(fh))
 }
 
 // returns the 16-bit value stored in bytes 0 and 1
@@ -160,19 +160,19 @@ func (fh FrameHeader) SetSizeValue(n int) {
 	fh.setLargeValue(uint16(n))
 }
 
-// ExchangeID returns the Exchange ID of the frame.
+// ConnID returns the Conn ID of the frame.
 // This is valid for both MuxerControl frames and data frames.
-func (fh FrameHeader) ExchangeID() ExchangeID {
-	return ExchangeID(fh.getSmallValue())
+func (fh FrameHeader) ConnID() ConnID {
+	return ConnID(fh.getSmallValue())
 }
 
-// SetExchangeID sets the exchange ID.
+// SetConnID sets the Conn ID.
 // This is valid for both MuxerControl frames and data frames.
-func (fh FrameHeader) SetExchangeID(exchangeID ExchangeID) {
-	if exchangeID > MuxerExchangeID {
-		panic("SetExchangeID(): exchangeID > MaxExchangeID")
+func (fh FrameHeader) SetConnID(connID ConnID) {
+	if connID > MuxerConnID {
+		panic("SetConnID(): connID > MuxerConnID")
 	}
-	fh.setSmallValue(uint16(exchangeID))
+	fh.setSmallValue(uint16(connID))
 }
 
 // HasPayload returns true if the Size value is used for payload size,
@@ -208,9 +208,9 @@ func (fh FrameHeader) PayloadSize() (n int) {
 	return
 }
 
-// IsMuxerControl returns true if the Exchange ID indicates this is a Muxer control frame.
+// IsMuxerControl returns true if the Conn ID indicates this is a Muxer control frame.
 func (fh FrameHeader) IsMuxerControl() bool {
-	return fh.ExchangeID() == MuxerExchangeID
+	return fh.ConnID() == MuxerConnID
 }
 
 // MuxerControl returns the frame control bits as a MuxerControl value.
@@ -226,10 +226,10 @@ func (fh FrameHeader) FrameControl() FrameFlag {
 }
 
 // SetMuxerControl sets the frame header to a Muxer control frame.
-// This sets the control bits and also sets the Exchange ID to MuxerExchangeID.
+// This sets the control bits and also sets the Conn ID to MuxerConnID.
 func (fh FrameHeader) SetMuxerControl(sc MuxerControl) {
 	fh[2] = (fh[2] & (^FrameFlagMask)) | byte(sc)
-	fh.SetExchangeID(MuxerExchangeID)
+	fh.SetConnID(MuxerConnID)
 }
 
 // HasFlow returns true if the Flow bit is set in the frame header.
@@ -279,11 +279,11 @@ func (fh FrameHeader) Clear() {
 	fh[3] = byte(0)
 }
 
-// ClearID zeroes out the frameheader bytes and sets the ExchangeID.
-func (fh FrameHeader) ClearID(exchangeID ExchangeID) {
-	if exchangeID > MaxExchangeID {
-		panic("AppendFrameHeader(): exchangeID > MaxExchangeID")
+// ClearID zeroes out the frameheader bytes and sets the ConnID.
+func (fh FrameHeader) ClearID(connID ConnID) {
+	if connID > MaxConnID {
+		panic("AppendFrameHeader(): connID > MaxConnID")
 	}
 	fh.Clear()
-	fh.SetExchangeID(exchangeID)
+	fh.SetConnID(connID)
 }

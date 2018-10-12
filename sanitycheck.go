@@ -4,8 +4,8 @@ package rap
 
 // sanity check the configuration
 func init() {
-	if ProtocolMaxConcurrentExchanges < 1 {
-		panic("ProtocolMaxConcurrentExchanges < 1")
+	if ProtocolMaxConcurrentConns < 1 {
+		panic("ProtocolMaxConcurrentConns < 1")
 	}
 	if SendWindowSize < 1 {
 		panic("SendWindowSize < 1")
@@ -13,20 +13,20 @@ func init() {
 	if SendWindowSize > MaxSendWindowSize {
 		panic("SendWindowSize > MaxSendWindowSize")
 	}
-	if MuxerExchangeID < 1 {
-		panic("MuxerExchangeID < 1")
+	if MuxerConnID < 1 {
+		panic("MuxerConnID < 1")
 	}
-	if ProtocolMaxExchangeID < 1 {
-		panic("ProtocolMaxExchangeID < 1")
+	if ProtocolMaxConnID < 1 {
+		panic("ProtocolMaxConnID < 1")
 	}
-	if ProtocolMaxExchangeID >= MuxerExchangeID {
-		panic("ProtocolMaxExchangeID >= MuxerExchangeID")
+	if ProtocolMaxConnID >= MuxerConnID {
+		panic("ProtocolMaxConnID >= MuxerConnID")
 	}
-	if MaxExchangeID < 0 {
-		panic("MaxExchangeID < 0")
+	if MaxConnID < 0 {
+		panic("MaxConnID < 0")
 	}
-	if MaxExchangeID > ProtocolMaxExchangeID {
-		panic("MaxExchangeID > ProtocolMaxExchangeID")
+	if MaxConnID > ProtocolMaxConnID {
+		panic("MaxConnID > ProtocolMaxConnID")
 	}
 	if FrameMaxSize < FrameHeaderSize+60 {
 		panic("FrameMaxSize < FrameHeaderSize+60")

@@ -139,8 +139,8 @@ func (mt *muxerTester) Close() {
 			}
 		}
 		if mt.injectFramesAtClose {
-			mt.muxClient.ExchangeWrite(nil)
-			mt.muxClient.ExchangeWrite(nil)
+			mt.muxClient.ConnWrite(nil)
+			mt.muxClient.ConnWrite(nil)
 		}
 		err := mt.a.WriteCloser.Close()
 		if mt.expectClientCloseError != nil {
@@ -194,18 +194,18 @@ func (mt *muxerTester) InjectRequestNoErrors(r *http.Request) {
 
 func (mt *muxerTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
 	w := httptest.NewRecorder()
-	e := mt.muxClient.NewExchangeWait(time.Second * 10)
+	e := mt.muxClient.NewConnWait(time.Second * 10)
 	defer e.Close()
 	requestErr = e.WriteRequest(r)
 	_, responseErr = e.ProxyResponse(w)
 	return
 }
 
-func (mt *muxerTester) FillExchanges() (gotten int) {
+func (mt *muxerTester) FillConns() (gotten int) {
 	for {
-		if e := mt.muxClient.NewExchange(); e != nil {
+		if e := mt.muxClient.NewConn(); e != nil {
 			gotten++
-			e.OnRecycle(mt.muxClient.ExchangeRelease)
+			e.OnRecycle(mt.muxClient.ConnRelease)
 			defer e.Close()
 		} else {
 			return
@@ -221,61 +221,61 @@ func Test_Muxer_String(t *testing.T) {
 	defer mt.Close()
 	expected := fmt.Sprintf("[Muxer %x]", mt.muxClient.serialNumber)
 	assert.Equal(t, expected, mt.muxClient.String())
-	assert.Equal(t, int(MaxExchangeID)+1, len(mt.muxClient.exchangeLookup))
-	assert.Equal(t, int(MaxExchangeID), cap(mt.muxClient.exchanges))
+	assert.Equal(t, int(MaxConnID)+1, len(mt.muxClient.connLookup))
+	assert.Equal(t, int(MaxConnID), cap(mt.muxClient.conns))
 }
 
-func Test_Muxer_exchanges_exhausted(t *testing.T) {
+func Test_Muxer_conns_exhausted(t *testing.T) {
 	mt := newMuxerTester(t)
 	defer mt.Close()
 
-	var firstExchange *Exchange
+	var firstConn *Conn
 
 	for {
-		if e := mt.muxClient.NewExchange(); e != nil {
-			if firstExchange == nil {
-				firstExchange = e
+		if conn := mt.muxClient.NewConn(); conn != nil {
+			if firstConn == nil {
+				firstConn = conn
 			} else {
-				defer e.Close()
+				defer conn.Close()
 			}
 		} else {
 			break
 		}
 	}
-	assert.Nil(t, mt.muxClient.NewExchangeWait(time.Millisecond*10))
-	firstExchange.Close()
-	e2 := mt.muxClient.NewExchangeWait(time.Second * 10)
-	assert.NotNil(t, e2)
-	e2.Close()
+	assert.Nil(t, mt.muxClient.NewConnWait(time.Millisecond*10))
+	firstConn.Close()
+	conn2 := mt.muxClient.NewConnWait(time.Second * 10)
+	assert.NotNil(t, conn2)
+	conn2.Close()
 }
 
-func Test_Muxer_ReleaseExchange(t *testing.T) {
+func Test_Muxer_ReleaseConn(t *testing.T) {
 	mt := newMuxerTester(t)
 	defer mt.Close()
-	e := mt.muxClient.NewExchange()
+	e := mt.muxClient.NewConn()
 	assert.NotNil(t, e)
 	e.Close()
 }
 
-func Test_Muxer_exchange_overflow(t *testing.T) {
+func Test_Muxer_conn_overflow(t *testing.T) {
 	mt := newMuxerTester(t)
 	defer mt.Close()
-	gotten := mt.FillExchanges()
-	assert.Equal(t, int(MaxExchangeID), gotten)
+	gotten := mt.FillConns()
+	assert.Equal(t, int(MaxConnID), gotten)
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
-	for len(mt.muxClient.exchanges) != int(MaxExchangeID) {
+	for len(mt.muxClient.conns) != int(MaxConnID) {
 		select {
 		case <-timer.C:
-			assert.Equal(t, int(MaxExchangeID), len(mt.muxClient.exchanges))
+			assert.Equal(t, int(MaxConnID), len(mt.muxClient.conns))
 		default:
 		}
 	}
-	assert.Equal(t, int(MaxExchangeID), len(mt.muxClient.exchanges))
-	e := NewExchange(mt.muxClient, 1)
-	e.OnRecycle(mt.muxClient.ExchangeRelease)
-	assert.True(t, e.remoteSendingFinal())
-	assert.Panics(t, func() { e.Close() })
+	assert.Equal(t, int(MaxConnID), len(mt.muxClient.conns))
+	conn := NewConn(mt.muxClient, 1)
+	conn.OnRecycle(mt.muxClient.ConnRelease)
+	assert.True(t, conn.remoteSendingFinal())
+	assert.Panics(t, func() { conn.Close() })
 }
 
 func Test_Muxer_empty_request_response(t *testing.T) {
@@ -341,7 +341,7 @@ func Test_Muxer_muxercontrol_reserved(t *testing.T) {
 	mt.Start()
 	fd := FrameDataAlloc()
 	fd.WriteMuxerControl(muxerControlReserved001)
-	mt.muxClient.ExchangeWrite(fd)
+	mt.muxClient.ConnWrite(fd)
 	<-mt.serverDone
 }
 
@@ -355,7 +355,7 @@ func Test_Muxer_muxercontrol_panic(t *testing.T) {
 	fd.WriteMuxerControl(MuxerControlPanic)
 	fd.WriteString("Some text")
 	fd.SetSizeValue()
-	mt.muxClient.ExchangeWrite(fd)
+	mt.muxClient.ConnWrite(fd)
 	<-mt.serverDone
 }
 

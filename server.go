@@ -225,7 +225,7 @@ func (srv *Server) getMuxerLimiterLocked() chan struct{} {
 	if srv.muxerLimiter == nil {
 		maxMuxers := srv.MaxMuxers
 		if maxMuxers < 1 {
-			maxMuxers = 1 + (ProtocolMaxConcurrentExchanges / (int(MaxExchangeID) + 1))
+			maxMuxers = 1 + (ProtocolMaxConcurrentConns / (int(MaxConnID) + 1))
 		}
 		srv.muxerLimiter = make(chan struct{}, maxMuxers)
 	}

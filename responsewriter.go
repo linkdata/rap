@@ -5,9 +5,9 @@ import (
 	"strconv"
 )
 
-// ResponseWriter implements http.ResponseWriter for an Exchange
+// ResponseWriter implements http.ResponseWriter for a Conn
 type ResponseWriter struct {
-	*Exchange
+	*Conn
 	Code        int         // the HTTP response code from WriteHeader
 	HeaderMap   http.Header // the HTTP response headers
 	Flushed     bool
@@ -15,9 +15,9 @@ type ResponseWriter struct {
 }
 
 // NewResponseWriter returns an initialized ResponseRecorder.
-func NewResponseWriter(e *Exchange) *ResponseWriter {
+func NewResponseWriter(e *Conn) *ResponseWriter {
 	return &ResponseWriter{
-		Exchange:  e,
+		Conn:      e,
 		HeaderMap: make(http.Header),
 		Code:      200,
 	}
@@ -35,16 +35,16 @@ func (rw *ResponseWriter) Header() http.Header {
 
 // Write always succeeds and writes to rw.Body, if not nil.
 func (rw *ResponseWriter) Write(buf []byte) (int, error) {
-	// log.Print("ResponseWriter.Write([", len(buf), "]byte) ", rw.Exchange)
+	// log.Print("ResponseWriter.Write([", len(buf), "]byte) ", rw.Conn)
 	if !rw.wroteHeader {
 		rw.WriteHeader(200)
 	}
-	return rw.Exchange.Write(buf)
+	return rw.Conn.Write(buf)
 }
 
 // WriteHeader sets rw.Code.
 func (rw *ResponseWriter) WriteHeader(code int) {
-	// log.Print("ResponseWriter.WriteHeader(", code, ") ", rw.Exchange)
+	// log.Print("ResponseWriter.WriteHeader(", code, ") ", rw.Conn)
 	if !rw.wroteHeader {
 		rw.Code = code
 		contentLength := int64(-1)
@@ -56,7 +56,7 @@ func (rw *ResponseWriter) WriteHeader(code int) {
 				}
 			}
 		}
-		rw.Exchange.WriteResponseData(rw.Code, contentLength, rw.HeaderMap)
+		rw.Conn.WriteResponseData(rw.Code, contentLength, rw.HeaderMap)
 		rw.wroteHeader = true
 	}
 }
@@ -75,7 +75,7 @@ func (rw *ResponseWriter) Flush() {
 		if !rw.wroteHeader {
 			rw.WriteHeader(200)
 		}
-		rw.Exchange.Close()
+		rw.Conn.Close()
 		rw.Flushed = true
 	}
 }

@@ -13,10 +13,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-// ExchangeID identifies a in-progress request/response.
-type ExchangeID uint16
+// ConnID identifies a in-progress request/response.
+type ConnID uint16
 
-func (e ExchangeID) String() string {
+func (e ConnID) String() string {
 	return fmt.Sprintf("[ID %04x]", uint16(e))
 }
 
@@ -30,24 +30,24 @@ type ErrMissingFrameHead struct{}
 
 func (ErrMissingFrameHead) Error() string { return "missing frame head" }
 
-// ExchangeMuxer is the interface that an Exchange needs in order to
+// ConnMuxer is the interface that a Conn needs in order to
 // communicate with the outside world and clean up.
-type ExchangeMuxer interface {
-	// ExchangeWrite allows an Exchange to write a FrameData
-	ExchangeWrite(fd FrameData) error
-	// ExchangeAbortChannel returns the channel that is closed when owner is closing
-	ExchangeAbortChannel() <-chan struct{}
+type ConnMuxer interface {
+	// ConnWrite allows a Conn to write a FrameData
+	ConnWrite(fd FrameData) error
+	// ConnAbortChannel returns the channel that is closed when owner is closing
+	ConnAbortChannel() <-chan struct{}
 }
 
-// exchangeDeadline is an abstraction for handling timeouts.
-type exchangeDeadline struct {
+// connDeadline is an abstraction for handling timeouts.
+type connDeadline struct {
 	mu     sync.Mutex // Guards timer and cancel
 	timer  *time.Timer
 	cancel chan struct{} // Must be non-nil
 }
 
-func makeExchangeDeadline() exchangeDeadline {
-	return exchangeDeadline{cancel: make(chan struct{})}
+func makeConnDeadline() connDeadline {
+	return connDeadline{cancel: make(chan struct{})}
 }
 
 // set sets the point in time when the deadline will time out.
@@ -56,7 +56,7 @@ func makeExchangeDeadline() exchangeDeadline {
 // t value in the future.
 //
 // A zero value for t prevents timeout.
-func (d *exchangeDeadline) set(t time.Time) {
+func (d *connDeadline) set(t time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -92,7 +92,7 @@ func (d *exchangeDeadline) set(t time.Time) {
 }
 
 // wait returns a channel that is closed when the deadline is exceeded.
-func (d *exchangeDeadline) wait() chan struct{} {
+func (d *connDeadline) wait() chan struct{} {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.cancel
@@ -122,20 +122,20 @@ func (timeoutError) Error() string   { return "deadline exceeded" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
 
-// Exchange is essentially a pipe. It maintains the state of a request-response
+// Conn is essentially a pipe. It maintains the state of a request-response
 // or WebSocket connection, moves data between the RAP and HTTP connections and
 // handles the flow control mechanism, which is a simple transmission
 // window with intermittent ACKs from the receiver.
-type Exchange struct {
-	ID          ExchangeID      // Exchange ID
-	mux         ExchangeMuxer   // the Muxer that owns us
-	onRecycle   func(*Exchange) // function to call when Exchange is recycled
-	ackCh       chan struct{}   // ack's from peer go in this
-	readCh      chan FrameData  // data frames from peer go in this
-	cmu         sync.Mutex      // guards localClosed and remoteClosed
-	localClosed chan struct{}   // closed when Close() has been called
+type Conn struct {
+	ID          ConnID         // Conn ID
+	mux         ConnMuxer      // the Muxer that owns us
+	onRecycle   func(*Conn)    // function to call when Conn is recycled
+	ackCh       chan struct{}  // ack's from peer go in this
+	readCh      chan FrameData // data frames from peer go in this
+	cmu         sync.Mutex     // guards localClosed and remoteClosed
+	localClosed chan struct{}  // closed when Close() has been called
 
-	// these are atomic to allow Exchange.String() to print the state without causing races
+	// these are atomic to allow Conn.String() to print the state without causing races
 	localSentFinal  int32    // nonzero if local has sent it's final frame
 	remoteSentFinal int32    // nonzero if remote has sent it's final frame
 	sendWindow      int32    // number of frames still allowed to be in flight
@@ -147,67 +147,67 @@ type Exchange struct {
 	rmu           sync.Mutex  // guards fdr
 	fdr           FrameData   // FrameData being read from by fr
 	fp            FrameParser // Frame parser (into fdr)
-	readDeadline  exchangeDeadline
-	writeDeadline exchangeDeadline
+	readDeadline  connDeadline
+	writeDeadline connDeadline
 	serialNumber  uint32
 }
 
-var exchangeNextSerialNumber uint32
+var connNextSerialNumber uint32
 
-func (e *Exchange) isHijacked() bool {
-	return atomic.LoadInt32(&e.hijacked) != 0
+func (conn *Conn) isHijacked() bool {
+	return atomic.LoadInt32(&conn.hijacked) != 0
 }
 
-func (e *Exchange) hijacking() bool {
-	return atomic.CompareAndSwapInt32(&e.hijacked, 0, 1)
+func (conn *Conn) hijacking() bool {
+	return atomic.CompareAndSwapInt32(&conn.hijacked, 0, 1)
 }
 
-func (e *Exchange) starting() bool {
-	return atomic.CompareAndSwapInt32((*int32)(&e.state), int32(runStateUnused), int32(runStateActive))
+func (conn *Conn) starting() bool {
+	return atomic.CompareAndSwapInt32((*int32)(&conn.state), int32(runStateUnused), int32(runStateActive))
 }
 
-func (e *Exchange) setRunState(state runState) {
-	atomic.StoreInt32((*int32)(&e.state), int32(state))
+func (conn *Conn) setRunState(state runState) {
+	atomic.StoreInt32((*int32)(&conn.state), int32(state))
 }
 
-func (e *Exchange) getRunState() runState {
-	return runState(atomic.LoadInt32((*int32)(&e.state)))
+func (conn *Conn) getRunState() runState {
+	return runState(atomic.LoadInt32((*int32)(&conn.state)))
 }
 
-func (e *Exchange) hasRemoteSentFinal() bool {
-	return atomic.LoadInt32(&e.remoteSentFinal) != 0
+func (conn *Conn) hasRemoteSentFinal() bool {
+	return atomic.LoadInt32(&conn.remoteSentFinal) != 0
 }
 
-func (e *Exchange) remoteSendingFinal() bool {
-	if atomic.CompareAndSwapInt32(&e.remoteSentFinal, 0, 1) {
-		close(e.readCh)
+func (conn *Conn) remoteSendingFinal() bool {
+	if atomic.CompareAndSwapInt32(&conn.remoteSentFinal, 0, 1) {
+		close(conn.readCh)
 		return true
 	}
 	return false
 }
 
-func (e *Exchange) hasLocalSentFinal() bool {
-	return atomic.LoadInt32(&e.localSentFinal) != 0
+func (conn *Conn) hasLocalSentFinal() bool {
+	return atomic.LoadInt32(&conn.localSentFinal) != 0
 }
 
-func (e *Exchange) localSendingFinal() bool {
-	return atomic.CompareAndSwapInt32(&e.localSentFinal, 0, 1)
+func (conn *Conn) localSendingFinal() bool {
+	return atomic.CompareAndSwapInt32(&conn.localSentFinal, 0, 1)
 }
 
-// Serial returns a string identifying the Exchange, containing the
-// owning Muxers serial number, a colon, and this exchange's serial number.
-// Note that the serial number is unrelated to the Exchange ID.
-func (e *Exchange) Serial() string {
+// Serial returns a string identifying the Conn, containing the
+// owning Muxers serial number, a colon, and this Conn's serial number.
+// Note that the serial number is unrelated to the Conn ID.
+func (conn *Conn) Serial() string {
 	muxSerial := uint32(0)
-	if c := e.getMux(); c != nil {
+	if c := conn.getMux(); c != nil {
 		muxSerial = c.serialNumber
 	}
-	return fmt.Sprintf("%x:%x", muxSerial, e.serialNumber)
+	return fmt.Sprintf("%x:%x", muxSerial, conn.serialNumber)
 }
 
-func (e *Exchange) String() string {
+func (conn *Conn) String() string {
 	state := ""
-	switch e.getRunState() {
+	switch conn.getRunState() {
 	case runStateUnused:
 		state = "IDLE  "
 	case runStateActive:
@@ -218,70 +218,70 @@ func (e *Exchange) String() string {
 		state = "    RC"
 	}
 	hijacked := "  "
-	if e.isHijacked() {
+	if conn.isHijacked() {
 		hijacked = " HJ"
 	}
 	locF := "  "
-	if e.hasLocalSentFinal() {
+	if conn.hasLocalSentFinal() {
 		locF = "LF"
 	}
 	remF := "  "
-	if e.hasRemoteSentFinal() {
+	if conn.hasRemoteSentFinal() {
 		remF = "RF"
 	}
 
-	return fmt.Sprintf("[Exchange %v %v %s %s %s %s (%d+%d)]",
-		e.Serial(), e.ID, state, hijacked, locF, remF, e.getSendWindow(), len(e.ackCh))
+	return fmt.Sprintf("[Conn %v %v %s %s %s %s (%d+%d)]",
+		conn.Serial(), conn.ID, state, hijacked, locF, remF, conn.getSendWindow(), len(conn.ackCh))
 }
 
-// NewExchange creates a new exchange
-func NewExchange(mux ExchangeMuxer, exchangeID ExchangeID) (e *Exchange) {
-	if exchangeID >= MuxerExchangeID {
-		panic(fmt.Sprintf("illegal exchange ID %d", int(exchangeID)))
+// NewConn creates a new Conn
+func NewConn(mux ConnMuxer, connID ConnID) (conn *Conn) {
+	if connID >= MuxerConnID {
+		panic(fmt.Sprintf("illegal Conn ID %d", int(connID)))
 	}
-	e = &Exchange{
-		ID:            exchangeID,
+	conn = &Conn{
+		ID:            connID,
 		mux:           mux,
 		sendWindow:    int32(SendWindowSize),
 		ackCh:         make(chan struct{}, MaxSendWindowSize),
 		readCh:        make(chan FrameData, MaxSendWindowSize),
 		localClosed:   make(chan struct{}),
-		readDeadline:  makeExchangeDeadline(),
-		writeDeadline: makeExchangeDeadline(),
-		serialNumber:  atomic.AddUint32(&exchangeNextSerialNumber, 1),
+		readDeadline:  makeConnDeadline(),
+		writeDeadline: makeConnDeadline(),
+		serialNumber:  atomic.AddUint32(&connNextSerialNumber, 1),
 	}
 	return
 }
 
-// SubmitFrame gives the Exchange an incoming FrameData.
+// SubmitFrame gives the Conn an incoming FrameData.
 // None of the frames seen may be muxer control frames.
 // A fd of nil indicates an EOF condition.
-// If this function blocks, it will block all Exchanges on
+// If this function blocks, it will block all Conns on
 // the Muxer.
-func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
+func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
 	// log.Print("SubmitFrame() ", e, fd)
 
 	if fd.Header().HasFlow() {
 		if fd.Header().IsAck() {
 			FrameDataFree(fd)
 			select {
-			case e.ackCh <- struct{}{}:
+			case conn.ackCh <- struct{}{}:
 			default:
 				panic(fmt.Sprint("ACK would block"))
 			}
 		} else if fd.Header().IsFinal() {
 			// a final frame
-			e.receivedFinal(fd)
+			conn.receivedFinal(fd)
 		}
 		return
 	}
 
-	if e.hasRemoteSentFinal() {
-		panic(fmt.Sprint(e, " received frame after final: ", fd))
+	if conn.hasRemoteSentFinal() {
+		panic(fmt.Sprint(conn, " received frame after final: ", fd))
 	}
 
 	select {
-	case e.readCh <- fd:
+	case conn.readCh <- fd:
 	default:
 		panic(fmt.Sprint("DATA would block: ", fd))
 	}
@@ -289,9 +289,9 @@ func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	return
 }
 
-func (e *Exchange) receivedFinal(fd FrameData) {
-	e.cmu.Lock()
-	defer e.cmu.Unlock()
+func (conn *Conn) receivedFinal(fd FrameData) {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
 	// log.Print(" FIN ", e, fd)
 
 	if fd != nil {
@@ -301,126 +301,126 @@ func (e *Exchange) receivedFinal(fd FrameData) {
 		FrameDataFree(fd)
 	}
 
-	if !e.remoteSendingFinal() {
+	if !conn.remoteSendingFinal() {
 		panic("received multiple final frames")
 	}
 
-	if e.hasLocalSentFinal() {
-		e.recycle()
+	if conn.hasLocalSentFinal() {
+		conn.recycle()
 	}
 }
 
 // readFrame reads data frames from the read channel.
 // None of the frames seen may be muxer control frames.
 // Also writes acknowledgement frames.
-func (e *Exchange) readFrame() (err error) {
-	// log.Print("Exchange.readFrame(): len(e.fdr)=", len(e.fdr), " e=", e)
-	if e.fdr != nil {
-		FrameDataFree(e.fdr)
-		e.fdr = nil
-		e.fp = nil
+func (conn *Conn) readFrame() (err error) {
+	// log.Print("Conn.readFrame(): len(e.fdr)=", len(e.fdr), " e=", e)
+	if conn.fdr != nil {
+		FrameDataFree(conn.fdr)
+		conn.fdr = nil
+		conn.fp = nil
 	}
 
 	select {
-	case e.fdr = <-e.readCh:
-		if e.fdr != nil {
-			e.fp = NewFrameParser(e.fdr)
-			e.writeAckFrame()
+	case conn.fdr = <-conn.readCh:
+		if conn.fdr != nil {
+			conn.fp = NewFrameParser(conn.fdr)
+			conn.writeAckFrame()
 		} else {
 			err = errors.WithStack(io.EOF)
 		}
-	case <-e.readDeadline.wait():
+	case <-conn.readDeadline.wait():
 		err = errors.WithStack(timeoutError{})
-	case <-e.mux.ExchangeAbortChannel():
+	case <-conn.mux.ConnAbortChannel():
 		err = errors.WithStack(serverClosedError{})
-	case <-e.localClosed:
+	case <-conn.localClosed:
 		err = errors.WithStack(io.ErrClosedPipe)
 	}
 
 	return
 }
 
-func (e *Exchange) writeAckFrame() {
-	fd := FrameDataAllocID(e.ID)
+func (conn *Conn) writeAckFrame() {
+	fd := FrameDataAllocID(conn.ID)
 	fd.Header().SetFlow()
-	e.mux.ExchangeWrite(fd)
+	conn.mux.ConnWrite(fd)
 }
 
 // LoadFrameReader ensures the frame reader has payload data or an error.
-func (e *Exchange) LoadFrameReader() (err error) {
-	e.rmu.Lock()
-	defer e.rmu.Unlock()
-	return e.loadFrameReader()
+func (conn *Conn) LoadFrameReader() (err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	return conn.loadFrameReader()
 }
 
-func (e *Exchange) loadFrameReader() (err error) {
-	for len(e.fp) == 0 && err == nil {
-		err = e.readFrame()
-		// log.Print("Exchange.loadFrameReader(): ", e.ID, " readFrame() len(fr)=", len(e.fp), " err=", err, "  ", e)
+func (conn *Conn) loadFrameReader() (err error) {
+	for len(conn.fp) == 0 && err == nil {
+		err = conn.readFrame()
+		// log.Print("Conn.loadFrameReader(): ", e.ID, " readFrame() len(fr)=", len(e.fp), " err=", err, "  ", e)
 	}
 	return
 }
 
 // WriteStart prepares a new frame for writing.
-func (e *Exchange) WriteStart() error {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	return e.writeStart()
+func (conn *Conn) WriteStart() error {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.writeStart()
 }
 
-func (e *Exchange) writeStart() error {
-	if e.hasRemoteSentFinal() {
+func (conn *Conn) writeStart() error {
+	if conn.hasRemoteSentFinal() {
 		return errors.WithStack(io.EOF)
 	}
 	select {
-	case <-e.localClosed:
+	case <-conn.localClosed:
 		return errors.WithStack(io.ErrClosedPipe)
-	case <-e.writeDeadline.wait():
+	case <-conn.writeDeadline.wait():
 		return errors.WithStack(timeoutError{})
 	default:
-		if e.fdw == nil {
-			// log.Print("Exchange.writeStart() (new fd)", e)
-			e.fdw = FrameDataAllocID(e.ID)
+		if conn.fdw == nil {
+			// log.Print("Conn.writeStart() (new fd)", e)
+			conn.fdw = FrameDataAllocID(conn.ID)
 		}
 		return nil
 	}
 }
 
 // Available returns number of free bytes in the current frame.
-func (e *Exchange) Available() int {
-	return e.fdw.Available()
+func (conn *Conn) Available() int {
+	return conn.fdw.Available()
 }
 
 // Buffered returns the number of bytes that have been written to the
 // current frame, including the header size.
-func (e *Exchange) Buffered() int {
-	return e.fdw.Buffered()
+func (conn *Conn) Buffered() int {
+	return conn.fdw.Buffered()
 }
 
-// Implements io.Reader for Exchange.
+// Implements io.Reader for Conn.
 // Used when copying data from a Muxer to a HTTP body.
-func (e *Exchange) Read(p []byte) (n int, err error) {
-	e.rmu.Lock()
-	defer e.rmu.Unlock()
-	return e.read(p)
+func (conn *Conn) Read(p []byte) (n int, err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	return conn.read(p)
 }
 
-func (e *Exchange) read(p []byte) (n int, err error) {
-	if err = e.loadFrameReader(); err == nil {
-		n, err = e.fp.Read(p)
+func (conn *Conn) read(p []byte) (n int, err error) {
+	if err = conn.loadFrameReader(); err == nil {
+		n, err = conn.fp.Read(p)
 	}
 	return
 }
 
-// ReadFrom implements io.ReaderFrom for Exchange body data.
+// ReadFrom implements io.ReaderFrom for Conn body data.
 // Used when copying data from a HTTP body to a Muxer.
-func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
+func (conn *Conn) ReadFrom(r io.Reader) (n int64, err error) {
 	if r == nil {
 		return 0, errors.WithStack(io.EOF)
 	}
 	for err == nil {
 		var m int64
-		m, err = e.readFromHelper(r)
+		m, err = conn.readFromHelper(r)
 		n += m
 	}
 	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
@@ -430,10 +430,10 @@ func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 	return
 }
 
-func (e *Exchange) readFrom(r io.Reader) (n int64, err error) {
+func (conn *Conn) readFrom(r io.Reader) (n int64, err error) {
 	for err == nil {
 		var m int64
-		m, err = e.readFromHelperLocked(r)
+		m, err = conn.readFromHelperLocked(r)
 		n += m
 	}
 	// io.ReaderFrom: Any error except io.EOF encountered during the read is also returned.
@@ -443,24 +443,24 @@ func (e *Exchange) readFrom(r io.Reader) (n int64, err error) {
 	return
 }
 
-func (e *Exchange) readFromHelper(r io.Reader) (n int64, err error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	return e.readFromHelperLocked(r)
+func (conn *Conn) readFromHelper(r io.Reader) (n int64, err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.readFromHelperLocked(r)
 }
 
-func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
+func (conn *Conn) readFromHelperLocked(r io.Reader) (n int64, err error) {
 	var count int
-	if err = e.writeStart(); err == nil {
-		maxCount := e.fdw.Available()
-		if count, err = r.Read(e.fdw[len(e.fdw) : len(e.fdw)+maxCount]); count > 0 {
+	if err = conn.writeStart(); err == nil {
+		maxCount := conn.fdw.Available()
+		if count, err = r.Read(conn.fdw[len(conn.fdw) : len(conn.fdw)+maxCount]); count > 0 {
 			if err != nil {
 				err = errors.WithStack(err)
 			}
-			e.fdw.Header().SetBody()
+			conn.fdw.Header().SetBody()
 			n += int64(count)
-			e.fdw = e.fdw[:len(e.fdw)+count]
-			if flushErr := e.flush(); flushErr != nil {
+			conn.fdw = conn.fdw[:len(conn.fdw)+count]
+			if flushErr := conn.flushLocked(); flushErr != nil {
 				if err == nil {
 					err = flushErr
 				}
@@ -472,49 +472,49 @@ func (e *Exchange) readFromHelperLocked(r io.Reader) (n int64, err error) {
 
 // TODO: func (b *Writer) Reset(w io.Writer)
 
-// Write implements io.Writer for Exchange, and is used to write body data.
-func (e *Exchange) Write(p []byte) (n int, err error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	// log.Print("Exchange.Write() len(p)=", len(p), " avail=", e.Available())
-	if n, err = e.write(p); err == nil {
-		if err = e.flush(); err != nil {
+// Write implements io.Writer for Conn, and is used to write body data.
+func (conn *Conn) Write(p []byte) (n int, err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	// log.Print("Conn.Write() len(p)=", len(p), " avail=", e.Available())
+	if n, err = conn.write(p); err == nil {
+		if err = conn.flushLocked(); err != nil {
 			n = 0
 		}
 	}
 	return
 }
 
-func (e *Exchange) write(p []byte) (n int, err error) {
-	err = e.writeStart()
+func (conn *Conn) write(p []byte) (n int, err error) {
+	err = conn.writeStart()
 
-	for err == nil && len(p) > e.fdw.Available() {
+	for err == nil && len(p) > conn.fdw.Available() {
 		var m int
-		if m = e.fdw.Available(); m > 0 {
-			e.fdw.Header().SetBody()
-			e.fdw = append(e.fdw, p[:m]...)
+		if m = conn.fdw.Available(); m > 0 {
+			conn.fdw.Header().SetBody()
+			conn.fdw = append(conn.fdw, p[:m]...)
 			p = p[m:]
 		}
-		if err = e.flush(); err == nil {
+		if err = conn.flushLocked(); err == nil {
 			n += m
-			err = e.writeStart()
+			err = conn.writeStart()
 		}
 	}
 
 	if err == nil {
-		e.fdw.Header().SetBody()
-		e.fdw = append(e.fdw, p...)
+		conn.fdw.Header().SetBody()
+		conn.fdw = append(conn.fdw, p...)
 		n += len(p)
 	}
 
 	return
 }
 
-// WriteTo writes the body payload of the exchange to a io.Writer.
-func (e *Exchange) WriteTo(w io.Writer) (n int64, err error) {
+// WriteTo writes the body payload of the Conn to a io.Writer.
+func (conn *Conn) WriteTo(w io.Writer) (n int64, err error) {
 	for err == nil {
 		var m int64
-		m, err = e.writeToHelper(w)
+		m, err = conn.writeToHelper(w)
 		n += m
 	}
 	if errors.Cause(err) == io.EOF {
@@ -523,16 +523,16 @@ func (e *Exchange) WriteTo(w io.Writer) (n int64, err error) {
 	return
 }
 
-func (e *Exchange) writeToHelper(w io.Writer) (n int64, err error) {
-	e.rmu.Lock()
-	defer e.rmu.Unlock()
-	if err = e.loadFrameReader(); err != nil {
+func (conn *Conn) writeToHelper(w io.Writer) (n int64, err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	if err = conn.loadFrameReader(); err != nil {
 		return
 	}
-	for len(e.fp) > 0 {
+	for len(conn.fp) > 0 {
 		var count int
-		count, err = w.Write(e.fp)
-		e.fp = e.fp[count:]
+		count, err = w.Write(conn.fp)
+		conn.fp = conn.fp[count:]
 		n += int64(count)
 		if err != nil && err != io.ErrShortWrite {
 			return
@@ -541,28 +541,28 @@ func (e *Exchange) writeToHelper(w io.Writer) (n int64, err error) {
 	return
 }
 
-// WriteByte implements io.ByteWriter for Exchange.
-func (e *Exchange) WriteByte(c byte) (err error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	if err = e.writeByte(c); err == nil {
-		err = e.flush()
+// WriteByte implements io.ByteWriter for Conn.
+func (conn *Conn) WriteByte(c byte) (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	if err = conn.writeByte(c); err == nil {
+		err = conn.flushLocked()
 	}
 	return
 }
 
-func (e *Exchange) writeByte(c byte) (err error) {
-	err = e.writeStart()
+func (conn *Conn) writeByte(c byte) (err error) {
+	err = conn.writeStart()
 
-	if err == nil && e.fdw.Available() <= 0 {
-		if err = e.flush(); err == nil {
-			err = e.writeStart()
+	if err == nil && conn.fdw.Available() <= 0 {
+		if err = conn.flushLocked(); err == nil {
+			err = conn.writeStart()
 		}
 	}
 
 	if err == nil {
-		e.fdw.Header().SetBody()
-		err = e.fdw.WriteByte(c)
+		conn.fdw.Header().SetBody()
+		err = conn.fdw.WriteByte(c)
 	}
 
 	return
@@ -575,28 +575,28 @@ func (e *Exchange) writeByte(c byte) (err error) {
 // Note that the current write frame is expected to be a regular data frame,
 // such that e.fdw.Header() returns false for IsMuxerControl() and true for
 // HasPayload().
-func (e *Exchange) Flush() (err error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	return e.flush()
+func (conn *Conn) Flush() (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.flushLocked()
 }
 
-func (e *Exchange) flush() (err error) {
-	if fd := e.fdw; fd != nil {
-		e.fdw = nil
-		err = e.writeFrame(fd)
+func (conn *Conn) flushLocked() (err error) {
+	if fd := conn.fdw; fd != nil {
+		conn.fdw = nil
+		err = conn.writeFrame(fd)
 	}
 	return
 }
 
-func (e *Exchange) writeFrame(fd FrameData) (err error) {
+func (conn *Conn) writeFrame(fd FrameData) (err error) {
 	if fd.Header().HasFlow() {
-		panic(fmt.Sprint("attempt to send flow control frame: ", e, fd))
+		panic(fmt.Sprint("attempt to send flow control frame: ", conn, fd))
 	}
 
 	if !fd.Header().HasBodyOrHead() {
 		if len(fd) > FrameHeaderSize {
-			panic(fmt.Sprint("missing head or body flag: ", e, fd))
+			panic(fmt.Sprint("missing head or body flag: ", conn, fd))
 		}
 		// empty blank frame
 		FrameDataFree(fd)
@@ -612,34 +612,34 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	// Consume ACKs and check for close conditions
 	for err == nil {
 		select {
-		case <-e.ackCh:
-			e.consumeAck()
-		case <-e.localClosed:
+		case <-conn.ackCh:
+			conn.consumeAck()
+		case <-conn.localClosed:
 			err = errors.WithStack(io.ErrClosedPipe)
-		case <-e.mux.ExchangeAbortChannel():
+		case <-conn.mux.ConnAbortChannel():
 			err = errors.WithStack(serverClosedError{})
-		case <-e.writeDeadline.wait():
+		case <-conn.writeDeadline.wait():
 			err = errors.WithStack(timeoutError{})
 		default:
-			if e.hasRemoteSentFinal() {
+			if conn.hasRemoteSentFinal() {
 				err = errors.WithStack(io.EOF)
-			} else if e.getSendWindow() > 0 {
+			} else if conn.getSendWindow() > 0 {
 				// if the send window allows, go ahead and send it
-				if atomic.AddInt32(&e.sendWindow, -1) < 0 {
-					panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
+				if atomic.AddInt32(&conn.sendWindow, -1) < 0 {
+					panic(fmt.Sprintf("sendWindow went negative: %+v\n", conn))
 				}
-				e.starting()
-				return e.mux.ExchangeWrite(fd)
+				conn.starting()
+				return conn.mux.ConnWrite(fd)
 			} else {
 				// SendWindow is empty, so do a blocking wait for an ACK
 				select {
-				case <-e.ackCh:
-					e.consumeAck()
-				case <-e.localClosed:
+				case <-conn.ackCh:
+					conn.consumeAck()
+				case <-conn.localClosed:
 					err = errors.WithStack(io.ErrClosedPipe)
-				case <-e.mux.ExchangeAbortChannel():
+				case <-conn.mux.ConnAbortChannel():
 					err = errors.WithStack(serverClosedError{})
-				case <-e.writeDeadline.wait():
+				case <-conn.writeDeadline.wait():
 					err = errors.WithStack(timeoutError{})
 				}
 			}
@@ -650,75 +650,75 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 	return
 }
 
-func (e *Exchange) getSendWindow() int {
-	return int(atomic.LoadInt32(&e.sendWindow))
+func (conn *Conn) getSendWindow() int {
+	return int(atomic.LoadInt32(&conn.sendWindow))
 }
 
-func (e *Exchange) getMux() *Muxer {
-	if c, ok := e.mux.(*Muxer); ok {
+func (conn *Conn) getMux() *Muxer {
+	if c, ok := conn.mux.(*Muxer); ok {
 		return c
 	}
 	return nil
 }
 
-// recycle restores an Exchange to it's initial state and calls the onRecycle handler.
-// Before calling, the local end must be closed. If the exchange is started,
+// recycle restores an Conn to it's initial state and calls the onRecycle handler.
+// Before calling, the local end must be closed. If the Conn is started,
 // then remote must be closed as well. If it is not started, the remote must not be closed.
-func (e *Exchange) recycle() {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	e.rmu.Lock()
-	defer e.rmu.Unlock()
-	e.recycleLocked()
+func (conn *Conn) recycle() {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	conn.recycleLocked()
 }
 
-func (e *Exchange) recycleLocked() {
+func (conn *Conn) recycleLocked() {
 	// log.Print("  RC ", e)
 
-	e.setRunState(runStateRecycle)
+	conn.setRunState(runStateRecycle)
 
-	if !isClosedChan(e.localClosed) {
-		panic(fmt.Sprintf("recycle(): local not closed\n%v\n", e))
+	if !isClosedChan(conn.localClosed) {
+		panic(fmt.Sprintf("recycle(): local not closed\n%v\n", conn))
 	}
-	if len(e.fdw) > 0 {
-		panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", e, e.fdw))
+	if len(conn.fdw) > 0 {
+		panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", conn, conn.fdw))
 	}
-	if !e.hasLocalSentFinal() {
-		panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", e))
+	if !conn.hasLocalSentFinal() {
+		panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", conn))
 	}
-	if !e.hasRemoteSentFinal() {
-		panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", e))
+	if !conn.hasRemoteSentFinal() {
+		panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", conn))
 	}
 
 	// drain ack and read channels
-	for len(e.ackCh) > 0 {
-		<-e.ackCh
+	for len(conn.ackCh) > 0 {
+		<-conn.ackCh
 	}
-	for len(e.readCh) > 0 {
-		FrameDataFree(<-e.readCh)
+	for len(conn.readCh) > 0 {
+		FrameDataFree(<-conn.readCh)
 	}
 
-	e.readCh = make(chan FrameData, MaxSendWindowSize)
-	e.localClosed = make(chan struct{})
-	atomic.StoreInt32(&e.localSentFinal, 0)
-	atomic.StoreInt32(&e.remoteSentFinal, 0)
-	atomic.StoreInt32(&e.sendWindow, int32(SendWindowSize))
-	atomic.StoreInt32(&e.hijacked, 0)
-	e.fdw = nil
-	e.fdr = nil
-	e.fp = nil
-	e.writeDeadline.set(time.Time{})
-	e.readDeadline.set(time.Time{})
+	conn.readCh = make(chan FrameData, MaxSendWindowSize)
+	conn.localClosed = make(chan struct{})
+	atomic.StoreInt32(&conn.localSentFinal, 0)
+	atomic.StoreInt32(&conn.remoteSentFinal, 0)
+	atomic.StoreInt32(&conn.sendWindow, int32(SendWindowSize))
+	atomic.StoreInt32(&conn.hijacked, 0)
+	conn.fdw = nil
+	conn.fdr = nil
+	conn.fp = nil
+	conn.writeDeadline.set(time.Time{})
+	conn.readDeadline.set(time.Time{})
 
-	e.setRunState(runStateUnused)
+	conn.setRunState(runStateUnused)
 
-	if e.onRecycle != nil {
-		e.onRecycle(e)
+	if conn.onRecycle != nil {
+		conn.onRecycle(conn)
 	}
 }
 
-func (e *Exchange) makeFinalFrame(isAck bool) (fd FrameData) {
-	if fd = FrameDataAllocID(e.ID); fd != nil {
+func (conn *Conn) makeFinalFrame(isAck bool) (fd FrameData) {
+	if fd = FrameDataAllocID(conn.ID); fd != nil {
 		fd.Header().SetFlow()
 		fd.Header().SetBody()
 		if isAck {
@@ -728,95 +728,95 @@ func (e *Exchange) makeFinalFrame(isAck bool) (fd FrameData) {
 	return
 }
 
-func (e *Exchange) writeFinalLocked(isAck bool) {
-	if e.localSendingFinal() {
-		e.flush()
-		if fd := e.makeFinalFrame(isAck); fd != nil {
-			e.mux.ExchangeWrite(fd)
+func (conn *Conn) writeFinalLocked(isAck bool) {
+	if conn.localSendingFinal() {
+		conn.flushLocked()
+		if fd := conn.makeFinalFrame(isAck); fd != nil {
+			conn.mux.ConnWrite(fd)
 		}
 	}
 }
 
-func (e *Exchange) consumeAck() {
-	if atomic.AddInt32(&e.sendWindow, 1) > int32(SendWindowSize) {
-		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", e.getSendWindow(), int32(SendWindowSize), e))
+func (conn *Conn) consumeAck() {
+	if atomic.AddInt32(&conn.sendWindow, 1) > int32(SendWindowSize) {
+		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", conn.getSendWindow(), int32(SendWindowSize), conn))
 	}
 }
 
 // Close unblocks all blocked calls to Read and Write, sends the final frame and
 // discards any pending data in the receive queue.
-// If the remote is closed, it recycles the Exchange.
-func (e *Exchange) Close() error {
-	e.cmu.Lock()
-	defer e.cmu.Unlock()
+// If the remote is closed, it recycles the Conn.
+func (conn *Conn) Close() error {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
 
 	// log.Print("  CL ", e)
 
 	select {
-	case <-e.localClosed:
+	case <-conn.localClosed:
 		// already closed
 		return errors.WithStack(io.ErrClosedPipe)
 	default:
-		close(e.localClosed)
+		close(conn.localClosed)
 	}
 
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	e.rmu.Lock()
-	defer e.rmu.Unlock()
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
 
-	if !e.hasRemoteSentFinal() {
+	if !conn.hasRemoteSentFinal() {
 		// will be recycled when remote is closed
-		e.writeFinalLocked(false)
-		e.setRunState(runStateWaitFin)
+		conn.writeFinalLocked(false)
+		conn.setRunState(runStateWaitFin)
 		return nil
 	}
 
-	e.writeFinalLocked(true)
-	e.recycleLocked()
+	conn.writeFinalLocked(true)
+	conn.recycleLocked()
 
 	return nil
 }
 
-func (e *Exchange) closeIfNotHijacked() error {
-	if e.isHijacked() {
+func (conn *Conn) closeIfNotHijacked() error {
+	if conn.isHijacked() {
 		return nil
 	}
-	return e.Close()
+	return conn.Close()
 }
 
-// OnRecycle sets the callback to be invoked when the exchange is being recycled.
+// OnRecycle sets the callback to be invoked when the Conn is being recycled.
 // Set to nil to disable the callback. You may *not* call this function from the
 // callback itself, as that will deadlock.
-func (e *Exchange) OnRecycle(onRecycle func(*Exchange)) {
-	e.cmu.Lock()
-	defer e.cmu.Unlock()
-	e.onRecycle = onRecycle
+func (conn *Conn) OnRecycle(onRecycle func(*Conn)) {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	conn.onRecycle = onRecycle
 }
 
 // WriteUserRecordType writes a user record marker and sets the head bit.
-func (e *Exchange) WriteUserRecordType(c byte) (err error) {
+func (conn *Conn) WriteUserRecordType(c byte) (err error) {
 	if c < 0x80 {
 		return ErrUnhandledRecordType{}
 	}
-	if err = e.WriteStart(); err == nil {
-		e.fdw.WriteRecordType(RecordType(c))
+	if err = conn.WriteStart(); err == nil {
+		conn.fdw.WriteRecordType(RecordType(c))
 	}
 	return
 }
 
-// WriteRequest writes a http.Request to the exchange, including it's Body.
-func (e *Exchange) WriteRequest(r *http.Request) (err error) {
-	if err = e.WriteStart(); err == nil {
-		if err = e.fdw.WriteRequest(r); err == nil {
+// WriteRequest writes a http.Request to the Conn, including it's Body.
+func (conn *Conn) WriteRequest(r *http.Request) (err error) {
+	if err = conn.WriteStart(); err == nil {
+		if err = conn.fdw.WriteRequest(r); err == nil {
 			if r.ContentLength > 0 {
-				if _, err = io.CopyN(e, r.Body, r.ContentLength); err != nil {
+				if _, err = io.CopyN(conn, r.Body, r.ContentLength); err != nil {
 					err = errors.WithStack(err)
 				}
 			} else {
-				_, err = e.ReadFrom(r.Body)
+				_, err = conn.ReadFrom(r.Body)
 			}
-			if flushErr := e.Flush(); err == nil {
+			if flushErr := conn.Flush(); err == nil {
 				err = flushErr
 			}
 		}
@@ -824,20 +824,20 @@ func (e *Exchange) WriteRequest(r *http.Request) (err error) {
 	return
 }
 
-// ProxyResponse reads a HTTP response but not it's body from the Exchange data
+// ProxyResponse reads a HTTP response but not it's body from the Conn data
 // and writes it to the given http.ResponseWriter.
-func (e *Exchange) ProxyResponse(w http.ResponseWriter) (statusCode int, err error) {
-	e.rmu.Lock()
-	defer e.rmu.Unlock()
+func (conn *Conn) ProxyResponse(w http.ResponseWriter) (statusCode int, err error) {
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
 
-	if err = e.loadFrameReader(); err != nil {
+	if err = conn.loadFrameReader(); err != nil {
 		return 0, err
 	}
 
-	if e.fdr.Header().HasHead() {
-		switch e.fp.ReadRecordType() {
+	if conn.fdr.Header().HasHead() {
+		switch conn.fp.ReadRecordType() {
 		case RecordTypeHTTPResponse:
-			statusCode = e.fp.ProxyResponse(w)
+			statusCode = conn.fp.ProxyResponse(w)
 		case RecordTypeHijacked:
 			statusCode = 101
 		default:
@@ -848,19 +848,19 @@ func (e *Exchange) ProxyResponse(w http.ResponseWriter) (statusCode int, err err
 	return
 }
 
-// WriteResponse writes a http.Response to the exchange.
-func (e *Exchange) WriteResponse(r *http.Response) (err error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	if err = e.writeResponseData(r.StatusCode, r.ContentLength, r.Header); err == nil {
+// WriteResponse writes a http.Response to the Conn.
+func (conn *Conn) WriteResponse(r *http.Response) (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	if err = conn.writeResponseDataLocked(r.StatusCode, r.ContentLength, r.Header); err == nil {
 		if err == nil && r.Body != nil {
 			if r.ContentLength > 0 {
-				_, err = io.CopyN(e, r.Body, r.ContentLength)
+				_, err = io.CopyN(conn, r.Body, r.ContentLength)
 			} else {
-				_, err = e.readFrom(r.Body)
+				_, err = conn.readFrom(r.Body)
 			}
 		}
-		if flushErr := e.flush(); err == nil {
+		if flushErr := conn.flushLocked(); err == nil {
 			err = flushErr
 		}
 	}
@@ -868,44 +868,44 @@ func (e *Exchange) WriteResponse(r *http.Response) (err error) {
 }
 
 // WriteResponseData writes a RAP response header.
-func (e *Exchange) WriteResponseData(code int, contentLength int64, header http.Header) (err error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	return e.writeResponseData(code, contentLength, header)
+func (conn *Conn) WriteResponseData(code int, contentLength int64, header http.Header) (err error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.writeResponseDataLocked(code, contentLength, header)
 }
 
-func (e *Exchange) writeResponseData(code int, contentLength int64, header http.Header) (err error) {
-	if err = e.writeStart(); err == nil {
-		err = e.fdw.WriteResponse(code, contentLength, header)
+func (conn *Conn) writeResponseDataLocked(code int, contentLength int64, header http.Header) (err error) {
+	if err = conn.writeStart(); err == nil {
+		err = conn.fdw.WriteResponse(code, contentLength, header)
 	}
 	return
 }
 
 // Serve waits for a start frame and then invokes the given http.Handler.
-func (e *Exchange) Serve(h http.Handler) (err error) {
-	defer e.closeIfNotHijacked()
-	if err = e.LoadFrameReader(); err == nil {
-		if e.fdr.Header().HasHead() {
-			switch rt := e.fp.ReadRecordType(); rt {
+func (conn *Conn) Serve(h http.Handler) (err error) {
+	defer conn.closeIfNotHijacked()
+	if err = conn.LoadFrameReader(); err == nil {
+		if conn.fdr.Header().HasHead() {
+			switch rt := conn.fp.ReadRecordType(); rt {
 			case RecordTypeHTTPRequest:
 				var req *http.Request
-				req, err = e.fp.ReadRequest()
+				req, err = conn.fp.ReadRequest()
 				if err == nil {
-					// log.Printf("rap.Exchange.Serve(): %+v\n", req)
-					req.Body = e
-					h.ServeHTTP(&ResponseWriter{Exchange: e}, req)
+					// log.Printf("rap.Conn.Serve(): %+v\n", req)
+					req.Body = conn
+					h.ServeHTTP(&ResponseWriter{Conn: conn}, req)
 					// if the handler left things in the buffer, flush it
-					if flushErr := e.Flush(); err == nil {
+					if flushErr := conn.Flush(); err == nil {
 						err = flushErr
 					}
 				}
 			case RecordTypeHijacked:
-				e.hijacking()
+				conn.hijacking()
 			default:
 				err = errors.Wrapf(ErrUnhandledRecordType{}, "type code '%02x'", int(rt))
 			}
 		} else {
-			err = errors.Wrapf(ErrMissingFrameHead{}, "%v", e.fdr)
+			err = errors.Wrapf(ErrMissingFrameHead{}, "%v", conn.fdr)
 		}
 	}
 	return
@@ -914,53 +914,53 @@ func (e *Exchange) Serve(h http.Handler) (err error) {
 // Hijack lets the caller take over the connection.
 // After a call to Hijack the HTTP server library
 // will not do anything else with the connection.
-func (e *Exchange) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	e.wmu.Lock()
-	defer e.wmu.Unlock()
-	if e.hijacking() {
-		e.starting()
-		fd := NewFrameDataID(e.ID)
+func (conn *Conn) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	if conn.hijacking() {
+		conn.starting()
+		fd := NewFrameDataID(conn.ID)
 		fd.WriteRecordType(RecordTypeHijacked)
-		return e, bufio.NewReadWriter(bufio.NewReader(e), bufio.NewWriter(e)), e.writeFrame(fd)
+		return conn, bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)), conn.writeFrame(fd)
 	}
 	return nil, nil, errors.Errorf("already hijacked")
 }
 
-type exchangeAddr struct{}
+type connAddr struct{}
 
-func (exchangeAddr) Network() string { return "rap" }
-func (exchangeAddr) String() string  { return "rap" }
+func (connAddr) Network() string { return "rap" }
+func (connAddr) String() string  { return "rap" }
 
 // LocalAddr returns the local network address stub.
-func (e *Exchange) LocalAddr() net.Addr {
-	return exchangeAddr{}
+func (conn *Conn) LocalAddr() net.Addr {
+	return connAddr{}
 }
 
 // RemoteAddr returns remote network address stub.
-func (e *Exchange) RemoteAddr() net.Addr {
-	return exchangeAddr{}
+func (conn *Conn) RemoteAddr() net.Addr {
+	return connAddr{}
 }
 
 // SetDeadline sets the read and write deadlines associated
 // with the connection. It is equivalent to calling both
 // SetReadDeadline and SetWriteDeadline.
-func (e *Exchange) SetDeadline(t time.Time) error {
-	if e.hasLocalSentFinal() {
+func (conn *Conn) SetDeadline(t time.Time) error {
+	if conn.hasLocalSentFinal() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-	e.readDeadline.set(t)
-	e.writeDeadline.set(t)
+	conn.readDeadline.set(t)
+	conn.writeDeadline.set(t)
 	return nil
 }
 
 // SetReadDeadline sets the deadline for future Read calls
 // and any currently-blocked Read call.
 // A zero value for t means Read will not time out.
-func (e *Exchange) SetReadDeadline(t time.Time) error {
-	if e.hasLocalSentFinal() {
+func (conn *Conn) SetReadDeadline(t time.Time) error {
+	if conn.hasLocalSentFinal() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-	e.readDeadline.set(t)
+	conn.readDeadline.set(t)
 	return nil
 }
 
@@ -969,10 +969,10 @@ func (e *Exchange) SetReadDeadline(t time.Time) error {
 // Even if write times out, it may return n > 0, indicating that
 // some of the data was successfully written.
 // A zero value for t means Write will not time out.
-func (e *Exchange) SetWriteDeadline(t time.Time) error {
-	if e.hasLocalSentFinal() {
+func (conn *Conn) SetWriteDeadline(t time.Time) error {
+	if conn.hasLocalSentFinal() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-	e.writeDeadline.set(t)
+	conn.writeDeadline.set(t)
 	return nil
 }

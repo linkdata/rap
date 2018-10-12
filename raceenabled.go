@@ -11,5 +11,5 @@ func init() {
 	// having too many running at a time won't improve testing,
 	// but it will dump a lot of irrelevant goroutine data on
 	// panics and timeouts.
-	MaxExchangeID = ExchangeID(1024)
+	MaxConnID = ConnID(1024)
 }

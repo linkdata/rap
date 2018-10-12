@@ -45,7 +45,7 @@ func Test_FrameParser_ReadRequest_IllegalURL(t *testing.T) {
 
 func Test_FrameParser_ProxyResponse(t *testing.T) {
 	fd := NewFrameData()
-	fd.WriteHeader(MaxExchangeID)
+	fd.WriteHeader(MaxConnID)
 	fd.WriteResponse(200, 0, nil)
 	fp := NewFrameParser(fd)
 	rr := &httptest.ResponseRecorder{}
@@ -53,7 +53,7 @@ func Test_FrameParser_ProxyResponse(t *testing.T) {
 	fp.ProxyResponse(rr)
 
 	fd.Clear()
-	fd.WriteHeader(MaxExchangeID)
+	fd.WriteHeader(MaxConnID)
 	h := http.Header{}
 	h.Add("Status", "Meh")
 	h.Add("Foo", "bar")
@@ -68,7 +68,7 @@ func Test_FrameParser_ProxyResponse(t *testing.T) {
 	assert.Equal(t, "234", rr.Header().Get("Content-Length"))
 
 	fd.Clear()
-	fd.WriteHeader(MaxExchangeID)
+	fd.WriteHeader(MaxConnID)
 	fd.WriteRecordType(RecordTypeHTTPResponse)
 	fd.WriteLen(200)
 	fd.WriteString("Content-Length")

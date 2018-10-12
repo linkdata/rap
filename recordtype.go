@@ -18,7 +18,7 @@ const (
 	RecordTypeServicePause = RecordType(0x05)
 	// RecordTypeServiceResume lets a RAP client resume normal operations after a pause
 	RecordTypeServiceResume = RecordType(0x06)
-	// RecordTypeHijacked is sent when an Exchange has been Hijack()'ed
+	// RecordTypeHijacked is sent when a Conn has been Hijack()'ed
 	RecordTypeHijacked = RecordType(0x07)
 	// RecordTypeUserFirst is the first record type value reserved for user records
 	RecordTypeUserFirst = RecordType(0x80)
