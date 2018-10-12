@@ -34,7 +34,7 @@ var (
 // net.Listener (if there is one), and should not be nil.
 type MakePipe func() (c1, c2 net.Conn, stop func(), err error)
 
-// TestConn tests that a net.Conn implementation properly satisfies the interface.
+// testNetConn tests that a net.Conn implementation properly satisfies the interface.
 // The tests should not produce any false positives, but may experience
 // false negatives. Thus, some issues may only be detected when the test is
 // run multiple times. For maximal effectiveness, run the tests under the

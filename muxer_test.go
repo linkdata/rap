@@ -64,11 +64,11 @@ type muxerTester struct {
 	isClosed               int32
 	injectFramesAtClose    bool
 	expectServerError      error
-	expectConnError        error
-	expectConnCloseError   error
+	expectClientError      error
+	expectClientCloseError error
 	expectServerCloseError error
 	serverDone             chan struct{}
-	connDone               chan struct{}
+	clientDone             chan struct{}
 }
 
 func (mt *muxerTester) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -113,19 +113,19 @@ func (mt *muxerTester) Start() {
 	go func(ct *muxerTester) {
 		wg.Done()
 		err := ct.muxClient.ServeHTTP(nil)
-		if ct.expectConnError != nil {
+		if ct.expectClientError != nil {
 			assert.NotNil(ct.t, err)
-			assert.Equal(ct.t, ct.expectConnError.Error(), errors.Cause(err).Error())
+			assert.Equal(ct.t, ct.expectClientError.Error(), errors.Cause(err).Error())
 		} else {
 			if atomic.LoadInt32(&ct.isClosed) == 0 {
-				log.Println("ct.conn.ServeHTTP(ct) premature exit")
+				log.Println("ct.muxClient.ServeHTTP(ct) premature exit")
 				assert.NoError(ct.t, err)
 			}
 			if err != nil && !isClosedError(err) {
 				assert.NoError(ct.t, err)
 			}
 		}
-		close(ct.connDone)
+		close(ct.clientDone)
 	}(mt)
 	wg.Wait()
 }
@@ -143,8 +143,8 @@ func (mt *muxerTester) Close() {
 			mt.muxClient.ExchangeWrite(nil)
 		}
 		err := mt.a.WriteCloser.Close()
-		if mt.expectConnCloseError != nil {
-			assert.Equal(mt.t, mt.expectConnCloseError.Error(), errors.Cause(err).Error())
+		if mt.expectClientCloseError != nil {
+			assert.Equal(mt.t, mt.expectClientCloseError.Error(), errors.Cause(err).Error())
 			assert.Error(mt.t, err)
 		} else {
 			assert.NoError(mt.t, err)
@@ -157,7 +157,7 @@ func (mt *muxerTester) Close() {
 			assert.NoError(mt.t, err)
 		}
 		<-mt.serverDone
-		<-mt.connDone
+		<-mt.clientDone
 	}
 }
 
@@ -170,7 +170,7 @@ func newMuxerTesterNotStarted(t *testing.T) (mt *muxerTester) {
 		muxClient:  NewMuxer(a),
 		muxServer:  NewMuxer(b),
 		serverDone: make(chan struct{}),
-		connDone:   make(chan struct{}),
+		clientDone: make(chan struct{}),
 	}
 	mt.muxClient.StatsCollector = a
 	mt.muxServer.StatsCollector = b
@@ -219,7 +219,7 @@ func Test_Muxer_String(t *testing.T) {
 	}
 	mt := newMuxerTester(t)
 	defer mt.Close()
-	expected := fmt.Sprintf("[Conn %x]", mt.muxClient.serialNumber)
+	expected := fmt.Sprintf("[Muxer %x]", mt.muxClient.serialNumber)
 	assert.Equal(t, expected, mt.muxClient.String())
 	assert.Equal(t, int(MaxExchangeID)+1, len(mt.muxClient.exchangeLookup))
 	assert.Equal(t, int(MaxExchangeID), cap(mt.muxClient.exchanges))
@@ -296,7 +296,7 @@ func Test_Muxer_big_request_response(t *testing.T) {
 	mt.InjectRequestNoErrors(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, 0xf0000))))
 }
 
-func Test_Muxer_conncontrol_ping_pong(t *testing.T) {
+func Test_Muxer_muxercontrol_ping_pong(t *testing.T) {
 	mt := newMuxerTester(t)
 	defer mt.Close()
 	assert.Zero(t, mt.muxClient.lastPingSent)
@@ -320,7 +320,7 @@ func Test_Muxer_conncontrol_ping_pong(t *testing.T) {
 	}
 }
 
-func Test_Muxer_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
+func Test_Muxer_muxercontrol_pinghandler_closed_before_pong(t *testing.T) {
 	mt := newMuxerTester(t)
 	defer mt.Close()
 	mt.expectServerError = serverClosedError{}
@@ -333,11 +333,11 @@ func Test_Muxer_conncontrol_pinghandler_closed_before_pong(t *testing.T) {
 	assert.Equal(t, serverClosedError{}, errors.Cause(err))
 }
 
-func Test_Muxer_conncontrol_reserved(t *testing.T) {
+func Test_Muxer_muxercontrol_reserved(t *testing.T) {
 	mt := newMuxerTesterNotStarted(t)
 	defer mt.Close()
 	mt.expectServerError = ProtocolError{}
-	mt.expectConnError = io.EOF
+	mt.expectClientError = io.EOF
 	mt.Start()
 	fd := FrameDataAlloc()
 	fd.WriteMuxerControl(muxerControlReserved001)
@@ -345,10 +345,10 @@ func Test_Muxer_conncontrol_reserved(t *testing.T) {
 	<-mt.serverDone
 }
 
-func Test_Muxer_conncontrol_panic(t *testing.T) {
+func Test_Muxer_muxercontrol_panic(t *testing.T) {
 	mt := newMuxerTesterNotStarted(t)
 	defer mt.Close()
-	mt.expectConnError = io.EOF
+	mt.expectClientError = io.EOF
 	mt.expectServerError = PanicError{}
 	mt.Start()
 	fd := FrameDataAlloc()
@@ -367,7 +367,7 @@ func Test_Muxer_ServeHTTP_write_error(t *testing.T) {
 		failOnWrite: true,
 		WriteCloser: mt.a.WriteCloser,
 	}
-	mt.expectConnError = errFailWriter
+	mt.expectClientError = errFailWriter
 	mt.expectServerError = io.ErrUnexpectedEOF
 	mt.Start()
 	mt.muxClient.Ping()
@@ -380,8 +380,8 @@ func Test_Muxer_ServeHTTP_write_close_error(t *testing.T) {
 		failOnClose: true,
 		WriteCloser: mt.a.WriteCloser,
 	}
-	mt.expectConnCloseError = errFailWriter
-	mt.expectConnError = errFailWriter
+	mt.expectClientCloseError = errFailWriter
+	mt.expectClientError = errFailWriter
 	mt.Start()
 	mt.muxClient.Ping()
 	mt.Close()

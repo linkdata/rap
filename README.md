@@ -6,7 +6,7 @@ The REST Aggregation Protocol, or *RAP* for short, is an asymmetric HTTP and Web
 
 ## Motivation
 
-Parsing HTTP and correctly implementing all the features of a HTTP server uses up significant resources on the server. Simply handling the TCP protocol requirements for tens of thousands of connections can consume significant CPU resources on the server.
+Parsing HTTP and correctly implementing all the features of a HTTP server uses up significant resources on the server. Simply handling the TCP protocol requirements for tens of thousands of network connections can consume significant CPU resources on the server.
 
 Traditional web applications simply accept this as an unavoidable fact and focus on finding ways to add more servers. But that brings it's own set of problems and isn't a viable solution for a CPU-bound server where scaling out isn't an option.
 
@@ -65,7 +65,7 @@ Set one or more string lookups for a *muxer*. Once set, a string lookup value mu
 
 ### Set route record (0x02)
 
-Set one or more route lookups for a connection. Once set, a route lookup value must not be changed. Only the upstream server may send this message to a connected gateway.
+Set one or more route lookups for a *muxer*. Once set, a route lookup value must not be changed. This message may only be sent from the upstream server to a gateway.
 * One or more of:
   * `length` Lookup index. Must be a value greater than zero. Must not previously have been set.
   * `string` Host name. If the empty string (`0x00 0x01`), route applies to all host names.
@@ -92,7 +92,7 @@ Sent from the upstream server in response to a HTTP request record.
 
 ### Service pause record (0x05)
 
-Sent from the upstream server to signal that no new requests may be initiated. New requests that cannot be served from cache will have the status code and reason provided. If a record body is provided, it should be provided as the response body. Note that this record applies to all connections from the client until a *service resume* record is received.
+Sent from the upstream server to signal that no new requests may be initiated. New requests that cannot be served from cache will have the status code and reason provided. If a record body is provided, it should be provided as the response body. Note that this record applies to all *muxers* from that client until a *service resume* record is received.
 This record has the same definition as the *HTTP response* record, and is parsed the same.
 
 ### Service resume record (0x06)
@@ -140,7 +140,7 @@ A string encoding starts with a `length`. If the length is nonzero, then that ma
 A zero length signals special case handling and is followed by another `length` value, interpreted as follows:
 * `0x00` Null string. Used to mark the end of a list of strings or signal other special cases.
 * `0x01` Empty string, i.e. `""`.
-* Other values refer to entries in the connection string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the connection must be closed.
+* Other values refer to entries in the *muxer* string lookup table for received strings. If an undefined string lookup value is seen, it is a fatal error and the *muxer* must be closed.
 
 ### `kvv`
 

@@ -4,7 +4,7 @@ package rap
 type RecordType byte
 
 const (
-	// RecordTypeInvalid is not usable and if sent will abort the connection
+	// RecordTypeInvalid is not usable and if sent will abort the muxer
 	RecordTypeInvalid = RecordType(0x00)
 	// RecordTypeSetString sets an entry in the string lookup table for sending
 	RecordTypeSetString = RecordType(0x01)

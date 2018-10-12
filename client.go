@@ -14,9 +14,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Client connects to a RAP server, maintaining one or more Muxers.
+// Client dials a RAP server, maintaining one or more Muxers.
 type Client struct {
-	Addr         string        // where to connect
+	Addr         string        // the address to dial
 	DialTimeout  time.Duration // dialing timeout
 	ReadTimeout  time.Duration // read timeout (reading the request)
 	WriteTimeout time.Duration // write timeout (writing the response)
@@ -28,9 +28,9 @@ type Client struct {
 	muxers       []*Muxer
 }
 
-// NewClient starts a new RAP Client. The Client will establish TCP connections
+// NewClient starts a new RAP Client. The Client will establish network connections
 // to the RAP Server at the given address as needed. This implies that no
-// connection will be made immediately.
+// network connection will be made immediately.
 func NewClient(addr string) *Client {
 	return &Client{
 		Addr:        addr,
@@ -39,7 +39,7 @@ func NewClient(addr string) *Client {
 	}
 }
 
-// Close closes all connections.
+// Close closes all Muxers.
 func (c *Client) Close() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -155,7 +155,7 @@ func (c *Client) NewExchangeMayDial() (e *Exchange, err error) {
 	for e == nil {
 		bestMux := c.selectBestMux()
 		if bestMux == nil {
-			// not enough free, make a new connection
+			// not enough free, dial a new one
 			if c.lastAttempt.Before(startTime) {
 				bestMux = c.dialLocked()
 			}

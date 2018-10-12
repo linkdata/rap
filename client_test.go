@@ -45,7 +45,7 @@ func Test_Client_server_seems_offline(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func Test_Client_connect_and_close(t *testing.T) {
+func Test_Client_dial_and_close(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)

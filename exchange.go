@@ -398,7 +398,7 @@ func (e *Exchange) Buffered() int {
 }
 
 // Implements io.Reader for Exchange.
-// Used when copying data from a RAP connection to a HTTP body.
+// Used when copying data from a Muxer to a HTTP body.
 func (e *Exchange) Read(p []byte) (n int, err error) {
 	e.rmu.Lock()
 	defer e.rmu.Unlock()
@@ -413,7 +413,7 @@ func (e *Exchange) read(p []byte) (n int, err error) {
 }
 
 // ReadFrom implements io.ReaderFrom for Exchange body data.
-// Used when copying data from a HTTP body to a RAP connection.
+// Used when copying data from a HTTP body to a Muxer.
 func (e *Exchange) ReadFrom(r io.Reader) (n int64, err error) {
 	if r == nil {
 		return 0, errors.WithStack(io.EOF)

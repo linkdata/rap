@@ -18,19 +18,19 @@ type StatsCollector interface {
 	AddBytesRead(int64)
 }
 
-// ErrTimeoutWaitingForReader means the reader timed out when closing the connection.
+// ErrTimeoutWaitingForReader means the reader timed out when closing the Muxer.
 type ErrTimeoutWaitingForReader struct{}
 
 func (ErrTimeoutWaitingForReader) Error() string { return "timeout waiting for reader at close" }
 
 // ProtocolError is the error type used for reporting protocol errors,
-// all of which are fatal to a connection.
+// all of which are fatal to a Muxer.
 type ProtocolError struct{}
 
 func (e ProtocolError) Error() string { return "protocol error" }
 
 // PanicError is the error type used for reporting peer panic errors,
-// all of which are fatal to a connection.
+// all of which are fatal to a muxer.
 type PanicError struct{}
 
 func (e PanicError) Error() string { return "peer panic" }
@@ -51,7 +51,7 @@ var muxerControlHandlers = map[MuxerControl]muxerControlHandler{
 // Muxer multiplexes concurrent requests-response Exchanges.
 // It maintains the set of ExchangeID's that free and may use them in any order.
 type Muxer struct {
-	io.ReadWriteCloser // The I/O endpoint, usually a TCP connection
+	io.ReadWriteCloser // The I/O endpoint
 	StatsCollector     // Where to report statistics (optional)
 	ReadTimeout        time.Duration
 	WriteTimeout       time.Duration
@@ -74,7 +74,7 @@ type Muxer struct {
 var muxerNextSerialNumber uint32
 
 func (mux *Muxer) String() string {
-	return fmt.Sprintf("[Conn %x]", mux.serialNumber)
+	return fmt.Sprintf("[Muxer %x]", mux.serialNumber)
 }
 
 // NewMuxer creates a new Muxer and initializes it.
@@ -130,7 +130,7 @@ func muxerControlPanicHandler(mux *Muxer, fd FrameData) error {
 
 func muxerControlReservedHandler(mux *Muxer, fd FrameData) error {
 	defer FrameDataFree(fd)
-	return errors.Wrapf(ProtocolError{}, "unknown conn control frame %v", fd.Header())
+	return errors.Wrapf(ProtocolError{}, "unknown Muxer control frame %v", fd.Header())
 }
 
 // Ping sends a ping frame and returns without waiting for response.
@@ -193,7 +193,7 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 		}
 
 		if err != nil {
-			// log.Print("Conn.ReadFrom(): fd.ReadFrom(): ", err.Error())
+			// log.Print("Muxer.ReadFrom(): fd.ReadFrom(): ", err.Error())
 			FrameDataFree(fd)
 			break
 		}
@@ -303,7 +303,7 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 	return
 }
 
-// ServeHTTP processes incoming and outgoing frames for the Conn until closed.
+// ServeHTTP processes incoming and outgoing frames for the Muxer until closed.
 func (mux *Muxer) ServeHTTP(h http.Handler) (err error) {
 	mux.Handler = h
 
@@ -343,7 +343,7 @@ func (mux *Muxer) closeDoneChanLocked() bool {
 	}
 }
 
-// Close closes the Conn immediately.
+// Close closes the Muxer immediately.
 func (mux *Muxer) Close() (err error) {
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
@@ -407,7 +407,7 @@ func (mux *Muxer) NewExchangeWait(d time.Duration) (e *Exchange) {
 // AvailableExchanges returns the number of Exchanges that are
 // currently able to be returned from NewExchange(). Note that
 // the value may not be exact if there are other goroutines using
-// the Conn.
+// the Muxer.
 func (mux *Muxer) AvailableExchanges() (exchangeCount int) {
 	exchangeCount = len(mux.exchanges)
 	lastID := atomic.LoadInt32(&mux.exchangeLastID)
@@ -449,7 +449,7 @@ func (mux *Muxer) ExchangeWrite(fd FrameData) error {
 	}
 }
 
-// ExchangeRelease returns the Exchange to the Conn, allowing it to
+// ExchangeRelease returns the Exchange to the Muxer, allowing it to
 // be re-used for other requests.
 func (mux *Muxer) ExchangeRelease(e *Exchange) {
 	select {

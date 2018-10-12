@@ -15,7 +15,7 @@ type serverClosedError struct{}
 
 func (serverClosedError) Error() string { return "server closed" }
 
-// Server listens for incoming RAP connections and creates Muxers for them.
+// Server listens for incoming network connections and creates Muxers for them.
 type Server struct {
 	Addr          string        // TCP address to listen on, ":10111" if empty
 	Handler       http.Handler  // HTTP handler to invoke
@@ -34,8 +34,8 @@ type Server struct {
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
-// connections. It's used by ListenAndServe and ListenAndServeTLS so
-// dead TCP connections (e.g. closing laptop mid-download) eventually
+// network connections. It's used by ListenAndServe and ListenAndServeTLS so
+// dead network connections (e.g. closing laptop mid-download) eventually
 // go away.
 type tcpKeepAliveListener struct {
 	*net.TCPListener
@@ -75,7 +75,7 @@ func (srv *Server) getListenAddr(addr string) string {
 }
 
 // ListenAndServe listens on the TCP network address srv.Addr and then calls
-// Serve to handle requests on incoming connections.
+// Serve to handle requests on incoming network connections.
 // If srv.Addr is blank, ":10111" is used.
 func (srv *Server) ListenAndServe() (err error) {
 	listener, err := srv.Listen(srv.getListenAddr(srv.Addr))
@@ -85,7 +85,7 @@ func (srv *Server) ListenAndServe() (err error) {
 	return
 }
 
-// Serve accepts incoming connections on the Listener l, creating a
+// Serve accepts incoming network connections on the Listener l, creating a
 // new service goroutine for each.  The service goroutines read requests and
 // then call srv.Handler to reply to them.
 func (srv *Server) Serve(l net.Listener) error {
@@ -111,7 +111,7 @@ func (srv *Server) Serve(l net.Listener) error {
 	srv.serveErrors = make(map[string]int)
 	srv.serveErrorsMu.Unlock()
 	for {
-		// wait for active connections to fall to allowed levels
+		// wait for active network connections to fall to allowed levels
 		rwc, e := l.Accept()
 		if e != nil {
 			select {
@@ -243,7 +243,7 @@ func (srv *Server) closeListenersLocked() error {
 	return err
 }
 
-// Close immediately closes all active connections.
+// Close immediately closes all active network connections and Muxers.
 func (srv *Server) Close() error {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()

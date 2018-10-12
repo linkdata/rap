@@ -19,8 +19,8 @@ func init() {
 	if ProtocolMaxExchangeID < 1 {
 		panic("ProtocolMaxExchangeID < 1")
 	}
-	if ProtocolMaxExchangeID >= ConnExchangeID {
-		panic("ProtocolMaxExchangeID >= ConnExchangeID")
+	if ProtocolMaxExchangeID >= MuxerExchangeID {
+		panic("ProtocolMaxExchangeID >= MuxerExchangeID")
 	}
 	if MaxExchangeID < 0 {
 		panic("MaxExchangeID < 0")

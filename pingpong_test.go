@@ -13,7 +13,7 @@ import (
 
 func Benchmark_single_4k_frame_latency(b *testing.B) {
 	pipedAutobahnServer(nil, func(addr string) {
-		// Connect to the server
+		// dial the server
 		u := "ws://" + addr + "/f"
 		ws, _, err := websocket.DefaultDialer.Dial(u, nil)
 		if err != nil {
@@ -44,7 +44,7 @@ func Benchmark_single_4k_frame_latency(b *testing.B) {
 
 func Benchmark_streamed_4k_frame_latency(b *testing.B) {
 	pipedAutobahnServer(nil, func(addr string) {
-		// Connect to the server
+		// dial the server
 		u := "ws://" + addr + "/f"
 		ws, _, err := websocket.DefaultDialer.Dial(u, nil)
 		if err != nil {
