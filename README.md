@@ -18,15 +18,15 @@ I looked to HTTP/2 as a likely candidate for multiplexing HTTP requests, but fou
 
 ## Overview
 
-One or more RAP *gateways* are connected to a single upstream server. The gateways receive incoming requests using any protocol it supports (HTTP(S), HTTP/2, SPDY etc) and multiplexes these onto one or more RAP *connections*. The gateways need no configuration data except for the upstream destination address.
+One or more RAP *gateways* are connected to a single upstream server. The gateways receive incoming requests using any protocol it supports (HTTP(S), HTTP/2, SPDY etc) and multiplexes these onto one or more RAP *muxers*. The gateways need no configuration data except for the upstream destination address.
 
-A RAP *connection* multiplexes concurrent requests-response *exchanges*, identified by a (small) unsigned integer. The gateway maintains a set of which exchange identifiers are free and may use them in any order. A gateway may open as many connections as it needs, but should strive to keep as few as possible.
+A RAP *muxer* multiplexes concurrent requests-response *exchanges*, identified by a (small) unsigned integer. The gateway maintains a set of which exchange identifiers are free and may use them in any order. A gateway may open as many muxers as it needs, but should strive to keep as few as possible.
 
-A RAP *exchange* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-exchange flow control mechanism, which is a simple transmission window with ACKs from the receiver. Exchanges inject *frames* into the *connection* for transmission.
+A RAP *exchange* maintains the state of a request-response sequence or WebSocket connection. It also handles the per-exchange flow control mechanism, which is a simple transmission window with ACKs from the receiver. Exchanges inject *frames* into the *muxer* for transmission.
 
-A RAP *frame* is the basic structure within a connection. It consists of a *frame header* followed by the *frame body* data bytes.
+A RAP *frame* is the basic structure within a *muxer* data stream. It consists of a *frame header* followed by the *frame body* data bytes.
 
-A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a connection control frame and the control field is a 3-bit MSB value specifying the frame type:
+A RAP *frame header* is 32 bits, divided into a 16-bit Size value, a 3-bit control field and a 13-bit exchange Index. If Index is 0x1fff (highest possible), the frame is a *muxer* control frame and the control field is a 3-bit MSB value specifying the frame type:
 * 000 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
 * 001 - reserved, but expect Size to reflect payload size
 * 010 - Ping, Size is bytes of payload data to return in a Pong
@@ -53,11 +53,11 @@ A RAP *record* type defines how the data bytes are encoded. The records have fie
 
 ### Invalid record (0x00)
 
-Never a valid record to send. If received, the connection is terminated immediately.
+Never a valid record to send. If received, the *muxer* is terminated immediately.
 
 ### Set string record (0x01)
 
-Set one or more string lookups for a connection. Once set, a string lookup value must not be changed. Note that each side maintains both it's own lookup table and the peer's lookup table. Receiving this record adds to the table used when sending strings to the peer. When receiving strings, each side must be able to resolve lookups that has previously been sent.
+Set one or more string lookups for a *muxer*. Once set, a string lookup value must not be changed. Note that each side maintains both it's own lookup table and the peer's lookup table. Receiving this record adds to the table used when sending strings to the peer. When receiving strings, each side must be able to resolve lookups that has previously been sent.
 * One or more of:
   * `length` Lookup index. Must be a value greater than 1. Must not previously have been set.
   * `string` Lookup string. Must not be a zero-length string.

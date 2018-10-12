@@ -61,11 +61,11 @@ func Test_Client_connect_and_close(t *testing.T) {
 	assert.NotZero(t, c.AvailableExchanges())
 	defer e2.Close()
 	if e1 != nil && e2 != nil {
-		assert.Equal(t, e1.conn, e2.conn)
+		assert.Equal(t, e1.mux, e2.mux)
 	}
 }
 
-func Test_Client_exhaust_conn(t *testing.T) {
+func Test_Client_exhaust_muxer(t *testing.T) {
 	st := newSrvTester(t)
 	defer st.Close()
 	c := NewClient(st.srv.Addr)
@@ -75,35 +75,35 @@ func Test_Client_exhaust_conn(t *testing.T) {
 
 	grabbed := make(chan *Exchange, int(MuxerExchangeID)*2+1)
 	e, err := c.NewExchangeMayDial()
-	firstConn := c.getMux()
+	firstMux := c.getMux()
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
-	assert.Equal(t, int(MaxExchangeID)-1, firstConn.AvailableExchanges())
+	assert.Equal(t, int(MaxExchangeID)-1, firstMux.AvailableExchanges())
 	for e != nil {
 		grabbed <- e
 		e = c.NewExchange()
 	}
-	assert.Equal(t, int(MaxExchangeID), cap(firstConn.exchanges))
-	assert.Equal(t, 0, len(firstConn.exchanges))
-	assert.Equal(t, 0, firstConn.AvailableExchanges())
+	assert.Equal(t, int(MaxExchangeID), cap(firstMux.exchanges))
+	assert.Equal(t, 0, len(firstMux.exchanges))
+	assert.Equal(t, 0, firstMux.AvailableExchanges())
 	assert.Equal(t, int(MaxExchangeID), len(grabbed))
 	e = c.NewExchange()
 	assert.Nil(t, e)
 
-	// This will create a new conn since the old is all in use
+	// This will create a new Muxer since the old is all in use
 	e, err = c.NewExchangeMayDial()
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
-	secondConn := c.getMux()
-	assert.NotEqual(t, firstConn.serialNumber, secondConn.serialNumber)
-	assert.Equal(t, int(MaxExchangeID), cap(secondConn.exchanges))
-	assert.Equal(t, int(MaxExchangeID)-1, secondConn.AvailableExchanges())
+	secondMux := c.getMux()
+	assert.NotEqual(t, firstMux.serialNumber, secondMux.serialNumber)
+	assert.Equal(t, int(MaxExchangeID), cap(secondMux.exchanges))
+	assert.Equal(t, int(MaxExchangeID)-1, secondMux.AvailableExchanges())
 
-	// close the exchange, should go back to the secondConn
+	// close the exchange, should go back to the secondMux
 	e.Close()
 	timer1 := time.NewTimer(time.Second * 5)
 	defer timer1.Stop()
-	for secondConn.AvailableExchanges() != int(MaxExchangeID) {
+	for secondMux.AvailableExchanges() != int(MaxExchangeID) {
 		select {
 		case <-timer1.C:
 			assert.FailNow(t, "exchange did not release in time")
@@ -111,17 +111,17 @@ func Test_Client_exhaust_conn(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	assert.Equal(t, int(MaxExchangeID), secondConn.AvailableExchanges())
+	assert.Equal(t, int(MaxExchangeID), secondMux.AvailableExchanges())
 
-	// Now free all the Exchanges in the old conn
+	// Now free all the Exchanges in the old mux
 	for len(grabbed) > 0 {
 		e = <-grabbed
 		e.Close()
 		assert.NotNil(t, e)
-		assert.Equal(t, firstConn.serialNumber, e.getConn().serialNumber)
+		assert.Equal(t, firstMux.serialNumber, e.getMux().serialNumber)
 	}
 
-	// Grab all available exchanges, should be two conn's worth available eventually
+	// Grab all available exchanges, should be two Muxers worth available eventually
 	e = c.NewExchange()
 	assert.NotNil(t, e)
 	timer2 := time.NewTimer(time.Second * 5)

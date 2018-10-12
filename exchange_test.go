@@ -27,7 +27,7 @@ type exchangeTester struct {
 	releasedCh  chan struct{}
 	ackFn       func(*Exchange)
 	finFn       func(*Exchange)
-	conn        ExchangeConnection
+	mux         ExchangeMuxer
 	Exchange    *Exchange
 	handler     http.Handler
 	lastWritten FrameData
@@ -156,7 +156,7 @@ func newExchangeTester(t *testing.T) *exchangeTester {
 		t:          t,
 		releasedCh: make(chan struct{}),
 	}
-	et.conn = newExchangeTesterWriter(et)
+	et.mux = newExchangeTesterWriter(et)
 	et.Exchange = NewExchange(et, MaxExchangeID)
 	et.Exchange.OnRecycle(et.ExchangeRelease)
 	et.wg.Add(1)
@@ -167,10 +167,10 @@ func newExchangeTesterUsingClient(t *testing.T, c *Client) *exchangeTester {
 	exchange, e := c.NewExchangeMayDial()
 	assert.NoError(t, e)
 	assert.NotNil(t, exchange)
-	assert.NotNil(t, exchange.conn)
+	assert.NotNil(t, exchange.mux)
 	et := &exchangeTester{
 		t:        t,
-		conn:     exchange.conn,
+		mux:      exchange.mux,
 		Exchange: exchange,
 	}
 	exchange.OnRecycle(et.ExchangeRelease)
@@ -179,14 +179,14 @@ func newExchangeTesterUsingClient(t *testing.T, c *Client) *exchangeTester {
 }
 
 func (et *exchangeTester) isWriteClosed() bool {
-	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+	if etw, ok := et.mux.(*exchangeTesterWriter); ok {
 		return etw.isWriteClosed()
 	}
 	return false
 }
 
 func (et *exchangeTester) closeWrite() bool {
-	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+	if etw, ok := et.mux.(*exchangeTesterWriter); ok {
 		return etw.closingWrite()
 	}
 	return false
@@ -204,7 +204,7 @@ func (et *exchangeTester) Released() bool {
 }
 
 func (et *exchangeTester) CloseWrite() {
-	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+	if etw, ok := et.mux.(*exchangeTesterWriter); ok {
 		etw.CloseWrite()
 	}
 }
@@ -229,7 +229,7 @@ func (et *exchangeTester) ExchangeWrite(fd FrameData) error {
 		if fd != nil && fd.Header().HasPayload() {
 			et.lastWritten = fd
 		}
-		return et.conn.ExchangeWrite(fd)
+		return et.mux.ExchangeWrite(fd)
 	}
 	return io.ErrClosedPipe
 }
@@ -239,12 +239,12 @@ func (et *exchangeTester) ExchangeRelease(e *Exchange) {
 }
 
 func (et *exchangeTester) ExchangeAbortChannel() <-chan struct{} {
-	return et.conn.ExchangeAbortChannel()
+	return et.mux.ExchangeAbortChannel()
 }
 
 func (et *exchangeTester) Close() {
 	et.Exchange.Close()
-	if etw, ok := et.conn.(*exchangeTesterWriter); ok {
+	if etw, ok := et.mux.(*exchangeTesterWriter); ok {
 		etw.CloseWrite()
 		etw.WaitForClose()
 	}
@@ -875,7 +875,7 @@ func Test_Exchange_SetDeadline_on_closed(t *testing.T) {
 	et.Exchange.recycle()
 }
 
-func makeConnPipe() (e1, e2 net.Conn, stop func(), err error) {
+func makeNetConnPipe() (e1, e2 net.Conn, stop func(), err error) {
 	return makeExchangePipe()
 }
 
@@ -884,32 +884,32 @@ func makeExchangePipe() (e1, e2 *Exchange, stop func(), err error) {
 
 	wg := sync.WaitGroup{}
 
-	c1 := NewMuxer(p1)
+	m1 := NewMuxer(p1)
 	wg.Add(2)
-	go func() { defer wg.Done(); c1.WriteTo(p1) }()
-	go func() { defer wg.Done(); c1.ReadFrom(p1) }()
+	go func() { defer wg.Done(); m1.WriteTo(p1) }()
+	go func() { defer wg.Done(); m1.ReadFrom(p1) }()
 
-	c2 := NewMuxer(p2)
+	m2 := NewMuxer(p2)
 	wg.Add(2)
-	go func() { defer wg.Done(); c2.WriteTo(p2) }()
-	go func() { defer wg.Done(); c2.ReadFrom(p2) }()
+	go func() { defer wg.Done(); m2.WriteTo(p2) }()
+	go func() { defer wg.Done(); m2.ReadFrom(p2) }()
 
-	e1 = c1.NewExchange()
-	e2 = c2.exchangeLookup[e1.ID]
+	e1 = m1.NewExchange()
+	e2 = m2.exchangeLookup[e1.ID]
 
 	return e1, e2, func() {
 		e1.Close()
 		e2.Close()
-		c2.Close()
-		c1.Close()
+		m2.Close()
+		m1.Close()
 		p1.Close()
 		p2.Close()
 		wg.Wait()
 	}, nil
 }
 
-func Test_Exchange_makeConnPipe(t *testing.T) {
-	c1, c2, stop, err := makeConnPipe()
+func Test_Exchange_makeNetConnPipe(t *testing.T) {
+	c1, c2, stop, err := makeNetConnPipe()
 	defer stop()
 	assert.NoError(t, err)
 	assert.NotNil(t, c1)
@@ -973,7 +973,7 @@ func Test_Exchange_transparency(t *testing.T) {
 		defer leaktest.Check(t)()
 	}
 
-	testConn(t, func() (c1, c2 net.Conn, stop func(), err error) {
+	testNetConn(t, func() (c1, c2 net.Conn, stop func(), err error) {
 		c1, c2 = net.Pipe()
 		stop = func() {
 			c1.Close()
@@ -981,7 +981,7 @@ func Test_Exchange_transparency(t *testing.T) {
 		}
 		return
 	})
-	testConn(t, makeConnPipe)
+	testNetConn(t, makeNetConnPipe)
 }
 
 func Test_Exchange_Addr_interface(t *testing.T) {

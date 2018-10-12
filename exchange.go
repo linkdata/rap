@@ -30,9 +30,9 @@ type ErrMissingFrameHead struct{}
 
 func (ErrMissingFrameHead) Error() string { return "missing frame head" }
 
-// ExchangeConnection is the interface that an Exchange needs in order to
+// ExchangeMuxer is the interface that an Exchange needs in order to
 // communicate with the outside world and clean up.
-type ExchangeConnection interface {
+type ExchangeMuxer interface {
 	// ExchangeWrite allows an Exchange to write a FrameData
 	ExchangeWrite(fd FrameData) error
 	// ExchangeAbortChannel returns the channel that is closed when owner is closing
@@ -127,13 +127,13 @@ func (timeoutError) Temporary() bool { return true }
 // handles the flow control mechanism, which is a simple transmission
 // window with intermittent ACKs from the receiver.
 type Exchange struct {
-	ID          ExchangeID         // Exchange ID
-	conn        ExchangeConnection // the Conn that owns us
-	onRecycle   func(*Exchange)    // function to call when Exchange is recycled
-	ackCh       chan struct{}      // ack's from peer go in this
-	readCh      chan FrameData     // data frames from peer go in this
-	cmu         sync.Mutex         // guards localClosed and remoteClosed
-	localClosed chan struct{}      // closed when Close() has been called
+	ID          ExchangeID      // Exchange ID
+	mux         ExchangeMuxer   // the Muxer that owns us
+	onRecycle   func(*Exchange) // function to call when Exchange is recycled
+	ackCh       chan struct{}   // ack's from peer go in this
+	readCh      chan FrameData  // data frames from peer go in this
+	cmu         sync.Mutex      // guards localClosed and remoteClosed
+	localClosed chan struct{}   // closed when Close() has been called
 
 	// these are atomic to allow Exchange.String() to print the state without causing races
 	localSentFinal  int32    // nonzero if local has sent it's final frame
@@ -195,14 +195,14 @@ func (e *Exchange) localSendingFinal() bool {
 }
 
 // Serial returns a string identifying the Exchange, containing the
-// owning Conn's serial number, a colon, and this exchange's serial number.
+// owning Muxers serial number, a colon, and this exchange's serial number.
 // Note that the serial number is unrelated to the Exchange ID.
 func (e *Exchange) Serial() string {
-	connSerial := uint32(0)
-	if c := e.getConn(); c != nil {
-		connSerial = c.serialNumber
+	muxSerial := uint32(0)
+	if c := e.getMux(); c != nil {
+		muxSerial = c.serialNumber
 	}
-	return fmt.Sprintf("%x:%x", connSerial, e.serialNumber)
+	return fmt.Sprintf("%x:%x", muxSerial, e.serialNumber)
 }
 
 func (e *Exchange) String() string {
@@ -235,13 +235,13 @@ func (e *Exchange) String() string {
 }
 
 // NewExchange creates a new exchange
-func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
+func NewExchange(mux ExchangeMuxer, exchangeID ExchangeID) (e *Exchange) {
 	if exchangeID >= MuxerExchangeID {
 		panic(fmt.Sprintf("illegal exchange ID %d", int(exchangeID)))
 	}
 	e = &Exchange{
 		ID:            exchangeID,
-		conn:          conn,
+		mux:           mux,
 		sendWindow:    int32(SendWindowSize),
 		ackCh:         make(chan struct{}, MaxSendWindowSize),
 		readCh:        make(chan FrameData, MaxSendWindowSize),
@@ -254,10 +254,10 @@ func NewExchange(conn ExchangeConnection, exchangeID ExchangeID) (e *Exchange) {
 }
 
 // SubmitFrame gives the Exchange an incoming FrameData.
-// None of the frames seen may be conn control frames.
+// None of the frames seen may be muxer control frames.
 // A fd of nil indicates an EOF condition.
 // If this function blocks, it will block all Exchanges on
-// the Conn.
+// the Muxer.
 func (e *Exchange) SubmitFrame(fd FrameData) (err error) {
 	// log.Print("SubmitFrame() ", e, fd)
 
@@ -311,7 +311,7 @@ func (e *Exchange) receivedFinal(fd FrameData) {
 }
 
 // readFrame reads data frames from the read channel.
-// None of the frames seen may be conn control frames.
+// None of the frames seen may be muxer control frames.
 // Also writes acknowledgement frames.
 func (e *Exchange) readFrame() (err error) {
 	// log.Print("Exchange.readFrame(): len(e.fdr)=", len(e.fdr), " e=", e)
@@ -331,7 +331,7 @@ func (e *Exchange) readFrame() (err error) {
 		}
 	case <-e.readDeadline.wait():
 		err = errors.WithStack(timeoutError{})
-	case <-e.conn.ExchangeAbortChannel():
+	case <-e.mux.ExchangeAbortChannel():
 		err = errors.WithStack(serverClosedError{})
 	case <-e.localClosed:
 		err = errors.WithStack(io.ErrClosedPipe)
@@ -343,7 +343,7 @@ func (e *Exchange) readFrame() (err error) {
 func (e *Exchange) writeAckFrame() {
 	fd := FrameDataAllocID(e.ID)
 	fd.Header().SetFlow()
-	e.conn.ExchangeWrite(fd)
+	e.mux.ExchangeWrite(fd)
 }
 
 // LoadFrameReader ensures the frame reader has payload data or an error.
@@ -571,9 +571,9 @@ func (e *Exchange) writeByte(c byte) (err error) {
 // TODO: func (b *Writer) WriteRune(r rune) (size int, err error)
 // TODO: func (b *Writer) WriteString(s string) (int, error)
 
-// Flush handles write flow control and injects the current frame into the conn.
+// Flush handles write flow control and injects the current frame into the Muxer.
 // Note that the current write frame is expected to be a regular data frame,
-// such that e.fdw.Header() returns false for IsConnControl() and true for
+// such that e.fdw.Header() returns false for IsMuxerControl() and true for
 // HasPayload().
 func (e *Exchange) Flush() (err error) {
 	e.wmu.Lock()
@@ -616,7 +616,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 			e.consumeAck()
 		case <-e.localClosed:
 			err = errors.WithStack(io.ErrClosedPipe)
-		case <-e.conn.ExchangeAbortChannel():
+		case <-e.mux.ExchangeAbortChannel():
 			err = errors.WithStack(serverClosedError{})
 		case <-e.writeDeadline.wait():
 			err = errors.WithStack(timeoutError{})
@@ -629,7 +629,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 					panic(fmt.Sprintf("sendWindow went negative: %+v\n", e))
 				}
 				e.starting()
-				return e.conn.ExchangeWrite(fd)
+				return e.mux.ExchangeWrite(fd)
 			} else {
 				// SendWindow is empty, so do a blocking wait for an ACK
 				select {
@@ -637,7 +637,7 @@ func (e *Exchange) writeFrame(fd FrameData) (err error) {
 					e.consumeAck()
 				case <-e.localClosed:
 					err = errors.WithStack(io.ErrClosedPipe)
-				case <-e.conn.ExchangeAbortChannel():
+				case <-e.mux.ExchangeAbortChannel():
 					err = errors.WithStack(serverClosedError{})
 				case <-e.writeDeadline.wait():
 					err = errors.WithStack(timeoutError{})
@@ -654,8 +654,8 @@ func (e *Exchange) getSendWindow() int {
 	return int(atomic.LoadInt32(&e.sendWindow))
 }
 
-func (e *Exchange) getConn() *Muxer {
-	if c, ok := e.conn.(*Muxer); ok {
+func (e *Exchange) getMux() *Muxer {
+	if c, ok := e.mux.(*Muxer); ok {
 		return c
 	}
 	return nil
@@ -732,7 +732,7 @@ func (e *Exchange) writeFinalLocked(isAck bool) {
 	if e.localSendingFinal() {
 		e.flush()
 		if fd := e.makeFinalFrame(isAck); fd != nil {
-			e.conn.ExchangeWrite(fd)
+			e.mux.ExchangeWrite(fd)
 		}
 	}
 }
