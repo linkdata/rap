@@ -25,27 +25,27 @@ control field and a 13-bit Conn ID. If the ID is 0x1fff (highest
 possible), the frame is a *Muxer* control frame and the control field
 is a 3-bit MSB value specifying the frame type:
 
-* 000 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
-* 001 - reserved, but expect Size to reflect payload size
-* 010 - Ping, Size is bytes of payload data to return in a Pong
-* 011 - Pong, Size is bytes of payload data as received in the Ping
-* 100 - reserved, ignore the Size value
-* 101 - reserved, ignore the Size value
-* 110 - reserved, ignore the Size value
-* 111 - reserved, ignore the Size value
+ * 000 - Panic, sender is shutting down due to error, Size is bytes of optional technical information
+ * 001 - reserved, but expect Size to reflect payload size
+ * 010 - Ping, Size is bytes of payload data to return in a Pong
+ * 011 - Pong, Size is bytes of payload data as received in the Ping
+ * 100 - reserved, ignore the Size value
+ * 101 - reserved, ignore the Size value
+ * 110 - reserved, ignore the Size value
+ * 111 - reserved, ignore the Size value
 
 If Index is 0..0x1ffe (inclusive), the frame applies to that Conn, and
 the control field is mapped to three flags: Flow, Body and Head. The following
 table lists the valid flag combinations and their meaning:
 
-* 000 - () *reserved*, expect Size to reflect payload size
-* 001 - (Head) the data bytes starts with a RAP *record*, without any body bytes
-* 010 - (Body) data bytes form body data, no RAP *record* present
-* 011 - (Head|Body) data bytes starts with a RAP *record*, remaining bytes form body data
-* 100 - (Flow) flow control acknowledging the receipt of a data frame
-* 101 - (Flow|Head) *reserved*, ignore the Size value
-* 110 - (Flow|Body) final frame, requesting a ack in the form of a (Flow|Body)
-* 111 - (Flow|Body|Head) final frame, sent in response to a (Flow|Head), no response may be sent
+ * 000 - *reserved*, expect Size to reflect payload size
+ * 001 - the data bytes starts with a RAP *record*, without any body bytes
+ * 010 - data bytes form body data, no RAP *record* present
+ * 011 - data bytes starts with a RAP *record*, remaining bytes form body data
+ * 100 - flow control acknowledging the receipt of a data frame
+ * 101 - *reserved*, ignore the Size value
+ * 110 - final frame, requesting a ack in the form of a (Flow|Body)
+ * 111 - final frame, sent in response to a (Flow|Head), no response may be sent
 
 */
 type FrameHeader []byte

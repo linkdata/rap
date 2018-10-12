@@ -29,8 +29,8 @@ func Test_Client_no_answer(t *testing.T) {
 	c := NewClient(noSrvAddr)
 	defer c.Close()
 	c.DialTimeout = time.Millisecond * 10
-	e, err := c.NewConnMayDial()
-	assert.Nil(t, e)
+	conn, err := c.NewConnMayDial()
+	assert.Nil(t, conn)
 	assert.Error(t, err)
 }
 
@@ -40,8 +40,8 @@ func Test_Client_server_seems_offline(t *testing.T) {
 	assert.Error(t, c.offlineError())
 	c.DialTimeout = time.Millisecond * 10
 	c.firstAttempt = time.Now().Add(-time.Second)
-	e, err := c.NewConnMayDial()
-	assert.Nil(t, e)
+	conn, err := c.NewConnMayDial()
+	assert.Nil(t, conn)
 	assert.Error(t, err)
 }
 
@@ -137,7 +137,7 @@ func Test_Client_exhaust_muxer(t *testing.T) {
 			}
 		}
 		conn = c.NewConn()
-		// log.Print("grabbed ", len(grabbed), " e=", e)
+		// log.Print("grabbed ", len(grabbed), " conn=", conn)
 	}
 
 	assert.Equal(t, int(MaxConnID)*2, len(grabbed))

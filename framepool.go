@@ -7,7 +7,7 @@ func init() {
 	frameDataPool = make(chan FrameData, MaxConnID)
 }
 
-// FrameDataAlloc allocates an empty FrameData, without a FrameHeader.
+// FrameDataAlloc allocates an empty FrameData, without a FrameHeader from the global pool.
 func FrameDataAlloc() FrameData {
 	select {
 	case fd := <-frameDataPool:
@@ -18,7 +18,7 @@ func FrameDataAlloc() FrameData {
 	}
 }
 
-// FrameDataAllocID allocates a FrameData with a FrameHeader and the given Conn ID set.
+// FrameDataAllocID allocates a FrameData with a FrameHeader and the given Conn ID set from the global pool.
 func FrameDataAllocID(id ConnID) FrameData {
 	select {
 	case fd := <-frameDataPool:
@@ -29,7 +29,7 @@ func FrameDataAllocID(id ConnID) FrameData {
 	}
 }
 
-// FrameDataFree releases a FrameData.
+// FrameDataFree releases a FrameData to the global pool.
 func FrameDataFree(fd FrameData) {
 	if fd != nil {
 		select {

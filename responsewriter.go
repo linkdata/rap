@@ -15,9 +15,9 @@ type ResponseWriter struct {
 }
 
 // NewResponseWriter returns an initialized ResponseRecorder.
-func NewResponseWriter(e *Conn) *ResponseWriter {
+func NewResponseWriter(conn *Conn) *ResponseWriter {
 	return &ResponseWriter{
-		Conn:      e,
+		Conn:      conn,
 		HeaderMap: make(http.Header),
 		Code:      200,
 	}

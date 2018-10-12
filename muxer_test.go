@@ -194,19 +194,19 @@ func (mt *muxerTester) InjectRequestNoErrors(r *http.Request) {
 
 func (mt *muxerTester) InjectRequest(r *http.Request) (requestErr, responseErr error) {
 	w := httptest.NewRecorder()
-	e := mt.muxClient.NewConnWait(time.Second * 10)
-	defer e.Close()
-	requestErr = e.WriteRequest(r)
-	_, responseErr = e.ProxyResponse(w)
+	conn := mt.muxClient.NewConnWait(time.Second * 10)
+	defer conn.Close()
+	requestErr = conn.WriteRequest(r)
+	_, responseErr = conn.ProxyResponse(w)
 	return
 }
 
 func (mt *muxerTester) FillConns() (gotten int) {
 	for {
-		if e := mt.muxClient.NewConn(); e != nil {
+		if conn := mt.muxClient.NewConn(); conn != nil {
 			gotten++
-			e.OnRecycle(mt.muxClient.ConnRelease)
-			defer e.Close()
+			conn.OnRecycle(mt.muxClient.ConnRelease)
+			defer conn.Close()
 		} else {
 			return
 		}
@@ -252,9 +252,9 @@ func Test_Muxer_conns_exhausted(t *testing.T) {
 func Test_Muxer_ReleaseConn(t *testing.T) {
 	mt := newMuxerTester(t)
 	defer mt.Close()
-	e := mt.muxClient.NewConn()
-	assert.NotNil(t, e)
-	e.Close()
+	conn := mt.muxClient.NewConn()
+	assert.NotNil(t, conn)
+	conn.Close()
 }
 
 func Test_Muxer_conn_overflow(t *testing.T) {

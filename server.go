@@ -112,14 +112,14 @@ func (srv *Server) Serve(l net.Listener) error {
 	srv.serveErrorsMu.Unlock()
 	for {
 		// wait for active network connections to fall to allowed levels
-		rwc, e := l.Accept()
-		if e != nil {
+		rwc, err := l.Accept()
+		if err != nil {
 			select {
 			case <-srv.getDoneChan():
 				return errors.WithStack(serverClosedError{})
 			default:
 			}
-			if ne, ok := e.(net.Error); ok && ne.Temporary() {
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
 				} else {
@@ -131,7 +131,7 @@ func (srv *Server) Serve(l net.Listener) error {
 				time.Sleep(tempDelay)
 				continue
 			}
-			return e
+			return err
 		}
 		tempDelay = 0
 		srv.getMuxerLimiter() <- struct{}{}

@@ -23,8 +23,8 @@ func Test_ReverseProxy_ServeHTTP(t *testing.T) {
 	hs.Config.Addr = "127.0.0.1:"
 	hs.Start()
 	defer hs.Close()
-	u, e := url.Parse(hs.URL)
-	assert.NoError(t, e)
+	u, err := url.Parse(hs.URL)
+	assert.NoError(t, err)
 	rp := NewReverseProxy(u, 0)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/foo/?bar=quux&bar=foo", ioutil.NopCloser(bytes.NewBufferString("Hello world body!")))

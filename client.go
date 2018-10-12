@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Client dials a RAP server, maintaining one or more Muxers.
+// Client dials a RAP server, maintaining zero or more Muxers.
 type Client struct {
 	Addr         string        // the address to dial
 	DialTimeout  time.Duration // dialing timeout
@@ -114,16 +114,16 @@ func (c *Client) offlineError() (err error) {
 }
 
 // NewConn returns a new Conn for use, or nil if none available.
-func (c *Client) NewConn() (e *Conn) {
+func (c *Client) NewConn() (conn *Conn) {
 	if mux := c.getMux(); mux != nil {
-		e = mux.NewConn()
+		conn = mux.NewConn()
 	}
-	if e == nil {
+	if conn == nil {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		bestMux := c.selectBestMux()
 		if bestMux != nil {
-			if e = bestMux.NewConn(); e != nil {
+			if conn = bestMux.NewConn(); conn != nil {
 				c.setMux(bestMux)
 			}
 		}
@@ -172,20 +172,20 @@ func (c *Client) NewConnMayDial() (conn *Conn, err error) {
 }
 
 func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	e := c.NewConn()
-	if e == nil {
+	conn := c.NewConn()
+	if conn == nil {
 		var err error
-		e, err = c.NewConnMayDial()
-		if e == nil {
+		conn, err = c.NewConnMayDial()
+		if conn == nil {
 			http.Error(w, err.Error(), http.StatusGatewayTimeout)
 			return
 		}
 	}
-	c.serveHTTP(w, r, e)
+	c.serveHTTP(w, r, conn)
 }
 
-func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Conn) {
-	defer e.Close()
+func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
+	defer conn.Close()
 
 	var requestErr error
 	var responseErr error
@@ -205,15 +205,15 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Conn) {
 	var statusCode int
 
 	if c.ReadTimeout != 0 {
-		e.SetDeadline(time.Now().Add(c.ReadTimeout))
+		conn.SetDeadline(time.Now().Add(c.ReadTimeout))
 	}
 
-	requestErr = e.WriteRequest(r)
+	requestErr = conn.WriteRequest(r)
 
 	if c.WriteTimeout != 0 {
-		e.SetDeadline(time.Now().Add(c.WriteTimeout))
+		conn.SetDeadline(time.Now().Add(c.WriteTimeout))
 	} else {
-		e.SetDeadline(time.Time{})
+		conn.SetDeadline(time.Time{})
 	}
 
 	// request write may have been interrupted by server, for example
@@ -221,7 +221,7 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Conn) {
 	requestInterrupted := isClosedError(errors.Cause(requestErr))
 
 	if requestErr == nil || requestInterrupted {
-		if statusCode, responseErr = e.ProxyResponse(w); responseErr == nil {
+		if statusCode, responseErr = conn.ProxyResponse(w); responseErr == nil {
 			if requestInterrupted {
 				// suppress the request error in favor of the response data
 				requestErr = nil
@@ -246,14 +246,14 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Conn) {
 				wg := sync.WaitGroup{}
 				wg.Add(1)
 				go func() {
-					io.Copy(rwc, e)
+					io.Copy(rwc, conn)
 					rwc.Close()
 					wg.Done()
 				}()
-				io.Copy(e, rwc)
+				io.Copy(conn, rwc)
 				wg.Wait()
 			} else {
-				_, responseErr = e.WriteTo(w)
+				_, responseErr = conn.WriteTo(w)
 			}
 		}
 	}
@@ -262,5 +262,5 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, e *Conn) {
 		return
 	}
 
-	panic(fmt.Sprintf("rap.Client.ServeHTTP(): uri=\"%s\"\nrequest error: %+v\nresponse error: %+v\nconn: %+v\n", r.RequestURI, requestErr, responseErr, e))
+	panic(fmt.Sprintf("rap.Client.ServeHTTP(): uri=\"%s\"\nrequest error: %+v\nresponse error: %+v\nconn: %+v\n", r.RequestURI, requestErr, responseErr, conn))
 }

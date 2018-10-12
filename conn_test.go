@@ -134,7 +134,7 @@ func (ctw *connTesterWriter) ConnWrite(fd FrameData) error {
 		case <-ctw.closeCh:
 			return serverClosedError{}
 		case <-t.C:
-			log.Print("e: ", ctw.ct.Conn)
+			log.Print("conn: ", ctw.ct.Conn)
 			log.Print("fd: ", fd)
 			panic("timeout waiting for ConnWrite to send")
 		}
@@ -143,8 +143,8 @@ func (ctw *connTesterWriter) ConnWrite(fd FrameData) error {
 	return io.ErrClosedPipe
 }
 
-func (ctw *connTesterWriter) ConnRelease(e *Conn) {
-	ctw.ct.ConnRelease(e)
+func (ctw *connTesterWriter) ConnRelease(conn *Conn) {
+	ctw.ct.ConnRelease(conn)
 }
 
 func (ctw *connTesterWriter) ConnAbortChannel() <-chan struct{} {
@@ -234,7 +234,7 @@ func (ct *connTester) ConnWrite(fd FrameData) error {
 	return io.ErrClosedPipe
 }
 
-func (ct *connTester) ConnRelease(e *Conn) {
+func (ct *connTester) ConnRelease(conn *Conn) {
 	ct.once.Do(func() { close(ct.releasedCh) })
 }
 
@@ -277,7 +277,7 @@ type failWriterError struct {
 	msg string // description of error
 }
 
-func (e *failWriterError) Error() string { return e.msg }
+func (fwe *failWriterError) Error() string { return fwe.msg }
 
 var errFailWriter = &failWriterError{msg: "failWriterError"}
 
@@ -478,7 +478,7 @@ func Test_Conn_WriteByte(t *testing.T) {
 	assert.True(t, ct.Conn.fdw.Header().HasBody())
 
 	// write final frame
-	ct.finFn = func(e *Conn) {}
+	ct.finFn = func(conn *Conn) {}
 	ct.Conn.Close()
 
 	// Flushing should fail since final is sent
@@ -635,7 +635,7 @@ func Test_Conn_WriteRequest(t *testing.T) {
 
 	ct = newConnTester(t)
 	defer ct.Close()
-	ct.finFn = func(e *Conn) {} // ignore the final frame from Close()
+	ct.finFn = func(conn *Conn) {} // ignore the final frame from Close()
 	ct.Conn.starting()
 	assert.NoError(t, ct.Conn.Close())
 	assert.True(t, ct.Conn.hasLocalSentFinal())
@@ -814,9 +814,9 @@ func Test_Conn_flowcontrol_errors(t *testing.T) {
 
 	ct := newConnTester(t)
 	defer ct.Close()
-	ct.ackFn = func(e *Conn) {
-		if e.getSendWindow() == 0 {
-			e.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
+	ct.ackFn = func(conn *Conn) {
+		if conn.getSendWindow() == 0 {
+			conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
 		}
 	}
 	err := ct.Conn.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer(make([]byte, FrameMaxPayloadSize*(MaxSendWindowSize+1)))))
@@ -842,7 +842,7 @@ func Test_Conn_flowcontrol_errors(t *testing.T) {
 func Test_Conn_SetDeadline_on_closed(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
-	ct.finFn = func(e *Conn) {}
+	ct.finFn = func(conn *Conn) {}
 	ct.Conn.starting()
 	ct.Conn.Close()
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(ct.Conn.SetDeadline(time.Now())))

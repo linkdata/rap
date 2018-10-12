@@ -27,13 +27,13 @@ func (ErrTimeoutWaitingForReader) Error() string { return "timeout waiting for r
 // all of which are fatal to a Muxer.
 type ProtocolError struct{}
 
-func (e ProtocolError) Error() string { return "protocol error" }
+func (err ProtocolError) Error() string { return "protocol error" }
 
 // PanicError is the error type used for reporting peer panic errors,
 // all of which are fatal to a muxer.
 type PanicError struct{}
 
-func (e PanicError) Error() string { return "peer panic" }
+func (err PanicError) Error() string { return "peer panic" }
 
 type muxerControlHandler func(*Muxer, FrameData) error
 
@@ -205,27 +205,27 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 			continue
 		}
 
-		e := mux.connLookup[fd.Header().ConnID()]
+		conn := mux.connLookup[fd.Header().ConnID()]
 
-		// log.Print("READ ", e, fd)
+		// log.Print("READ ", conn, fd)
 
-		if e.starting() {
+		if conn.starting() {
 			if mux.ReadTimeout != 0 {
-				e.SetReadDeadline(time.Now().Add(mux.ReadTimeout))
+				conn.SetReadDeadline(time.Now().Add(mux.ReadTimeout))
 			} else {
-				e.SetReadDeadline(time.Time{})
+				conn.SetReadDeadline(time.Time{})
 			}
 			if mux.WriteTimeout != 0 {
-				e.SetWriteDeadline(time.Now().Add(mux.WriteTimeout))
+				conn.SetWriteDeadline(time.Now().Add(mux.WriteTimeout))
 			} else {
-				e.SetWriteDeadline(time.Time{})
+				conn.SetWriteDeadline(time.Time{})
 			}
 			if mux.Handler != nil {
-				go e.Serve(mux.Handler)
+				go conn.Serve(mux.Handler)
 			}
 		}
 
-		e.SubmitFrame(fd)
+		conn.SubmitFrame(fd)
 	}
 	return
 }

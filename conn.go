@@ -16,8 +16,8 @@ import (
 // ConnID identifies a in-progress request/response.
 type ConnID uint16
 
-func (e ConnID) String() string {
-	return fmt.Sprintf("[ID %04x]", uint16(e))
+func (connID ConnID) String() string {
+	return fmt.Sprintf("[ID %04x]", uint16(connID))
 }
 
 // ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
@@ -259,7 +259,7 @@ func NewConn(mux ConnMuxer, connID ConnID) (conn *Conn) {
 // If this function blocks, it will block all Conns on
 // the Muxer.
 func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
-	// log.Print("SubmitFrame() ", e, fd)
+	// log.Print("SubmitFrame() ", conn, fd)
 
 	if fd.Header().HasFlow() {
 		if fd.Header().IsAck() {
@@ -292,7 +292,7 @@ func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
 func (conn *Conn) receivedFinal(fd FrameData) {
 	conn.cmu.Lock()
 	defer conn.cmu.Unlock()
-	// log.Print(" FIN ", e, fd)
+	// log.Print(" FIN ", conn, fd)
 
 	if fd != nil {
 		if fd.Header().SizeValue() != 0 {
@@ -314,7 +314,7 @@ func (conn *Conn) receivedFinal(fd FrameData) {
 // None of the frames seen may be muxer control frames.
 // Also writes acknowledgement frames.
 func (conn *Conn) readFrame() (err error) {
-	// log.Print("Conn.readFrame(): len(e.fdr)=", len(e.fdr), " e=", e)
+	// log.Print("Conn.readFrame(): len(conn.fdr)=", len(conn.fdr), " conn=", conn)
 	if conn.fdr != nil {
 		FrameDataFree(conn.fdr)
 		conn.fdr = nil
@@ -356,7 +356,7 @@ func (conn *Conn) LoadFrameReader() (err error) {
 func (conn *Conn) loadFrameReader() (err error) {
 	for len(conn.fp) == 0 && err == nil {
 		err = conn.readFrame()
-		// log.Print("Conn.loadFrameReader(): ", e.ID, " readFrame() len(fr)=", len(e.fp), " err=", err, "  ", e)
+		// log.Print("Conn.loadFrameReader(): ", conn.ID, " readFrame() len(fr)=", len(conn.fp), " err=", err, "  ", conn)
 	}
 	return
 }
@@ -379,7 +379,7 @@ func (conn *Conn) writeStart() error {
 		return errors.WithStack(timeoutError{})
 	default:
 		if conn.fdw == nil {
-			// log.Print("Conn.writeStart() (new fd)", e)
+			// log.Print("Conn.writeStart() (new fd)", conn)
 			conn.fdw = FrameDataAllocID(conn.ID)
 		}
 		return nil
@@ -476,7 +476,7 @@ func (conn *Conn) readFromHelperLocked(r io.Reader) (n int64, err error) {
 func (conn *Conn) Write(p []byte) (n int, err error) {
 	conn.wmu.Lock()
 	defer conn.wmu.Unlock()
-	// log.Print("Conn.Write() len(p)=", len(p), " avail=", e.Available())
+	// log.Print("Conn.Write() len(p)=", len(p), " avail=", conn.Available())
 	if n, err = conn.write(p); err == nil {
 		if err = conn.flushLocked(); err != nil {
 			n = 0
@@ -573,7 +573,7 @@ func (conn *Conn) writeByte(c byte) (err error) {
 
 // Flush handles write flow control and injects the current frame into the Muxer.
 // Note that the current write frame is expected to be a regular data frame,
-// such that e.fdw.Header() returns false for IsMuxerControl() and true for
+// such that conn.fdw.Header() returns false for IsMuxerControl() and true for
 // HasPayload().
 func (conn *Conn) Flush() (err error) {
 	conn.wmu.Lock()
@@ -673,7 +673,7 @@ func (conn *Conn) recycle() {
 }
 
 func (conn *Conn) recycleLocked() {
-	// log.Print("  RC ", e)
+	// log.Print("  RC ", conn)
 
 	conn.setRunState(runStateRecycle)
 
@@ -750,7 +750,7 @@ func (conn *Conn) Close() error {
 	conn.cmu.Lock()
 	defer conn.cmu.Unlock()
 
-	// log.Print("  CL ", e)
+	// log.Print("  CL ", conn)
 
 	select {
 	case <-conn.localClosed:
