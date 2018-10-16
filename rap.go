@@ -1,4 +1,6 @@
-// Package rap implements the REST Aggregation Protocol.
+// Copyright 2018 Johan Lindh. All rights reserved.
+// Use of this source code is governed by the MIT license, see the LICENSE file.
+
 package rap
 
 import "time"

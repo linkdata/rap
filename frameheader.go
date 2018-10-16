@@ -1,4 +1,5 @@
-// frameheader.go
+// Copyright 2018 Johan Lindh. All rights reserved.
+// Use of this source code is governed by the MIT license, see the LICENSE file.
 
 // A frame header consists of four bytes. First byte is the flow-control bit
 // and high seven bits of the size data. Second byte is low eight bits of the

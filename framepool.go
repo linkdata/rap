@@ -1,3 +1,6 @@
+// Copyright 2018 Johan Lindh. All rights reserved.
+// Use of this source code is governed by the MIT license, see the LICENSE file.
+
 package rap
 
 // Provides a buffer of allocated but unused FrameData.
