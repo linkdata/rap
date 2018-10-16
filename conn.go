@@ -677,19 +677,28 @@ func (conn *Conn) recycleLocked() {
 
 	conn.setRunState(runStateRecycle)
 
-	if !isClosedChan(conn.localClosed) {
-		panic(fmt.Sprintf("recycle(): local not closed\n%v\n", conn))
-	}
-	if len(conn.fdw) > 0 {
-		panic(fmt.Sprintf("recycle(): still data left in fdw\n%v\n%v\n", conn, conn.fdw))
-	}
-	if !conn.hasLocalSentFinal() {
-		panic(fmt.Sprintf("recycle(): local has not sent final\n%v\n", conn))
-	}
-	if !conn.hasRemoteSentFinal() {
-		panic(fmt.Sprintf("recycle(): remote has not sent final\n%v\n", conn))
+	if err := conn.canRecycleLocked(); err != nil {
+		panic(err)
 	}
 
+	conn.forceRecycleLocked()
+}
+
+func (conn *Conn) canRecycleLocked() error {
+	switch {
+	case !isClosedChan(conn.localClosed):
+		return errors.Errorf("recycle(): local not closed\n%v\n", conn)
+	case len(conn.fdw) > 0:
+		return errors.Errorf("recycle(): still data left in fdw\n%v\n%v\n", conn, conn.fdw)
+	case !conn.hasLocalSentFinal():
+		return errors.Errorf("recycle(): local has not sent final\n%v\n", conn)
+	case !conn.hasRemoteSentFinal():
+		return errors.Errorf("recycle(): remote has not sent final\n%v\n", conn)
+	}
+	return nil
+}
+
+func (conn *Conn) forceRecycleLocked() {
 	// drain ack and read channels
 	for len(conn.ackCh) > 0 {
 		<-conn.ackCh
