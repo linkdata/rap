@@ -2,10 +2,6 @@ package rap
 
 import (
 	"log"
-	"net/http"
-	"net/http/httptest"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -87,6 +83,57 @@ func init() {
 }
 */
 
+func Benchmark_Client_NewConn(b *testing.B) {
+	s := &Server{
+		Addr: srvAddr,
+	}
+	ln, lnerr := s.Listen(srvAddr)
+	if lnerr != nil {
+		log.Fatal(lnerr)
+	}
+	defer s.Close()
+	go s.Serve(ln)
+
+	c := NewClient(s.Addr)
+	defer c.Close()
+
+	conn, err := c.NewConnMayDial()
+	defer conn.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conns := make([]*Conn, b.N)
+	idx := 0
+
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		conn = c.NewConn()
+		if conn != nil {
+			conns[idx] = conn
+			idx++
+		} else {
+			b.StopTimer()
+			for i, conn := range conns {
+				if conn != nil {
+					conn.forceRecycleLocked()
+				}
+				conns[i] = nil
+			}
+			idx = 0
+			b.StartTimer()
+		}
+	}
+	b.StopTimer()
+
+	for _, conn := range conns {
+		if conn != nil {
+			conn.Close()
+		}
+	}
+}
+
+/*
 func Benchmark_100k_small_queries(b *testing.B) {
 	connCount := 100000
 	parallelism := 20000
@@ -131,3 +178,4 @@ func Benchmark_100k_small_queries(b *testing.B) {
 		log.Fatal("serveCount (", serveCount, ") < queryCount (", queryCount, ")")
 	}
 }
+*/
