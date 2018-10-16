@@ -7,9 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/pkg/errors"
 )
@@ -77,10 +75,10 @@ func (c *Client) dialLocked() *Muxer {
 	return mux
 }
 
-// selectBestMux returns an existing Muxer that have free Conns,
+// selectBestMuxLocked returns an existing Muxer that have free Conns,
 // or nil if none were found.
 // Must run with the mutex locked.
-func (c *Client) selectBestMux() (bestMux *Muxer) {
+func (c *Client) selectBestMuxLocked() (bestMux *Muxer) {
 	bestLength := 0
 	for _, mux := range c.muxers {
 		avail := mux.AvailableConns()
@@ -92,14 +90,18 @@ func (c *Client) selectBestMux() (bestMux *Muxer) {
 	return
 }
 
-// non-racy "return c.mux"
 func (c *Client) getMux() *Muxer {
-	return (*Muxer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&c.mux))))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.getMuxLocked()
 }
 
-// non-racy "c.mux = mux"
-func (c *Client) setMux(mux *Muxer) {
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.mux)), unsafe.Pointer(mux))
+func (c *Client) getMuxLocked() *Muxer {
+	return c.mux
+}
+
+func (c *Client) setMuxLocked(mux *Muxer) {
+	c.mux = mux
 }
 
 func (c *Client) offlineError() (err error) {
@@ -115,16 +117,16 @@ func (c *Client) offlineError() (err error) {
 
 // NewConn returns a new Conn for use, or nil if none available.
 func (c *Client) NewConn() (conn *Conn) {
-	if mux := c.getMux(); mux != nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if mux := c.getMuxLocked(); mux != nil {
 		conn = mux.NewConn()
 	}
 	if conn == nil {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		bestMux := c.selectBestMux()
+		bestMux := c.selectBestMuxLocked()
 		if bestMux != nil {
 			if conn = bestMux.NewConn(); conn != nil {
-				c.setMux(bestMux)
+				c.setMuxLocked(bestMux)
 			}
 		}
 	}
@@ -153,7 +155,7 @@ func (c *Client) NewConnMayDial() (conn *Conn, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for conn == nil {
-		bestMux := c.selectBestMux()
+		bestMux := c.selectBestMuxLocked()
 		if bestMux == nil {
 			// not enough free, dial a new one
 			if c.lastAttempt.Before(startTime) {
@@ -165,7 +167,7 @@ func (c *Client) NewConnMayDial() (conn *Conn, err error) {
 		}
 		// grab a Conn before we publish the new Muxer
 		if conn = bestMux.NewConnWait(c.DialTimeout); conn != nil {
-			c.setMux(bestMux)
+			c.setMuxLocked(bestMux)
 		}
 	}
 	return conn, nil
