@@ -24,9 +24,13 @@ func (connID ConnID) String() string {
 }
 
 // ErrUnhandledRecordType is returned when a frame head record type is unknown or unexpected.
-type ErrUnhandledRecordType struct{}
+type ErrUnhandledRecordType struct {
+	Value RecordType // The invalid record type value received.
+}
 
-func (ErrUnhandledRecordType) Error() string { return "unhandled record type" }
+func (e ErrUnhandledRecordType) Error() string {
+	return fmt.Sprintf("unhandled record type 0x%02x", byte(e.Value))
+}
 
 // ErrMissingFrameHead is returned when an RAP frame was expected to have the HEAD bit set and contain a RAP record.
 type ErrMissingFrameHead struct{}
@@ -809,7 +813,7 @@ func (conn *Conn) OnRecycle(onRecycle func(*Conn)) {
 // WriteUserRecordType writes a user record marker and sets the head bit.
 func (conn *Conn) WriteUserRecordType(c byte) (err error) {
 	if c < 0x80 {
-		return ErrUnhandledRecordType{}
+		return errors.WithStack(ErrUnhandledRecordType{RecordType(c)})
 	}
 	if err = conn.WriteStart(); err == nil {
 		conn.fdw.WriteRecordType(RecordType(c))
@@ -847,13 +851,13 @@ func (conn *Conn) ProxyResponse(w http.ResponseWriter) (statusCode int, err erro
 	}
 
 	if conn.fdr.Header().HasHead() {
-		switch conn.fp.ReadRecordType() {
+		switch rt := conn.fp.ReadRecordType(); rt {
 		case RecordTypeHTTPResponse:
 			statusCode = conn.fp.ProxyResponse(w)
 		case RecordTypeHijacked:
 			statusCode = 101
 		default:
-			return 0, errors.WithStack(ErrUnhandledRecordType{})
+			return 0, errors.WithStack(ErrUnhandledRecordType{rt})
 		}
 	}
 
@@ -914,7 +918,7 @@ func (conn *Conn) Serve(h http.Handler) (err error) {
 			case RecordTypeHijacked:
 				conn.hijacking()
 			default:
-				err = errors.Wrapf(ErrUnhandledRecordType{}, "type code '%02x'", int(rt))
+				err = errors.WithStack(ErrUnhandledRecordType{rt})
 			}
 		} else {
 			err = errors.Wrapf(ErrMissingFrameHead{}, "%v", conn.fdr)

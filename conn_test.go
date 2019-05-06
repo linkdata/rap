@@ -433,11 +433,12 @@ func Test_Conn_StartAndRelease_unhandled_record_type(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	fd := NewFrameData()
+	rt := RecordTypeUserFirst - 1
 	fd.WriteHeader(MaxConnID)
-	fd.WriteRecordType(RecordTypeUserFirst - 1)
+	fd.WriteRecordType(rt)
 	ct.SubmitFrame(fd)
 	err := ct.Conn.Serve(ct)
-	assert.Equal(t, ErrUnhandledRecordType{}, errors.Cause(err))
+	assert.Equal(t, ErrUnhandledRecordType{rt}, errors.Cause(err))
 	assert.True(t, ct.Released())
 }
 
@@ -458,7 +459,7 @@ func Test_Conn_WriteByte(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 
-	assert.Equal(t, ErrUnhandledRecordType{}, errors.Cause(ct.Conn.WriteUserRecordType(0x1)))
+	assert.Equal(t, ErrUnhandledRecordType{0x1}, errors.Cause(ct.Conn.WriteUserRecordType(0x1)))
 
 	assert.NoError(t, ct.Conn.WriteUserRecordType(0xFF))
 
@@ -765,13 +766,14 @@ func Test_Conn_ProxyResponse_wrong_record_type(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	fd := NewFrameDataID(MaxConnID)
-	fd.WriteRecordType(RecordTypeUserFirst)
+	rt := RecordTypeUserFirst
+	fd.WriteRecordType(rt)
 	ct.SubmitFrame(fd)
 	ct.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := ct.Conn.ProxyResponse(rr2)
 	assert.True(t, ct.Conn.hasRemoteSentFinal())
-	assert.Equal(t, ErrUnhandledRecordType{}.Error(), errors.Cause(err).Error())
+	assert.Equal(t, ErrUnhandledRecordType{rt}.Error(), errors.Cause(err).Error())
 }
 
 func Test_Conn_Close(t *testing.T) {
