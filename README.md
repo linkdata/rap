@@ -167,7 +167,7 @@ Or:
 
 Each side of a *conn* maintains a count of *frames* with payload (where the *flow* bit is clear) sent but not acknowledged. Frames sent with the conn ID set to `0x1FFF` or flow control frames (those with the *flow* bit set) does not count.
 
-A receiver *conn* must be able to buffer the full window size count of *frames*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *conn id*, control bits set to `000` (not flow, no body data, no head data) and the size value set to zero. This is called a *flow control frame*.
+A receiver *conn* must be able to buffer the full window size count of *frames*. When a received *frame* that is counted is processed, the receiver must acknowledge receipt of it by sending a *frame header* with the same *conn id*, control bits set to `100` (is flow, no body data, no head data) and the size value set to zero. This is called an *ack frame*.
 
 ## Closing
 
