@@ -187,12 +187,22 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 		m, err = fd.ReadFrom(r)
 		n += m
 
+		readTimedOut := (m == 0)
+
 		if hasCollector {
 			unreported += m
-			if unreported > int64(FrameMaxSize) {
-				mux.StatsCollector.AddBytesRead(unreported)
-				unreported = 0
+			if unreported > 0 {
+				if readTimedOut || unreported > int64(FrameMaxSize) {
+					mux.StatsCollector.AddBytesRead(unreported)
+					unreported = 0
+				}
 			}
+		}
+
+		// if read timed out, check if we are closing
+		if readTimedOut && mux.isClosed() {
+			FrameDataFree(fd)
+			break
 		}
 
 		if err != nil {
@@ -281,7 +291,7 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", c.getConnForID(fd.Header().ConnID()), fd)
+			// log.Print("WRIT ", mux.connLookup[fd.Header().ConnID()], fd)
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)
@@ -306,6 +316,15 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 	return
 }
 
+func (mux *Muxer) isClosed() bool {
+	select {
+	case <-mux.doneChan:
+		return true
+	default:
+		return false
+	}
+}
+
 // ServeHTTP processes incoming and outgoing frames for the Muxer until closed.
 func (mux *Muxer) ServeHTTP(h http.Handler) (err error) {
 	mux.Handler = h
@@ -324,8 +343,10 @@ func (mux *Muxer) ServeHTTP(h http.Handler) (err error) {
 
 	err = <-errCh
 
-	if closeErr := mux.Close(); closeErr != nil && (err == nil || isClosedError(err)) {
-		err = closeErr
+	if !mux.isClosed() {
+		if closeErr := mux.Close(); closeErr != nil && (err == nil || isClosedError(err)) {
+			err = closeErr
+		}
 	}
 
 	if otherErr := <-errCh; otherErr != nil && err == nil {
@@ -346,39 +367,100 @@ func (mux *Muxer) closeDoneChanLocked() bool {
 	}
 }
 
+// returns true if doneChan was closed now, false if already closed
+func (mux *Muxer) closeDoneChan() bool {
+	mux.mu.Lock()
+	defer mux.mu.Unlock()
+	return mux.closeDoneChanLocked()
+}
+
+func (mux *Muxer) closeReaderLocked() (err error) {
+	// closing the I/O stream will cause the reader goroutine to stop with an error
+	err = mux.ReadWriteCloser.Close()
+	mux.readerWaitGroup.Wait()
+	return
+}
+
+func (mux *Muxer) closeReader() (err error) {
+	mux.mu.Lock()
+	defer mux.mu.Unlock()
+	return mux.closeReaderLocked()
+}
+
+// returns true if there are no more active conns
+func (mux *Muxer) closeIdleConnsLocked() bool {
+	for len(mux.conns) > 0 {
+		if conn := <-mux.conns; conn != nil {
+			conn.OnRecycle(nil)
+			mux.connLookup[conn.ID] = nil
+		}
+	}
+	for _, conn := range mux.connLookup {
+		if conn != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// returns true if there are no more active conns
+func (mux *Muxer) closeIdleConns() bool {
+	mux.mu.Lock()
+	defer mux.mu.Unlock()
+	return mux.closeIdleConnsLocked()
+}
+
+func (mux *Muxer) closeActiveConnsLocked() (err error) {
+	// Close all Conns we know of (in the lookup table)
+	// those will be in-progress Conns
+	for i, conn := range mux.connLookup {
+		if conn != nil {
+			mux.connLookup[i] = nil
+			eerr := conn.Close()
+			if err == nil && !isClosedError(eerr) {
+				err = eerr
+			}
+		}
+	}
+	return
+}
+
 // Close closes the Muxer immediately.
 func (mux *Muxer) Close() (err error) {
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
 
 	if mux.closeDoneChanLocked() {
-		// closing the I/O stream will cause the reader goroutine to stop with an error
-		err = mux.ReadWriteCloser.Close()
-
-		mux.readerWaitGroup.Wait()
-
-		// Drain the unused Conn channel
-		for len(mux.conns) > 0 {
-			if conn := <-mux.conns; conn != nil {
-				conn.OnRecycle(nil)
-				mux.connLookup[conn.ID] = nil
-			}
-		}
-
-		// Close all Conns we know of (in the lookup table)
-		// those will be in-progress Conns
-		for i, conn := range mux.connLookup {
-			if conn != nil {
-				mux.connLookup[i] = nil
-				eerr := conn.Close()
-				if err == nil && !isClosedError(eerr) {
-					err = eerr
-				}
-			}
+		err = mux.closeReaderLocked()
+		mux.closeIdleConnsLocked()
+		if err2 := mux.closeActiveConnsLocked(); err2 != nil && err == nil {
+			err = err2
 		}
 	}
-
 	return
+}
+
+// Shutdown attempts a graceful shutdown of the muxer.
+// It waits for active requests to finish,
+// then aborts those that exceed the read time out.
+func (mux *Muxer) Shutdown() error {
+	if mux.closeDoneChan() {
+		defer mux.closeReader()
+	}
+
+	ticker := time.NewTicker(mux.ReadTimeout)
+	defer ticker.Stop()
+	for {
+		if mux.closeIdleConns() {
+			return nil
+		}
+		select {
+		case <-ticker.C:
+			mux.Close()
+			return timeoutError{}
+		default:
+		}
+	}
 }
 
 func isClosedError(err error) bool {

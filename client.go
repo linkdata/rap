@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -22,7 +23,8 @@ type Client struct {
 	ReadTimeout  time.Duration // read timeout (reading the request)
 	WriteTimeout time.Duration // write timeout (writing the response)
 	mux          *Muxer        // the current active Muxer (atomic access only)
-	mu           sync.Mutex    // protects those below
+	paused       int32
+	mu           sync.Mutex // protects those below
 	lastError    error
 	lastAttempt  time.Time
 	firstAttempt time.Time
@@ -40,10 +42,7 @@ func NewClient(addr string) *Client {
 	}
 }
 
-// Close closes all Muxers.
-func (c *Client) Close() (err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Client) closeMuxersLocked() (err error) {
 	for i, mux := range c.muxers {
 		c.muxers[i] = nil
 		if mux != nil {
@@ -52,8 +51,49 @@ func (c *Client) Close() (err error) {
 			}
 		}
 	}
+	return
+}
+
+func (c *Client) closeMuxers() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closeMuxersLocked()
+}
+
+// Close stops serving requests and closes all Muxers immediately.
+func (c *Client) Close() (err error) {
+	atomic.StoreInt32(&c.paused, 1)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closeMuxersLocked()
 	c.muxers = nil
 	return
+}
+
+func (c *Client) shutdownMuxers() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, mux := range c.muxers {
+		c.muxers[i] = nil
+		if mux != nil {
+			if err := mux.Shutdown(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Shutdown attempts a graceful shutdown of the client.
+// It calls Shutdown() on all of the clients muxers.
+// If any of those fail, it simply closes all muxers.
+func (c *Client) Shutdown() error {
+	atomic.StoreInt32(&c.paused, 1)
+	if err := c.shutdownMuxers(); err != nil {
+		c.closeMuxers()
+		return err
+	}
+	return nil
 }
 
 // dialLocked creates a new RAP Muxer to the server.
@@ -177,6 +217,10 @@ func (c *Client) NewConnMayDial() (conn *Conn, err error) {
 }
 
 func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if atomic.LoadInt32(&c.paused) != 0 {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
 	conn := c.NewConn()
 	if conn == nil {
 		var err error
