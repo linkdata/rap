@@ -744,13 +744,15 @@ func (conn *Conn) makeFinalFrame(isAck bool) (fd FrameData) {
 	return
 }
 
-func (conn *Conn) writeFinalLocked(isAck bool) {
+func (conn *Conn) writeFinalLocked(isAck bool) (err error) {
 	if conn.localSendingFinal() {
-		conn.flushLocked()
-		if fd := conn.makeFinalFrame(isAck); fd != nil {
-			conn.mux.ConnWrite(fd)
+		if err = conn.flushLocked(); err == nil {
+			if fd := conn.makeFinalFrame(isAck); fd != nil {
+				err = conn.mux.ConnWrite(fd)
+			}
 		}
 	}
+	return
 }
 
 func (conn *Conn) consumeAck() {
