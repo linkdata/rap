@@ -85,7 +85,8 @@ func (c *Client) shutdownMuxers() error {
 }
 
 // Shutdown attempts a graceful shutdown of the client.
-// It calls Shutdown() on all of the clients muxers.
+// It immediately stops accepting new requests, and then
+// it calls Shutdown() on all of it's muxers.
 // If any of those fail, it simply closes all muxers.
 func (c *Client) Shutdown() error {
 	atomic.StoreInt32(&c.paused, 1)
@@ -276,9 +277,8 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 				requestErr = nil
 			}
 
-			// write the response body
+			// check for hijacking
 			if isUpgrade && statusCode == 101 {
-				// hijack
 				hj, ok := w.(http.Hijacker)
 				if !ok {
 					panic("rap.Client.ServeHTTP(): http.Hijacker unsupported")
@@ -302,6 +302,7 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 				io.Copy(conn, rwc)
 				wg.Wait()
 			} else {
+				// write the response body
 				_, responseErr = conn.WriteTo(w)
 			}
 		}
