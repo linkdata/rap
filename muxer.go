@@ -291,7 +291,7 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", mux.connLookup[fd.Header().ConnID()], fd)
+			// log.Print("WRIT ", mux.getConn(fd.Header().ConnID()), fd)
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)
@@ -314,6 +314,13 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 	}
 
 	return
+}
+
+func (mux *Muxer) getConn(connID ConnID) *Conn {
+	if connID > MaxConnID {
+		return nil
+	}
+	return mux.connLookup[connID]
 }
 
 func (mux *Muxer) isClosed() bool {
