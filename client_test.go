@@ -65,87 +65,6 @@ func Test_Client_dial_and_close(t *testing.T) {
 	}
 }
 
-func Test_Client_exhaust_muxer(t *testing.T) {
-	st := newSrvTester(t)
-	defer st.Close()
-	c := NewClient(st.srv.Addr)
-	assert.NotNil(t, c)
-	defer c.Close()
-	c.DialTimeout = time.Second
-
-	grabbed := make(chan *Conn, int(MuxerConnID)*2+1)
-	conn, err := c.NewConnMayDial()
-	firstMux := c.getMux()
-	assert.NoError(t, err)
-	assert.NotNil(t, conn)
-	assert.Equal(t, int(MaxConnID)-1, firstMux.AvailableConns())
-	for conn != nil {
-		grabbed <- conn
-		conn = c.NewConn()
-	}
-	assert.Equal(t, int(MaxConnID), cap(firstMux.conns))
-	assert.Equal(t, 0, len(firstMux.conns))
-	assert.Equal(t, 0, firstMux.AvailableConns())
-	assert.Equal(t, int(MaxConnID), len(grabbed))
-	conn = c.NewConn()
-	assert.Nil(t, conn)
-
-	// This will create a new Muxer since the old is all in use
-	conn, err = c.NewConnMayDial()
-	assert.NoError(t, err)
-	assert.NotNil(t, conn)
-	secondMux := c.getMux()
-	assert.NotEqual(t, firstMux.serialNumber, secondMux.serialNumber)
-	assert.Equal(t, int(MaxConnID), cap(secondMux.conns))
-	assert.Equal(t, int(MaxConnID)-1, secondMux.AvailableConns())
-
-	// close the Conn, should go back to the secondMux
-	conn.Close()
-	timer1 := time.NewTimer(time.Second * 5)
-	defer timer1.Stop()
-	for secondMux.AvailableConns() != int(MaxConnID) {
-		select {
-		case <-timer1.C:
-			assert.FailNow(t, "Conn did not release in time")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-	assert.Equal(t, int(MaxConnID), secondMux.AvailableConns())
-
-	// Now free all the Conns in the old mux
-	for len(grabbed) > 0 {
-		conn = <-grabbed
-		conn.Close()
-		assert.NotNil(t, conn)
-		assert.Equal(t, firstMux.serialNumber, conn.getMux().serialNumber)
-	}
-
-	// Grab all available conns, should be two Muxers worth available eventually
-	conn = c.NewConn()
-	assert.NotNil(t, conn)
-	timer2 := time.NewTimer(time.Second * 5)
-	defer timer2.Stop()
-	for len(grabbed) < int(MaxConnID)*2 {
-		if conn != nil {
-			grabbed <- conn
-		} else {
-			select {
-			case <-timer2.C:
-				assert.FailNow(t, fmt.Sprint("unable to grab ", int(MaxConnID)*2, " conns, got ", len(grabbed)))
-			default:
-			}
-		}
-		conn = c.NewConn()
-		// log.Print("grabbed ", len(grabbed), " conn=", conn)
-	}
-
-	assert.Equal(t, int(MaxConnID)*2, len(grabbed))
-	for len(grabbed) > 0 {
-		(<-grabbed).Close()
-	}
-}
-
 func Test_Client_ServeHTTP_simple(t *testing.T) {
 	if leaktestEnabled {
 		defer leaktest.Check(t)()
@@ -233,6 +152,87 @@ func Test_Client_ServeHTTP_websocket_simple(t *testing.T) {
 
 	ts := httptest.NewServer(c)
 	defer ts.Close()
+}
+
+func Test_Client_exhaust_muxer(t *testing.T) {
+	st := newSrvTester(t)
+	defer st.Close()
+	c := NewClient(st.srv.Addr)
+	assert.NotNil(t, c)
+	defer c.Close()
+	c.DialTimeout = time.Second
+
+	grabbed := make(chan *Conn, int(MuxerConnID)*2+1)
+	conn, err := c.NewConnMayDial()
+	firstMux := c.getMux()
+	assert.NoError(t, err)
+	assert.NotNil(t, conn)
+	assert.Equal(t, int(MaxConnID)-1, firstMux.AvailableConns())
+	for conn != nil {
+		grabbed <- conn
+		conn = c.NewConn()
+	}
+	assert.Equal(t, int(MaxConnID), cap(firstMux.conns))
+	assert.Equal(t, 0, len(firstMux.conns))
+	assert.Equal(t, 0, firstMux.AvailableConns())
+	assert.Equal(t, int(MaxConnID), len(grabbed))
+	conn = c.NewConn()
+	assert.Nil(t, conn)
+
+	// This will create a new Muxer since the old is all in use
+	conn, err = c.NewConnMayDial()
+	assert.NoError(t, err)
+	assert.NotNil(t, conn)
+	secondMux := c.getMux()
+	assert.NotEqual(t, firstMux.serialNumber, secondMux.serialNumber)
+	assert.Equal(t, int(MaxConnID), cap(secondMux.conns))
+	assert.Equal(t, int(MaxConnID)-1, secondMux.AvailableConns())
+
+	// close the Conn, should go back to the secondMux
+	conn.Close()
+	timer1 := time.NewTimer(time.Second * 5)
+	defer timer1.Stop()
+	for secondMux.AvailableConns() != int(MaxConnID) {
+		select {
+		case <-timer1.C:
+			assert.FailNow(t, "Conn did not release in time")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	assert.Equal(t, int(MaxConnID), secondMux.AvailableConns())
+
+	// Now free all the Conns in the old mux
+	for len(grabbed) > 0 {
+		conn = <-grabbed
+		conn.Close()
+		assert.NotNil(t, conn)
+		assert.Equal(t, firstMux.serialNumber, conn.getMux().serialNumber)
+	}
+
+	// Grab all available conns, should be two Muxers worth available eventually
+	conn = c.NewConn()
+	assert.NotNil(t, conn)
+	timer2 := time.NewTimer(time.Second * 5)
+	defer timer2.Stop()
+	for len(grabbed) < int(MaxConnID)*2 {
+		if conn != nil {
+			grabbed <- conn
+		} else {
+			select {
+			case <-timer2.C:
+				assert.FailNow(t, fmt.Sprint("unable to grab ", int(MaxConnID)*2, " conns, got ", len(grabbed)))
+			default:
+			}
+		}
+		conn = c.NewConn()
+		// log.Print("grabbed ", len(grabbed), " conn=", conn)
+	}
+
+	assert.Equal(t, int(MaxConnID)*2, len(grabbed))
+	for len(grabbed) > 0 {
+		(<-grabbed).Close()
+	}
 }
 
 func Test_Client_parallel_queries(t *testing.T) {
