@@ -302,7 +302,7 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 				io.Copy(conn, rwc)
 				wg.Wait()
 			} else {
-				// write the response body
+				// close and write the response body
 				_, responseErr = conn.WriteTo(w)
 			}
 		}

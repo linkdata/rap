@@ -134,23 +134,27 @@ func (timeoutError) Temporary() bool { return true }
 // handles the flow control mechanism, which is a simple transmission
 // window with intermittent ACKs from the receiver.
 type Conn struct {
-	ID          ConnID         // Conn ID
-	mux         ConnMuxer      // the Muxer that owns us
-	onRecycle   func(*Conn)    // function to call when Conn is recycled
-	ackCh       chan struct{}  // ack's from peer go in this
-	readCh      chan FrameData // data frames from peer go in this
-	cmu         sync.Mutex     // guards localClosed and remoteClosed
-	localClosed chan struct{}  // closed when Close() has been called
+	ID    ConnID        // Conn ID
+	mux   ConnMuxer     // the Muxer that owns us
+	ackCh chan struct{} // ack's from peer go in this
+
+	muLocal     sync.Mutex    // guards close(localClosed) and onRecycle
+	localClosed chan struct{} // closed when Close() has been called
+	onRecycle   func(*Conn)   // function to call when Conn is recycled
+
+	muRemote sync.Mutex     // guards close(readCh)
+	readCh   chan FrameData // data frames from peer go in this
 
 	// these are atomic to allow Conn.String() to print the state without causing races
-	localSentFinal  int32    // nonzero if local has sent it's final frame
-	remoteSentFinal int32    // nonzero if remote has sent it's final frame
-	sendWindow      int32    // number of frames still allowed to be in flight
-	state           runState // nonzero if a header frame has been sent or received
-	hijacked        int32    // nonzero if Hijack() was called
+	localSentFinal  int32    // atomic nonzero if local has sent it's final frame
+	remoteSentFinal int32    // atomic nonzero if remote has sent it's final frame
+	sendWindow      int32    // atomic number of frames still allowed to be in flight
+	state           runState // atomic nonzero if a header frame has been sent or received
+	hijacked        int32    // atomic nonzero if Hijack() was called
 
-	wmu           sync.Mutex  // guards fdw
-	fdw           FrameData   // FrameData being written to, nil after final frame sent
+	wmu sync.Mutex // guards fdw
+	fdw FrameData  // FrameData being written to, nil after final frame sent
+
 	rmu           sync.Mutex  // guards fdr
 	fdr           FrameData   // FrameData being read from by fr
 	fp            FrameParser // Frame parser (into fdr)
@@ -186,20 +190,23 @@ func (conn *Conn) hasRemoteSentFinal() bool {
 }
 
 func (conn *Conn) remoteSendingFinal() bool {
-	if atomic.CompareAndSwapInt32(&conn.remoteSentFinal, 0, 1) {
-		close(conn.readCh)
-		return true
+	conn.muRemote.Lock()
+	defer conn.muRemote.Unlock()
+	if conn.hasRemoteSentFinal() {
+		return false
 	}
-	return false
+	close(conn.readCh)
+	atomic.StoreInt32(&conn.remoteSentFinal, 1)
+	return true
 }
 
 func (conn *Conn) hasLocalSentFinal() bool {
 	return atomic.LoadInt32(&conn.localSentFinal) != 0
 }
 
-func (conn *Conn) localSendingFinal() bool {
-	return atomic.CompareAndSwapInt32(&conn.localSentFinal, 0, 1)
-}
+//func (conn *Conn) localSendingFinal() bool {
+//	return atomic.CompareAndSwapInt32(&conn.localSentFinal, 0, 1)
+//}
 
 // Serial returns a string identifying the Conn, containing the
 // owning Muxers serial number, a colon, and this Conn's serial number.
@@ -209,7 +216,7 @@ func (conn *Conn) Serial() string {
 	if c := conn.getMux(); c != nil {
 		muxSerial = c.serialNumber
 	}
-	return fmt.Sprintf("%x:%x", muxSerial, conn.serialNumber)
+	return fmt.Sprintf("%x:%04x", muxSerial, conn.serialNumber)
 }
 
 func (conn *Conn) String() string {
@@ -229,10 +236,10 @@ func (conn *Conn) String() string {
 		hijacked = " HJ"
 	}
 	locF := "  "
+	remF := "  "
 	if conn.hasLocalSentFinal() {
 		locF = "LF"
 	}
-	remF := "  "
 	if conn.hasRemoteSentFinal() {
 		remF = "RF"
 	}
@@ -297,8 +304,6 @@ func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
 }
 
 func (conn *Conn) receivedFinal(fd FrameData) {
-	conn.cmu.Lock()
-	defer conn.cmu.Unlock()
 	// log.Print(" FIN ", conn, fd)
 
 	if fd != nil {
@@ -313,6 +318,8 @@ func (conn *Conn) receivedFinal(fd FrameData) {
 	}
 
 	if conn.hasLocalSentFinal() {
+		// conn.cmu.Lock()
+		// defer conn.cmu.Unlock()
 		conn.recycle()
 	}
 }
@@ -340,8 +347,8 @@ func (conn *Conn) readFrame() (err error) {
 		err = errors.WithStack(timeoutError{})
 	case <-conn.mux.ConnAbortChannel():
 		err = errors.WithStack(serverClosedError{})
-	case <-conn.localClosed:
-		err = errors.WithStack(io.ErrClosedPipe)
+		//case <-conn.localClosed:
+		//	err = errors.WithStack(io.ErrClosedPipe)
 	}
 
 	return
@@ -672,11 +679,15 @@ func (conn *Conn) getMux() *Muxer {
 // Before calling, the local end must be closed. If the Conn is started,
 // then remote must be closed as well. If it is not started, the remote must not be closed.
 func (conn *Conn) recycle() {
-	conn.wmu.Lock()
-	defer conn.wmu.Unlock()
-	conn.rmu.Lock()
-	defer conn.rmu.Unlock()
-	conn.recycleLocked()
+	if rs := conn.getRunState(); rs != runStateUnused && rs != runStateRecycle {
+		conn.muLocal.Lock()
+		defer conn.muLocal.Unlock()
+		conn.wmu.Lock()
+		defer conn.wmu.Unlock()
+		conn.rmu.Lock()
+		defer conn.rmu.Unlock()
+		conn.recycleLocked()
+	}
 }
 
 func (conn *Conn) recycleLocked() {
@@ -733,6 +744,12 @@ func (conn *Conn) forceRecycleLocked() {
 	}
 }
 
+func (conn *Conn) consumeAck() {
+	if atomic.AddInt32(&conn.sendWindow, 1) > int32(SendWindowSize) {
+		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", conn.getSendWindow(), int32(SendWindowSize), conn))
+	}
+}
+
 func (conn *Conn) makeFinalFrame(isAck bool) (fd FrameData) {
 	if fd = FrameDataAllocID(conn.ID); fd != nil {
 		fd.Header().SetFlow()
@@ -740,36 +757,25 @@ func (conn *Conn) makeFinalFrame(isAck bool) (fd FrameData) {
 		if isAck {
 			fd.Header().SetHead()
 		}
+		return
 	}
-	return
+	panic("failed to allocate final frame")
 }
 
 func (conn *Conn) writeFinalLocked(isAck bool) (err error) {
-	if conn.localSendingFinal() {
-		if err = conn.flushLocked(); err == nil {
-			if fd := conn.makeFinalFrame(isAck); fd != nil {
-				err = conn.mux.ConnWrite(fd)
-			}
-		}
+	conn.fdw = nil // discard any incomplete frame
+	if err = conn.mux.ConnWrite(conn.makeFinalFrame(false)); err == nil {
+		atomic.StoreInt32(&conn.localSentFinal, 1)
 	}
 	return
 }
 
-func (conn *Conn) consumeAck() {
-	if atomic.AddInt32(&conn.sendWindow, 1) > int32(SendWindowSize) {
-		panic(fmt.Sprintf("sendWindow %d > %d SendWindowSize: %+v\n", conn.getSendWindow(), int32(SendWindowSize), conn))
-	}
-}
-
-// Close unblocks all blocked calls to Read and Write, sends the final frame and
-// discards any pending data in the receive queue.
-// If the remote is closed, it recycles the Conn.
-func (conn *Conn) Close() error {
-	conn.cmu.Lock()
-	defer conn.cmu.Unlock()
-
-	// log.Print("  CL ", conn)
-
+// Close interrupts any write operations in progress, sends the final frame,
+// and any future writes will fail until the Conn is recycled.
+// If the remote has sent their final frame it recycles the Conn immediately.
+func (conn *Conn) Close() (err error) {
+	conn.muLocal.Lock()
+	defer conn.muLocal.Unlock()
 	select {
 	case <-conn.localClosed:
 		// already closed
@@ -780,20 +786,18 @@ func (conn *Conn) Close() error {
 
 	conn.wmu.Lock()
 	defer conn.wmu.Unlock()
-	conn.rmu.Lock()
-	defer conn.rmu.Unlock()
-
-	if !conn.hasRemoteSentFinal() {
-		// will be recycled when remote is closed
-		conn.writeFinalLocked(false)
-		conn.setRunState(runStateWaitFin)
-		return nil
+	if err = conn.writeFinalLocked(false); err == nil {
+		conn.muRemote.Lock()
+		defer conn.muRemote.Unlock()
+		if conn.hasRemoteSentFinal() {
+			conn.rmu.Lock()
+			defer conn.rmu.Unlock()
+			conn.recycleLocked()
+		} else {
+			conn.setRunState(runStateWaitFin)
+		}
 	}
-
-	conn.writeFinalLocked(true)
-	conn.recycleLocked()
-
-	return nil
+	return
 }
 
 func (conn *Conn) closeIfNotHijacked() error {
@@ -807,8 +811,8 @@ func (conn *Conn) closeIfNotHijacked() error {
 // Set to nil to disable the callback. You may *not* call this function from the
 // callback itself, as that will deadlock.
 func (conn *Conn) OnRecycle(onRecycle func(*Conn)) {
-	conn.cmu.Lock()
-	defer conn.cmu.Unlock()
+	conn.muLocal.Lock()
+	defer conn.muLocal.Unlock()
 	conn.onRecycle = onRecycle
 }
 
@@ -831,8 +835,10 @@ func (conn *Conn) WriteRequest(r *http.Request) (err error) {
 				if _, err = io.CopyN(conn, r.Body, r.ContentLength); err != nil {
 					err = errors.WithStack(err)
 				}
-			} else {
+			} else if r.ContentLength == -1 {
 				_, err = conn.ReadFrom(r.Body)
+			} else {
+				r.Body.Close()
 			}
 			if flushErr := conn.Flush(); err == nil {
 				err = flushErr
@@ -874,8 +880,10 @@ func (conn *Conn) WriteResponse(r *http.Response) (err error) {
 		if err == nil && r.Body != nil {
 			if r.ContentLength > 0 {
 				_, err = io.CopyN(conn, r.Body, r.ContentLength)
-			} else {
+			} else if r.ContentLength == -1 {
 				_, err = conn.readFrom(r.Body)
+			} else {
+				r.Body.Close()
 			}
 		}
 		if flushErr := conn.flushLocked(); err == nil {

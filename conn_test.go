@@ -331,7 +331,7 @@ func Test_Conn_String(t *testing.T) {
 	conn := NewConn(&connTester{}, 0x1)
 	conn.setRunState(runStateWaitFin)
 	conn.hijacking()
-	conn.localSendingFinal()
+	atomic.StoreInt32(&conn.localSentFinal, 1)
 	conn.remoteSendingFinal()
 	expected := fmt.Sprintf("[Conn %v %v   FIN   HJ LF RF (%d+%d)]", conn.Serial(), conn.ID, SendWindowSize, 0)
 	assert.Equal(t, expected, conn.String())

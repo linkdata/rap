@@ -37,7 +37,6 @@ func (e echoTester) echoClient(c *rap.Client, req *http.Request) {
 	} else {
 		fmt.Printf("No echo received, expected:\n[%s]\n", expect)
 	}
-	fmt.Printf("OK [%s]\n", expect)
 }
 
 func (e echoTester) echo(req *http.Request) {
@@ -101,9 +100,36 @@ func main() {
 	if len(args) < 1 {
 		log.Fatal("missing required argument: address:port of upstream RAP server")
 	}
+	addr := args[0]
+	client := rap.NewClient(addr)
+	defer client.Close()
 
-	et := echoTester{Addr: args[0]}
+	/*
+		if conn, err := client.NewConnMayDial(); err == nil {
+			for i := 1; i <= rap.SendWindowSize*2; i++ {
+				fmt.Printf("%d: state %s\n", i, conn.String())
+				conn.Write([]byte{1})
+			}
+			fmt.Printf("ending state %s\n", conn.String())
+			conn.Close()
+		}
+	*/
+
+	et := echoTester{Addr: addr}
+
+	//lotsaFooBar := bytes.Repeat([]byte("foobar! "), 8192)
+	//et.echo(httptest.NewRequest("POST", "/lotsafoobar", ioutil.NopCloser(bytes.NewReader(lotsaFooBar))))
+
 	et.echo(httptest.NewRequest("GET", "/", nil))
 	et.echo(httptest.NewRequest("PUT", "/meh", bytes.NewReader([]byte("foo\nbar"))))
-	et.echo(httptest.NewRequest("PUT", "/meh", ioutil.NopCloser(bytes.NewReader([]byte("foo")))))
+	et.echo(httptest.NewRequest("PUT", "/meh", ioutil.NopCloser(bytes.NewReader([]byte("baz")))))
+
+	for n := 0; n < 1000; n++ {
+		// et.echoClient(client, httptest.NewRequest("GET", "/", nil))
+		// et.echoClient(client, httptest.NewRequest("PUT", "/meh", ioutil.NopCloser(bytes.NewReader([]byte("foo")))))
+	}
+
+	if err := client.Shutdown(); err != nil {
+		fmt.Print(err)
+	}
 }
