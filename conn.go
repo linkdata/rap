@@ -828,13 +828,14 @@ func (conn *Conn) WriteUserRecordType(c byte) (err error) {
 func (conn *Conn) WriteRequest(r *http.Request) (err error) {
 	if err = conn.WriteStart(); err == nil {
 		if err = conn.fdw.WriteRequest(r); err == nil {
-			if r.ContentLength > 0 {
-				if _, err = io.CopyN(conn, r.Body, r.ContentLength); err != nil {
-					err = errors.WithStack(err)
+			if r.Body != nil {
+				if r.ContentLength > 0 {
+					if _, err = io.CopyN(conn, r.Body, r.ContentLength); err != nil {
+						err = errors.WithStack(err)
+					}
+				} else if r.ContentLength == -1 {
+					_, err = conn.ReadFrom(r.Body)
 				}
-			} else if r.ContentLength == -1 {
-				_, err = conn.ReadFrom(r.Body)
-			} else {
 				r.Body.Close()
 			}
 			if flushErr := conn.Flush(); err == nil {
@@ -851,21 +852,18 @@ func (conn *Conn) ProxyResponse(w http.ResponseWriter) (statusCode int, err erro
 	conn.rmu.Lock()
 	defer conn.rmu.Unlock()
 
-	if err = conn.loadFrameReader(); err != nil {
-		return 0, err
-	}
-
-	if conn.fdr.Header().HasHead() {
-		switch rt := conn.fp.ReadRecordType(); rt {
-		case RecordTypeHTTPResponse:
-			statusCode = conn.fp.ProxyResponse(w)
-		case RecordTypeHijacked:
-			statusCode = 101
-		default:
-			return 0, errors.WithStack(ErrUnhandledRecordType{rt})
+	if err = conn.loadFrameReader(); err == nil {
+		if conn.fdr.Header().HasHead() {
+			switch rt := conn.fp.ReadRecordType(); rt {
+			case RecordTypeHTTPResponse:
+				statusCode = conn.fp.ProxyResponse(w)
+			case RecordTypeHijacked:
+				statusCode = 101
+			default:
+				err = errors.WithStack(ErrUnhandledRecordType{rt})
+			}
 		}
 	}
-
 	return
 }
 
