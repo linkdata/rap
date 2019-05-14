@@ -28,6 +28,7 @@ project.lock.json
 *.prof
 *.zip
 *.test
+*.log
 
 coverage.txt
 
