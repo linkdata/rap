@@ -75,7 +75,7 @@ type Muxer struct {
 	serialNumber       uint32
 
 	muNetLog sync.Mutex
-	NetLog   bool // if true, log network data using log.Print()
+	netLog   bool // if true, log network data using log.Print()
 }
 
 var muxerNextSerialNumber uint32
@@ -99,7 +99,9 @@ func NewMuxer(rwc io.ReadWriteCloser) *Muxer {
 	}
 
 	for idx := range mux.connLookup {
-		mux.connLookup[idx] = NewConn(mux, ConnID(idx))
+		conn := NewConn(mux, ConnID(idx))
+		conn.netLog = mux.netLog
+		mux.connLookup[idx] = conn
 	}
 	return mux
 }
@@ -167,6 +169,17 @@ func (mux *Muxer) Latency() (d time.Duration) {
 	return
 }
 
+// NetLog enables or disables logging of network data
+// and Conn state changes.
+func (mux *Muxer) NetLog(state bool) {
+	mux.mu.Lock()
+	defer mux.mu.Unlock()
+	mux.netLog = state
+	for _, conn := range mux.connLookup {
+		conn.netLog = state
+	}
+}
+
 // ReadFrom implements io.ReaderFrom.
 func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 	var unreported int64
@@ -224,7 +237,7 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 
 		conn := mux.connLookup[fd.Header().ConnID()]
 
-		if mux.NetLog {
+		if mux.netLog {
 			mux.muNetLog.Lock()
 			log.Print("READ ", conn, fd)
 			mux.muNetLog.Unlock()
@@ -299,7 +312,7 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			if mux.NetLog {
+			if mux.netLog {
 				mux.muNetLog.Lock()
 				log.Print("WRIT ", mux.getConn(fd.Header().ConnID()), fd)
 				mux.muNetLog.Unlock()
@@ -506,6 +519,7 @@ func (mux *Muxer) NewConnWait(d time.Duration) (conn *Conn) {
 		case <-timer.C:
 		}
 	}
+	conn.netLog = mux.netLog
 	return
 }
 
@@ -526,6 +540,7 @@ func (mux *Muxer) AvailableConns() (connCount int) {
 func (mux *Muxer) NewConn() (conn *Conn) {
 	select {
 	case conn = <-mux.conns:
+		conn.netLog = mux.netLog
 		return
 	default:
 	}
@@ -537,6 +552,7 @@ func (mux *Muxer) NewConn() (conn *Conn) {
 		nextID := lastID + 1
 		if atomic.CompareAndSwapInt32(&mux.connLastID, lastID, nextID) {
 			conn = NewConn(mux, ConnID(nextID))
+			conn.netLog = mux.netLog
 			conn.OnRecycle(mux.ConnRelease)
 			mux.connLookup[nextID] = conn
 			return
@@ -559,6 +575,9 @@ func (mux *Muxer) ConnWrite(fd FrameData) error {
 func (mux *Muxer) ConnRelease(conn *Conn) {
 	select {
 	case mux.conns <- conn:
+		if mux.netLog {
+			log.Print("IDLE ", conn)
+		}
 	default:
 		panic(fmt.Sprint("can't release Conn, len(s.conns) ", len(mux.conns), " cap(s.conns) ", cap(mux.conns), " max ", MaxConnID))
 	}

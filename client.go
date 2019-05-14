@@ -22,6 +22,7 @@ type Client struct {
 	DialTimeout  time.Duration // dialing timeout
 	ReadTimeout  time.Duration // read timeout (reading the request)
 	WriteTimeout time.Duration // write timeout (writing the response)
+	netLog       bool          // set to true to log.Print() network data
 	mux          *Muxer        // the current active Muxer (atomic access only)
 	paused       int32
 	mu           sync.Mutex // protects those below
@@ -114,9 +115,25 @@ func (c *Client) dialLocked() *Muxer {
 	c.lastAttempt = time.Time{}
 	c.firstAttempt = time.Time{}
 	mux := NewMuxer(rwc)
+	mux.netLog = c.netLog
 	go mux.ServeHTTP(nil)
 	c.muxers = append(c.muxers, mux)
 	return mux
+}
+
+// NetLog enables or disables logging of network data
+// and Conn state changes. This is a large volume of
+// information, so it's recommended to redirect the
+// log output using log.SetOutput().
+func (c *Client) NetLog(state bool) {
+	c.netLog = state
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, mux := range c.muxers {
+		if mux != nil {
+			mux.NetLog(state)
+		}
+	}
 }
 
 // selectBestMuxLocked returns an existing Muxer that have free Conns,
@@ -303,6 +320,7 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 				wg.Wait()
 			} else {
 				// close and write the response body
+				// conn.Close()
 				_, responseErr = conn.WriteTo(w)
 			}
 		}

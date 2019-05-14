@@ -34,6 +34,7 @@ type Server struct {
 	muxerLimiter  chan struct{}
 	doneChan      chan struct{}
 	activeMuxer   map[*Muxer]struct{}
+	netLog        bool
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -140,6 +141,7 @@ func (srv *Server) Serve(l net.Listener) error {
 		srv.getMuxerLimiter() <- struct{}{}
 		go func(rwc io.ReadWriteCloser) {
 			mux := NewMuxer(rwc)
+			mux.NetLog(srv.netLog)
 			mux.StatsCollector = srv
 			mux.ReadTimeout = srv.ReadTimeout
 			mux.WriteTimeout = srv.WriteTimeout
@@ -151,6 +153,21 @@ func (srv *Server) Serve(l net.Listener) error {
 			}
 			<-srv.getMuxerLimiter()
 		}(rwc)
+	}
+}
+
+// NetLog enables or disables logging of network data
+// and Conn state changes. This is a large volume of
+// information, so it's recommended to redirect the
+// log output using log.SetOutput().
+func (srv *Server) NetLog(state bool) {
+	srv.netLog = state
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	for mux := range srv.activeMuxer {
+		if mux != nil {
+			mux.NetLog(state)
+		}
 	}
 }
 
