@@ -519,7 +519,9 @@ func (mux *Muxer) NewConnWait(d time.Duration) (conn *Conn) {
 		case <-timer.C:
 		}
 	}
-	conn.netLog = mux.netLog
+	if conn != nil {
+		conn.netLog = mux.netLog
+	}
 	return
 }
 

@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -160,6 +161,7 @@ type Conn struct {
 	readDeadline  connDeadline
 	writeDeadline connDeadline
 	serialNumber  uint32
+	netLog        bool // if true, log state changes
 }
 
 var connNextSerialNumber uint32
@@ -202,10 +204,6 @@ func (conn *Conn) remoteSendingFinal() bool {
 func (conn *Conn) hasLocalSentFinal() bool {
 	return atomic.LoadInt32(&conn.localSentFinal) != 0
 }
-
-//func (conn *Conn) localSendingFinal() bool {
-//	return atomic.CompareAndSwapInt32(&conn.localSentFinal, 0, 1)
-//}
 
 // Serial returns a string identifying the Conn, containing the
 // owning Muxers serial number, a colon, and this Conn's serial number.
@@ -303,7 +301,9 @@ func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
 }
 
 func (conn *Conn) receivedFinal(fd FrameData) {
-	// log.Print(" FIN ", conn, fd)
+	if conn.netLog {
+		log.Print(" FIN ", conn, fd)
+	}
 
 	if fd != nil {
 		if fd.Header().SizeValue() != 0 {
@@ -686,7 +686,9 @@ func (conn *Conn) recycle() {
 }
 
 func (conn *Conn) recycleLocked() {
-	// log.Print("  RC ", conn)
+	if conn.netLog {
+		log.Print("  RC ", conn)
+	}
 
 	conn.setRunState(runStateRecycle)
 
