@@ -138,25 +138,24 @@ type Conn struct {
 	mux   ConnMuxer     // the Muxer that owns us
 	ackCh chan struct{} // ack's from peer go in this
 
-	muLocal     sync.Mutex    // guards close(localClosed) and onRecycle
-	localClosed chan struct{} // closed when Close() has been called
-	onRecycle   func(*Conn)   // function to call when Conn is recycled
-
-	muRemote sync.Mutex     // guards close(readCh)
-	readCh   chan FrameData // data frames from peer go in this
+	cmu         sync.Mutex     // state mutex, guards the below variables
+	localClosed chan struct{}  // closed when Close() has been called
+	onRecycle   func(*Conn)    // function to call when Conn is recycled
+	readCh      chan FrameData // data frames from peer go in this
+	state       runState       // atomic nonzero if a header frame has been sent or received
 
 	// these are atomic to allow Conn.String() to print the state without causing races
-	localSentFinal  int32    // atomic nonzero if local has sent it's final frame
-	remoteSentFinal int32    // atomic nonzero if remote has sent it's final frame
-	sendWindow      int32    // atomic number of frames still allowed to be in flight
-	state           runState // atomic nonzero if a header frame has been sent or received
-	hijacked        int32    // atomic nonzero if Hijack() was called
+	localSentFinal  int32 // atomic nonzero if local has sent it's final frame
+	remoteSentFinal int32 // atomic nonzero if remote has sent it's final frame
+	sendWindow      int32 // atomic number of frames still allowed to be in flight
+	hijacked        int32 // atomic nonzero if Hijack() was called
 
 	wmu sync.Mutex // guards fdw
 	fdw FrameData  // FrameData being written to, nil after final frame sent
 
-	rmu           sync.Mutex  // guards fdr
-	fdr           FrameData   // FrameData being read from by fr
+	rmu sync.Mutex // guards fdr
+	fdr FrameData  // FrameData being read from by fr
+
 	fp            FrameParser // Frame parser (into fdr)
 	readDeadline  connDeadline
 	writeDeadline connDeadline
@@ -190,8 +189,8 @@ func (conn *Conn) hasRemoteSentFinal() bool {
 }
 
 func (conn *Conn) remoteSendingFinal() bool {
-	conn.muRemote.Lock()
-	defer conn.muRemote.Unlock()
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
 	if conn.hasRemoteSentFinal() {
 		return false
 	}
@@ -318,8 +317,6 @@ func (conn *Conn) receivedFinal(fd FrameData) {
 	}
 
 	if conn.hasLocalSentFinal() {
-		// conn.cmu.Lock()
-		// defer conn.cmu.Unlock()
 		conn.recycle()
 	}
 }
@@ -679,15 +676,13 @@ func (conn *Conn) getMux() *Muxer {
 // Before calling, the local end must be closed. If the Conn is started,
 // then remote must be closed as well. If it is not started, the remote must not be closed.
 func (conn *Conn) recycle() {
-	if rs := conn.getRunState(); rs != runStateUnused && rs != runStateRecycle {
-		conn.muLocal.Lock()
-		defer conn.muLocal.Unlock()
-		conn.wmu.Lock()
-		defer conn.wmu.Unlock()
-		conn.rmu.Lock()
-		defer conn.rmu.Unlock()
-		conn.recycleLocked()
-	}
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	conn.rmu.Lock()
+	defer conn.rmu.Unlock()
+	conn.recycleLocked()
 }
 
 func (conn *Conn) recycleLocked() {
@@ -704,6 +699,8 @@ func (conn *Conn) recycleLocked() {
 
 func (conn *Conn) canRecycleLocked() error {
 	switch {
+	case conn.getRunState() == runStateUnused:
+		return errors.Errorf("recycle(): attempt to recycle unused\n%v\n", conn)
 	case !isClosedChan(conn.localClosed):
 		return errors.Errorf("recycle(): local not closed\n%v\n", conn)
 	case len(conn.fdw) > 0:
@@ -774,8 +771,8 @@ func (conn *Conn) writeFinalLocked(isAck bool) (err error) {
 // and any future writes will fail until the Conn is recycled.
 // If the remote has sent their final frame it recycles the Conn immediately.
 func (conn *Conn) Close() (err error) {
-	conn.muLocal.Lock()
-	defer conn.muLocal.Unlock()
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
 	select {
 	case <-conn.localClosed:
 		// already closed
@@ -787,8 +784,6 @@ func (conn *Conn) Close() (err error) {
 	conn.wmu.Lock()
 	defer conn.wmu.Unlock()
 	if err = conn.writeFinalLocked(false); err == nil {
-		conn.muRemote.Lock()
-		defer conn.muRemote.Unlock()
 		if conn.hasRemoteSentFinal() {
 			conn.rmu.Lock()
 			defer conn.rmu.Unlock()
@@ -811,8 +806,8 @@ func (conn *Conn) closeIfNotHijacked() error {
 // Set to nil to disable the callback. You may *not* call this function from the
 // callback itself, as that will deadlock.
 func (conn *Conn) OnRecycle(onRecycle func(*Conn)) {
-	conn.muLocal.Lock()
-	defer conn.muLocal.Unlock()
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
 	conn.onRecycle = onRecycle
 }
 
