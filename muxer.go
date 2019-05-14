@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -72,6 +73,9 @@ type Muxer struct {
 	isReadClosed       bool
 	isWriteClosed      bool
 	serialNumber       uint32
+
+	muNetLog sync.Mutex
+	NetLog   bool // if true, log network data using log.Print()
 }
 
 var muxerNextSerialNumber uint32
@@ -220,7 +224,11 @@ func (mux *Muxer) ReadFrom(r io.Reader) (n int64, err error) {
 
 		conn := mux.connLookup[fd.Header().ConnID()]
 
-		// log.Print("READ ", conn, fd)
+		if mux.NetLog {
+			mux.muNetLog.Lock()
+			log.Print("READ ", conn, fd)
+			mux.muNetLog.Unlock()
+		}
 
 		if conn.starting() {
 			if mux.ReadTimeout != 0 {
@@ -291,7 +299,12 @@ func (mux *Muxer) WriteTo(w io.Writer) (n int64, err error) {
 			}
 
 			// do the actual write
-			// log.Print("WRIT ", mux.getConn(fd.Header().ConnID()), fd)
+			if mux.NetLog {
+				mux.muNetLog.Lock()
+				log.Print("WRIT ", mux.getConn(fd.Header().ConnID()), fd)
+				mux.muNetLog.Unlock()
+			}
+
 			written, err = fd.WriteTo(w)
 			n += written
 			FrameDataFree(fd)
