@@ -171,9 +171,47 @@ A receiver *conn* must be able to buffer the full window size count of *frames*.
 
 ## Closing
 
-Before a *conn* is done and it's id may be reused, both sides must send and receive a empty *frame* with the *flow* and *body* control bits set. These are known as the *final frames*. After the *final frame* is sent, no more non-flow-control frames may be sent. Upon receiving a *final frame*, we must send a *final frame ack* in response if we haven't already (known as a *final frame ack*).
+Before a *conn* is done and it's id may be reused, both sides must send and receive a empty *frame* with the *flow* and *body* control bits set. These are known as the *final frames*. After the *final frame* is sent, no more non-flow-control frames may be sent. Upon receiving a *final frame*, no more data frames may be received, and once we've consumed any queued data frames we must send a *final frame ack* in response.
 
-Once a *conn* has both sent and received *final frames* it may be recycled and re-used.
+Once a *conn* has both sent and received *final frame acks* it may be recycled and re-used.
+
+## State table
+
+```
+In this table, each state listed can change state depeding on which
+kind of frame is sent or received. If a state doesn't explicitly
+handle the event, it's a protocol error and the Conn must abort.
+Send and receive ack's for data frames are always allowed.
+Also note that 'receive' in this context means the frame has been
+consumed by the receiver. Merely being read from the network and 
+queued for delivery to endpoint doesn't count.
+
+[Idle]
+  Send data frame --> [Active]
+  Receive data frame --> [Active]
+
+[Active]
+  Send data frame
+  Receive data frame
+  Send final frame --> [LocalWaitAck]
+  Receive final frame --> (Send final frame ack) --> [RemoteClosed]
+
+[RemoteClosed]
+  Send data frame
+  Send final frame --> [WaitAck]
+
+[LocalWaitAck]
+  Receive data frame
+  Receive final frame ack --> [LocalClosed]
+  Receive final frame --> (Send final frame ack) --> [WaitAck]
+
+[LocalClosed]
+  Receive data frame
+  Receive final frame --> (Send final frame ack) --> [Idle]
+
+[WaitAck]
+  Receive final frame ack --> [Idle]
+```
 
 ## API documentation
 

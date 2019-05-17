@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -32,9 +33,10 @@ type connTester struct {
 	handler     http.Handler
 	lastWritten FrameData
 	sentFinal   int32
+	netLog      bool
 }
 
-type connTesterWriter struct {
+type connTesterMuxer struct {
 	ct          *connTester
 	writeCh     chan FrameData
 	lastWritten FrameData
@@ -43,8 +45,8 @@ type connTesterWriter struct {
 	timeoutErr  error
 }
 
-func newConnTesterWriter(ct *connTester) *connTesterWriter {
-	ctw := &connTesterWriter{
+func newConnTesterMuxer(ct *connTester) *connTesterMuxer {
+	ctw := &connTesterMuxer{
 		ct:         ct,
 		writeCh:    make(chan FrameData),
 		closeCh:    make(chan struct{}),
@@ -65,6 +67,9 @@ func newConnTesterWriter(ct *connTester) *connTesterWriter {
 			if fd == nil {
 				break
 			}
+			if ctw.ct.netLog {
+				log.Print("WRIT ", ctw.ct.Conn, fd)
+			}
 			if !fd.Header().IsMuxerControl() {
 				if fd.Header().HasFlow() {
 					isFinal := fd.Header().IsFinal()
@@ -74,11 +79,10 @@ func newConnTesterWriter(ct *connTester) *connTesterWriter {
 						if ctw.ct.sendingFinal() {
 							if ctw.ct.finFn != nil {
 								ctw.ct.finFn(ctw.ct.Conn)
-							} else {
-								if needsAck {
-									ctw.ct.SubmitFrame(ct.Conn.makeFinalFrame(true))
-								}
 							}
+						}
+						if needsAck {
+							ctw.ct.SubmitFrame(ct.Conn.makeFinalFrame(true))
 						}
 					}
 				} else {
@@ -97,35 +101,36 @@ func newConnTesterWriter(ct *connTester) *connTesterWriter {
 	return ctw
 }
 
-func (ctw *connTesterWriter) isWriteClosed() bool {
+func (ctw *connTesterMuxer) isWriteClosed() bool {
 	return atomic.LoadInt32(&ctw.writeClosed) != 0
 }
 
-func (ctw *connTesterWriter) closingWrite() bool {
+func (ctw *connTesterMuxer) closingWrite() bool {
 	return atomic.CompareAndSwapInt32(&ctw.writeClosed, 0, 1)
 }
 
-func (ctw *connTesterWriter) CloseWrite() {
+func (ctw *connTesterMuxer) CloseWrite() {
 	if ctw.closingWrite() {
 		close(ctw.writeCh)
 	}
 }
 
-func (ctw *connTesterWriter) Close() {
+func (ctw *connTesterMuxer) Close() {
 	ctw.CloseWrite()
 }
 
-func (ctw *connTesterWriter) WaitForClose() {
+func (ctw *connTesterMuxer) WaitForClose() {
 	timer := time.NewTimer(time.Second * 10)
 	defer timer.Stop()
 	select {
 	case <-ctw.closeCh:
 	case <-timer.C:
+		log.Print("connTesterWriter timeout waiting for close")
 		assert.Fail(ctw.ct.t, "connTesterWriter timeout waiting for close")
 	}
 }
 
-func (ctw *connTesterWriter) ConnWrite(fd FrameData) error {
+func (ctw *connTesterMuxer) ConnWrite(fd FrameData) error {
 	if !ctw.ct.isWriteClosed() {
 		t := time.NewTimer(time.Second)
 		defer t.Stop()
@@ -143,11 +148,11 @@ func (ctw *connTesterWriter) ConnWrite(fd FrameData) error {
 	return io.ErrClosedPipe
 }
 
-func (ctw *connTesterWriter) ConnRelease(conn *Conn) {
+func (ctw *connTesterMuxer) ConnRelease(conn *Conn) {
 	ctw.ct.ConnRelease(conn)
 }
 
-func (ctw *connTesterWriter) ConnAbortChannel() <-chan struct{} {
+func (ctw *connTesterMuxer) ConnAbortChannel() <-chan struct{} {
 	return ctw.closeCh
 }
 
@@ -156,7 +161,7 @@ func newConnTester(t *testing.T) *connTester {
 		t:          t,
 		releasedCh: make(chan struct{}),
 	}
-	ct.mux = newConnTesterWriter(ct)
+	ct.mux = newConnTesterMuxer(ct)
 	ct.Conn = NewConn(ct, MaxConnID)
 	ct.Conn.OnRecycle(ct.ConnRelease)
 	ct.wg.Add(1)
@@ -179,14 +184,14 @@ func newConnTesterUsingClient(t *testing.T, c *Client) *connTester {
 }
 
 func (ct *connTester) isWriteClosed() bool {
-	if ctw, ok := ct.mux.(*connTesterWriter); ok {
+	if ctw, ok := ct.mux.(*connTesterMuxer); ok {
 		return ctw.isWriteClosed()
 	}
 	return false
 }
 
 func (ct *connTester) closeWrite() bool {
-	if ctw, ok := ct.mux.(*connTesterWriter); ok {
+	if ctw, ok := ct.mux.(*connTesterMuxer); ok {
 		return ctw.closingWrite()
 	}
 	return false
@@ -204,13 +209,16 @@ func (ct *connTester) Released() bool {
 }
 
 func (ct *connTester) CloseWrite() {
-	if etw, ok := ct.mux.(*connTesterWriter); ok {
+	if etw, ok := ct.mux.(*connTesterMuxer); ok {
 		etw.CloseWrite()
 	}
 }
 
 func (ct *connTester) SubmitFrame(fd FrameData) error {
 	ct.Conn.starting()
+	if ct.netLog {
+		log.Print("READ ", ct.Conn, fd)
+	}
 	return ct.Conn.SubmitFrame(fd)
 }
 
@@ -244,7 +252,7 @@ func (ct *connTester) ConnAbortChannel() <-chan struct{} {
 
 func (ct *connTester) Close() {
 	ct.Conn.Close()
-	if ctw, ok := ct.mux.(*connTesterWriter); ok {
+	if ctw, ok := ct.mux.(*connTesterMuxer); ok {
 		ctw.CloseWrite()
 		ctw.WaitForClose()
 	}
@@ -329,11 +337,11 @@ func (fw *failWriter) failError() (err error) {
 
 func Test_Conn_String(t *testing.T) {
 	conn := NewConn(&connTester{}, 0x1)
-	conn.setRunState(runStateWaitFin)
+	conn.setRunState(runStateWaitAck)
 	conn.hijacking()
-	atomic.StoreInt32(&conn.localSentFinal, 1)
 	conn.remoteSendingFinal()
-	expected := fmt.Sprintf("[Conn %v %v   FIN   HJ LF RF (%d+%d)]", conn.Serial(), conn.ID, SendWindowSize, 0)
+	close(conn.localClosed)
+	expected := fmt.Sprintf("[Conn %v %v %s HJ (%d+%d)]", conn.Serial(), conn.ID, conn.getRunStateText(), SendWindowSize, 0)
 	assert.Equal(t, expected, conn.String())
 }
 
@@ -395,6 +403,7 @@ func Test_Conn_StartAndRelease_missing_frame_head(t *testing.T) {
 	fd.Header().SetBody()
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	ct.SubmitFrame(fd)
+	ct.SendFinal()
 	assert.Panics(t, func() { ct.Conn.Serve(ct) })
 	assert.True(t, ct.Released())
 }
@@ -410,6 +419,7 @@ func Test_Conn_StartAndRelease_invalid_url_in_request_record(t *testing.T) {
 	fd.WriteStringNull() // scheme
 	fd.WriteRoute(":a:") // illegal url
 	ct.SubmitFrame(fd)
+	ct.SendFinal()
 	err := ct.Conn.Serve(ct)
 	assert.Error(t, err)
 	assert.True(t, ct.Released())
@@ -423,9 +433,8 @@ func Test_Conn_StartAndRelease_incomplete_request_frame(t *testing.T) {
 	fd.WriteHeader(MaxConnID)
 	fd.WriteRecordType(RecordTypeHTTPRequest)
 	ct.SubmitFrame(fd)
-	assert.Panics(t, func() {
-		ct.Conn.Serve(ct)
-	})
+	ct.SendFinal()
+	assert.Panics(t, func() { ct.Conn.Serve(ct) })
 	assert.True(t, ct.Released())
 }
 
@@ -437,6 +446,7 @@ func Test_Conn_StartAndRelease_unhandled_record_type(t *testing.T) {
 	fd.WriteHeader(MaxConnID)
 	fd.WriteRecordType(rt)
 	ct.SubmitFrame(fd)
+	ct.SendFinal()
 	err := ct.Conn.Serve(ct)
 	assert.Equal(t, ErrUnhandledRecordType{rt}, errors.Cause(err))
 	assert.True(t, ct.Released())
@@ -487,7 +497,7 @@ func Test_Conn_WriteByte(t *testing.T) {
 	err := ct.Conn.WriteByte(0x01)
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
 	assert.True(t, ct.Conn.remoteSendingFinal())
-	ct.Conn.recycle()
+	// ct.Conn.recycle()
 }
 
 func Test_Conn_Write(t *testing.T) {
@@ -591,7 +601,7 @@ func Test_Conn_ReadFrom(t *testing.T) {
 
 	assert.NoError(t, ct.Conn.Flush())
 	assert.Zero(t, len(ct.Conn.fdw))
-	assert.False(t, ct.Conn.hasLocalSentFinal())
+	assert.False(t, ct.Conn.isClosed())
 
 	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
 	assert.NotZero(t, m)
@@ -631,7 +641,7 @@ func Test_Conn_WriteRequest(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	err := ct.Conn.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
-	assert.False(t, ct.Conn.hasLocalSentFinal())
+	assert.False(t, ct.Conn.isClosed())
 	assert.NoError(t, err)
 
 	ct = newConnTester(t)
@@ -639,8 +649,9 @@ func Test_Conn_WriteRequest(t *testing.T) {
 	ct.finFn = func(conn *Conn) {} // ignore the final frame from Close()
 	ct.Conn.starting()
 	assert.NoError(t, ct.Conn.Close())
-	assert.True(t, ct.Conn.hasLocalSentFinal())
-	assert.False(t, ct.Conn.hasRemoteSentFinal())
+	assert.True(t, ct.Conn.isClosed())
+	rs := ct.Conn.getRunState()
+	assert.True(t, rs == runStateLocalWaitAck || rs == runStateLocalClosed)
 	err = ct.Conn.WriteRequest(httptest.NewRequest("GET", "/", nil))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
 }
@@ -652,7 +663,7 @@ func Test_Conn_WriteResponse(t *testing.T) {
 	rr.WriteString("Meh")
 	rr.WriteHeader(200)
 	err := ct.Conn.WriteResponse(rr.Result())
-	assert.False(t, ct.Conn.hasLocalSentFinal())
+	assert.False(t, ct.Conn.isClosed())
 	assert.NoError(t, err)
 }
 
@@ -662,7 +673,10 @@ func Test_Conn_CloseWrite(t *testing.T) {
 	ct.Conn.starting()
 	close(ct.Conn.localClosed)
 	err := ct.Conn.Close()
-	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
+	if isClosedError(err) {
+		err = nil
+	}
+	assert.NoError(t, errors.Cause(err))
 
 	ct = newConnTester(t)
 	defer ct.Close()
@@ -703,7 +717,6 @@ func Test_Conn_ProxyResponse_transparency(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NoError(t, ct.Conn.WriteResponse(rr.Result()))
 	assert.NoError(t, ct.Conn.Close())
-	assert.True(t, ct.Released())
 
 	testingFrame := ct.lastWritten
 	assert.NotNil(t, testingFrame)
@@ -712,7 +725,7 @@ func Test_Conn_ProxyResponse_transparency(t *testing.T) {
 	assert.Equal(t, 201, rr.Code)
 	assert.Equal(t, int(3), rr.Body.Len())
 
-	assert.NoError(t, ct.Conn.Close())
+	// assert.NoError(t, ct.Conn.Close())
 
 	// Test transparency
 	ct2 := newConnTester(t)
@@ -724,7 +737,8 @@ func Test_Conn_ProxyResponse_transparency(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = ct2.Conn.WriteTo(rr2)
 	assert.Error(t, io.EOF, errors.Cause(err))
-	assert.True(t, ct2.Conn.hasRemoteSentFinal())
+	// assert.True(t, ct2.Conn.hasRemoteSentFinal())
+	assert.Equal(t, ct2.Conn.getRunState(), runStateRemoteClosed)
 	assert.Equal(t, int(3), rr.Body.Len())
 	assert.Equal(t, int(3), rr2.Body.Len())
 	assert.Equal(t, rr.Body.String(), rr2.Body.String())
@@ -757,7 +771,7 @@ func Test_Conn_ProxyResponse_read_eof(t *testing.T) {
 	ct.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := ct.Conn.ProxyResponse(rr2)
-	assert.True(t, ct.Conn.hasRemoteSentFinal())
+	assert.Equal(t, ct.Conn.getRunState(), runStateRemoteClosed)
 	assert.Equal(t, io.EOF, errors.Cause(err))
 }
 
@@ -769,10 +783,8 @@ func Test_Conn_ProxyResponse_wrong_record_type(t *testing.T) {
 	rt := RecordTypeUserFirst
 	fd.WriteRecordType(rt)
 	ct.SubmitFrame(fd)
-	ct.SendFinal()
 	rr2 := httptest.NewRecorder()
 	_, err := ct.Conn.ProxyResponse(rr2)
-	assert.True(t, ct.Conn.hasRemoteSentFinal())
 	assert.Equal(t, ErrUnhandledRecordType{rt}.Error(), errors.Cause(err).Error())
 }
 
@@ -851,7 +863,6 @@ func Test_Conn_SetDeadline_on_closed(t *testing.T) {
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(ct.Conn.SetReadDeadline(time.Now())))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(ct.Conn.SetWriteDeadline(time.Now())))
 	assert.True(t, ct.Conn.remoteSendingFinal())
-	ct.Conn.recycle()
 }
 
 func makeNetConnPipe() (e1, e2 net.Conn, stop func(), err error) {
@@ -915,6 +926,7 @@ func Test_Conn_flowcontrol_halts(t *testing.T) {
 		c2.Write([]byte{1})
 		assert.Equal(t, SendWindowSize-i, c2.getSendWindow())
 	}
+	assert.Equal(t, 0, c2.getSendWindow())
 	// This write should time out
 	c2.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
 	n, err := c2.Write([]byte{1})
@@ -931,18 +943,21 @@ func Test_Conn_flowcontrol_halts(t *testing.T) {
 	assert.Equal(t, 1, n)
 	assert.NoError(t, err)
 
-	// closing C1 discards all the pending data
 	assert.NoError(t, c1.Close())
 
 	// wait for remote to be closed
-	for !c2.hasRemoteSentFinal() {
-		time.Sleep(time.Millisecond)
-	}
+	_, err = io.Copy(ioutil.Discard, c2)
+	assert.NoError(t, errors.Cause(err))
 
-	// should fail with EOF indicating remote closed
+	// c1 still isn't reading, so c2 window should be zero
+	assert.Equal(t, 0, c2.getSendWindow())
+
+	// This write should time out
+	c2.SetWriteDeadline(time.Now().Add(time.Millisecond * 10))
 	n, err = c2.Write([]byte{1})
-	assert.Equal(t, 0, n)
-	assert.Equal(t, io.EOF, errors.Cause(err))
+	assert.Zero(t, n)
+	assert.Equal(t, timeoutError{}.Error(), errors.Cause(err).Error())
+	c2.SetWriteDeadline(time.Time{})
 
 	assert.NoError(t, c2.Close())
 }

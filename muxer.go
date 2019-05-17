@@ -581,7 +581,7 @@ func (mux *Muxer) ConnRelease(conn *Conn) {
 			log.Print("IDLE ", conn)
 		}
 	default:
-		panic(fmt.Sprint("can't release Conn, len(s.conns) ", len(mux.conns), " cap(s.conns) ", cap(mux.conns), " max ", MaxConnID))
+		panic(fmt.Sprint("can't release Conn, len(s.conns) ", len(mux.conns), " cap(s.conns) ", cap(mux.conns), " max ", MaxConnID, " conn ", conn))
 	}
 	return
 }

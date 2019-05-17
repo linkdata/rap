@@ -44,6 +44,7 @@ func (e echoTester) echo(req *http.Request) {
 	if c == nil {
 		c = rap.NewClient(e.Addr)
 		defer c.Close()
+		c.NetLog(true)
 	}
 	e.echoClient(c, req)
 }

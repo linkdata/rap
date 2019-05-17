@@ -256,6 +256,7 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 
 	var requestErr error
 	var responseErr error
+	var statusCode int
 
 	// log.Printf("rap.Client.ServeHTTP(): %+v\n", r)
 
@@ -269,8 +270,6 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 		}
 	}
 
-	var statusCode int
-
 	if c.ReadTimeout != 0 {
 		conn.SetDeadline(time.Now().Add(c.ReadTimeout))
 	}
@@ -283,12 +282,20 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 		conn.SetDeadline(time.Time{})
 	}
 
+	if !isUpgrade {
+		conn.Shutdown()
+	}
+
 	// request write may have been interrupted by server, for example
 	// by sending a 4xx in repsonse to a too-long request or a timeout
 	requestInterrupted := isClosedError(errors.Cause(requestErr))
 
 	if requestErr == nil || requestInterrupted {
-		if statusCode, responseErr = conn.ProxyResponse(w); responseErr == nil {
+		statusCode, responseErr = conn.ProxyResponse(w)
+		if isClosedError(responseErr) {
+			responseErr = nil
+		}
+		if responseErr == nil {
 			if requestInterrupted {
 				// suppress the request error in favor of the response data
 				requestErr = nil
@@ -319,8 +326,6 @@ func (c *Client) serveHTTP(w http.ResponseWriter, r *http.Request, conn *Conn) {
 				io.Copy(conn, rwc)
 				wg.Wait()
 			} else {
-				// close and write the response body
-				// conn.Close()
 				_, responseErr = conn.WriteTo(w)
 			}
 		}

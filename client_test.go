@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -195,7 +197,9 @@ func Test_Client_exhaust_muxer(t *testing.T) {
 	for secondMux.AvailableConns() != int(MaxConnID) {
 		select {
 		case <-timer1.C:
+			assert.Equal(t, int(MaxConnID), secondMux.AvailableConns())
 			assert.FailNow(t, "Conn did not release in time")
+			break
 		default:
 			time.Sleep(time.Millisecond)
 		}
@@ -245,6 +249,11 @@ func Test_Client_parallel_queries(t *testing.T) {
 	factor := int32(MaxConnID*4) / parallelism
 	queryCount := parallelism * factor
 	serveCount := int32(0)
+	netLog := true
+	if f, _ := os.Create("Test_Client_parallel_queries.log"); f != nil {
+		defer f.Close()
+		log.SetOutput(f)
+	}
 
 	s := &Server{
 		Addr:         srvAddr,
@@ -258,9 +267,11 @@ func Test_Client_parallel_queries(t *testing.T) {
 	ln, lnerr := s.Listen(srvAddr)
 	assert.NoError(t, lnerr)
 	defer s.Close()
+	s.NetLog(netLog)
 	go s.Serve(ln)
 
 	c := NewClient(s.Addr)
+	c.NetLog(netLog)
 	c.ReadTimeout = time.Second * 10
 	c.WriteTimeout = time.Second * 10
 	defer c.Close()
