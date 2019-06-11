@@ -76,10 +76,10 @@ func newConnTesterMuxer(ct *connTester) *connTesterMuxer {
 					needsAck := !fd.Header().IsFinalAck()
 					FrameDataFree(fd)
 					if isFinal {
-						if ctw.ct.sendingFinal() {
-							if ctw.ct.finFn != nil {
-								ctw.ct.finFn(ctw.ct.Conn)
-							}
+						if ctw.ct.finFn != nil {
+							ctw.ct.finFn(ctw.ct.Conn)
+						} else {
+							ctw.ct.SendFinal()
 						}
 						if needsAck {
 							ctw.ct.SubmitFrame(ct.Conn.makeFinalFrame(true))
@@ -251,6 +251,7 @@ func (ct *connTester) ConnAbortChannel() <-chan struct{} {
 }
 
 func (ct *connTester) Close() {
+	ct.SendFinal()
 	ct.Conn.Close()
 	if ctw, ok := ct.mux.(*connTesterMuxer); ok {
 		ctw.CloseWrite()
@@ -340,7 +341,7 @@ func Test_Conn_String(t *testing.T) {
 	conn.setRunState(runStateWaitAck)
 	conn.hijacking()
 	conn.remoteSendingFinal()
-	close(conn.localClosed)
+	close(conn.shutdownCh)
 	expected := fmt.Sprintf("[Conn %v %v %s HJ (%d+%d)]", conn.Serial(), conn.ID, conn.getRunStateText(), SendWindowSize, 0)
 	assert.Equal(t, expected, conn.String())
 }
@@ -455,11 +456,13 @@ func Test_Conn_StartAndRelease_unhandled_record_type(t *testing.T) {
 func Test_Conn_StartAndRelease_missing_body_bit_panics(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
+	assert.True(t, ct.Conn.starting())
 	ct.Conn.writeStart()
 	ct.Conn.fdw.Write(make([]byte, 1))
 	var err error
 	assert.Panics(t, func() { err = ct.Conn.Flush() })
 	assert.NoError(t, err)
+	ct.SendFinal()
 	err = ct.Conn.Close()
 	assert.NoError(t, err)
 	assert.True(t, ct.Released())
@@ -488,16 +491,15 @@ func Test_Conn_WriteByte(t *testing.T) {
 	assert.Equal(t, FrameHeaderSize+1, ct.Conn.Buffered())
 	assert.True(t, ct.Conn.fdw.Header().HasBody())
 
-	// write final frame
+	// have Conn write final frame, but suppress tester final frame response
 	ct.finFn = func(conn *Conn) {}
-	ct.Conn.Close()
+	ct.Conn.Shutdown()
 
 	// Flushing should fail since final is sent
 	ct.Conn.write(make([]byte, ct.Conn.Available()))
 	err := ct.Conn.WriteByte(0x01)
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
-	assert.True(t, ct.Conn.remoteSendingFinal())
-	// ct.Conn.recycle()
+	ct.SendFinal()
 }
 
 func Test_Conn_Write(t *testing.T) {
@@ -525,6 +527,8 @@ func Test_Conn_Write(t *testing.T) {
 	ct.Conn.write([]byte{0x04, 0x05})
 	assert.True(t, ct.Conn.fdw.Header().HasBody())
 	assert.Equal(t, FrameHeaderSize+1, ct.Conn.Buffered())
+
+	ct.SendFinal()
 }
 
 func Test_Conn_Flush(t *testing.T) {
@@ -601,12 +605,13 @@ func Test_Conn_ReadFrom(t *testing.T) {
 
 	assert.NoError(t, ct.Conn.Flush())
 	assert.Zero(t, len(ct.Conn.fdw))
-	assert.False(t, ct.Conn.isClosed())
+	assert.False(t, ct.Conn.isShutdown())
 
 	m, err = buf.Write(make([]byte, FrameMaxSize*2+1))
 	assert.NotZero(t, m)
 	assert.NoError(t, err)
-	ct.Conn.Close()
+	ct.SendFinal()
+	ct.Conn.Shutdown()
 	n, err = ct.Conn.ReadFrom(&buf)
 	assert.Error(t, io.ErrClosedPipe, errors.Cause(err))
 }
@@ -641,19 +646,20 @@ func Test_Conn_WriteRequest(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	err := ct.Conn.WriteRequest(httptest.NewRequest("GET", "/", bytes.NewBuffer([]byte{0xde, 0xad})))
-	assert.False(t, ct.Conn.isClosed())
+	assert.False(t, ct.Conn.isShutdown())
 	assert.NoError(t, err)
 
 	ct = newConnTester(t)
 	defer ct.Close()
-	ct.finFn = func(conn *Conn) {} // ignore the final frame from Close()
+	ct.finFn = func(conn *Conn) {} // dont send final frame on receipt of Conn's final
 	ct.Conn.starting()
-	assert.NoError(t, ct.Conn.Close())
-	assert.True(t, ct.Conn.isClosed())
+	assert.NoError(t, ct.Conn.Shutdown())
+	assert.True(t, ct.Conn.isShutdown())
 	rs := ct.Conn.getRunState()
 	assert.True(t, rs == runStateLocalWaitAck || rs == runStateLocalClosed)
 	err = ct.Conn.WriteRequest(httptest.NewRequest("GET", "/", nil))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(err))
+	ct.SendFinal()
 }
 
 func Test_Conn_WriteResponse(t *testing.T) {
@@ -663,23 +669,23 @@ func Test_Conn_WriteResponse(t *testing.T) {
 	rr.WriteString("Meh")
 	rr.WriteHeader(200)
 	err := ct.Conn.WriteResponse(rr.Result())
-	assert.False(t, ct.Conn.isClosed())
+	assert.False(t, ct.Conn.isShutdown())
 	assert.NoError(t, err)
 }
 
 func Test_Conn_CloseWrite(t *testing.T) {
 	ct := newConnTester(t)
-	defer ct.Close()
 	ct.Conn.starting()
-	close(ct.Conn.localClosed)
+	ct.Conn.Shutdown()
 	err := ct.Conn.Close()
 	if isClosedError(err) {
 		err = nil
 	}
 	assert.NoError(t, errors.Cause(err))
+	ct.Close()
 
 	ct = newConnTester(t)
-	defer ct.Close()
+	ct.Conn.starting()
 	ct.Conn.writeStart()
 	ct.Conn.fdw.Write(make([]byte, FrameMaxSize+1))
 	ct.Conn.fdw.Header().SetBody()
@@ -687,9 +693,10 @@ func Test_Conn_CloseWrite(t *testing.T) {
 	assert.Equal(t, ErrFrameTooBig{}, errors.Cause(err))
 	err = ct.Conn.Close()
 	assert.NoError(t, err)
+	ct.Close()
 
 	ct = newConnTester(t)
-	defer ct.Close()
+	ct.Conn.starting()
 	assert.NoError(t, ct.Conn.WriteUserRecordType(0xFF))
 	assert.NoError(t, ct.Conn.WriteByte(0x01))
 	assert.NoError(t, ct.Conn.Flush())
@@ -701,6 +708,7 @@ func Test_Conn_CloseWrite(t *testing.T) {
 	assert.Zero(t, len(ct.Conn.readCh))
 	assert.NoError(t, ct.Conn.Close())
 	assert.True(t, ct.Released())
+	ct.Close()
 }
 
 func Test_Conn_ProxyResponse_transparency(t *testing.T) {
@@ -803,7 +811,7 @@ func Test_Conn_Stop(t *testing.T) {
 	defer ct.Close()
 	ct.InjectRequest(httptest.NewRequest("GET", "/", nil))
 	assert.NoError(t, ct.Conn.Serve(ct))
-	assert.NoError(t, ct.Conn.Close())
+	assert.Equal(t, io.EOF, errors.Cause(ct.Conn.Close()))
 	assert.True(t, ct.Released())
 }
 
@@ -853,16 +861,15 @@ func Test_Conn_flowcontrol_errors(t *testing.T) {
 	ct.Conn.sendWindow = int32(SendWindowSize)
 }
 
-func Test_Conn_SetDeadline_on_closed(t *testing.T) {
+func Test_Conn_SetDeadline_after_shutdown(t *testing.T) {
 	ct := newConnTester(t)
 	defer ct.Close()
 	ct.finFn = func(conn *Conn) {}
 	ct.Conn.starting()
-	ct.Conn.Close()
+	ct.Conn.Shutdown()
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(ct.Conn.SetDeadline(time.Now())))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(ct.Conn.SetReadDeadline(time.Now())))
 	assert.Equal(t, io.ErrClosedPipe, errors.Cause(ct.Conn.SetWriteDeadline(time.Now())))
-	assert.True(t, ct.Conn.remoteSendingFinal())
 }
 
 func makeNetConnPipe() (e1, e2 net.Conn, stop func(), err error) {
@@ -1025,14 +1032,13 @@ func Test_Conn_recycle_with_only_local_closed_panics(t *testing.T) {
 	defer ct.Close()
 
 	ct.Conn.starting()
-	close(ct.Conn.localClosed)
+	close(ct.Conn.shutdownCh)
 
 	assert.Panics(t, func() {
 		ct.Conn.recycle()
 	})
 
-	assert.True(t, ct.Conn.remoteSendingFinal())
-
+	ct.Conn.remoteSendingFinal()
 }
 
 func Test_Conn_manually_sending_final_frame_panics(t *testing.T) {

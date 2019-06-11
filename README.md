@@ -202,10 +202,10 @@ queued for delivery to endpoint doesn't count.
 
 [LocalWaitAck]
   Receive data frame
-  Receive final frame ack --> [LocalClosed]
+  Receive final frame ack --> [c]
   Receive final frame --> (Send final frame ack) --> [WaitAck]
 
-[LocalClosed]
+[RemoteClosed]
   Receive data frame
   Receive final frame --> (Send final frame ack) --> [Idle]
 

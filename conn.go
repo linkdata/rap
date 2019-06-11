@@ -160,18 +160,16 @@ type Conn struct {
 	mux   ConnMuxer     // the Muxer that owns us
 	ackCh chan struct{} // ack's from peer go in this
 
-	cmu         sync.Mutex     // state mutex, guards the below variables
-	localClosed chan struct{}  // closed when Close() has been called
-	onRecycle   func(*Conn)    // function to call when Conn is recycled
-	readCh      chan FrameData // data frames from peer go in this
-	state       runState       // atomic nonzero if a header frame has been sent or received
+	cmu        sync.Mutex     // state mutex, guards the below variables
+	shutdownCh chan struct{}  // closed when final frame sent
+	recycleCh  chan struct{}  // closed when Conn may be recycled
+	onRecycle  func(*Conn)    // function to call when Conn is recycled
+	readCh     chan FrameData // data frames from peer go in this
+	state      runState       // atomic nonzero if a header frame has been sent or received
 
 	// these are atomic to allow Conn.String() to print the state without causing races
-	// localSentFinal int32 // atomic nonzero if local has sent it's final frame
-	// remoteSentFinal int32 // atomic nonzero if remote has sent it's final frame
 	sendWindow int32 // atomic number of frames still allowed to be in flight
 	hijacked   int32 // atomic nonzero if Hijack() was called
-	//finalAcked int32 // atomic nonzero if remote ack'd our final frame
 
 	wmu sync.Mutex // guards fdw
 	fdw FrameData  // FrameData being written to, nil after final frame sent
@@ -212,41 +210,24 @@ func (conn *Conn) getRunStateText() string {
 	return getRunStateText(conn.getRunState())
 }
 
-//func (conn *Conn) hasRemoteSentFinal() bool {
-//	return atomic.LoadInt32(&conn.remoteSentFinal) != 0
-//}
-
-func (conn *Conn) remoteSendingFinal() bool {
-	conn.cmu.Lock()
-	defer conn.cmu.Unlock()
-	//if conn.hasRemoteSentFinal() {
-	//	return false
-	//}
+func (conn *Conn) remoteSendingFinalLocked() {
 	close(conn.readCh)
-	//atomic.StoreInt32(&conn.remoteSentFinal, 1)
-	return true
 }
 
-func (conn *Conn) isClosed() bool {
+func (conn *Conn) remoteSendingFinal() {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	conn.remoteSendingFinalLocked()
+}
+
+func (conn *Conn) isShutdown() bool {
 	select {
-	case <-conn.localClosed:
+	case <-conn.shutdownCh:
 		return true
 	default:
 		return false
 	}
 }
-
-//func (conn *Conn) isFinalAcked() bool {
-//	return atomic.LoadInt32(&conn.finalAcked) != 0
-//}
-
-//func (conn *Conn) mayRecycle() bool {
-//	return conn.isFinalAcked() && conn.getRunState() == runStateClosing && conn.isClosed()
-//}
-
-//func (conn *Conn) hasLocalSentFinal() bool {
-//	return atomic.LoadInt32(&conn.localSentFinal) != 0
-//}
 
 // Serial returns a string identifying the Conn, containing the
 // owning Muxers serial number, a colon, and this Conn's serial number.
@@ -279,7 +260,8 @@ func NewConn(mux ConnMuxer, connID ConnID) (conn *Conn) {
 		sendWindow:    int32(SendWindowSize),
 		ackCh:         make(chan struct{}, MaxSendWindowSize),
 		readCh:        make(chan FrameData, MaxSendWindowSize),
-		localClosed:   make(chan struct{}),
+		shutdownCh:    make(chan struct{}),
+		recycleCh:     make(chan struct{}),
 		readDeadline:  makeConnDeadline(),
 		writeDeadline: makeConnDeadline(),
 		serialNumber:  atomic.AddUint32(&connNextSerialNumber, 1),
@@ -319,7 +301,21 @@ func (conn *Conn) SubmitFrame(fd FrameData) (err error) {
 	return
 }
 
+func (conn *Conn) readyToRecycleLocked() {
+	conn.setRunState(runStateRecycle)
+	close(conn.recycleCh)
+}
+
+func (conn *Conn) readyToRecycle() {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	conn.readyToRecycleLocked()
+}
+
 func (conn *Conn) receivedFinal(fd FrameData) {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+
 	if conn.netLog {
 		log.Print(" FIN ", conn, fd)
 	}
@@ -333,29 +329,31 @@ func (conn *Conn) receivedFinal(fd FrameData) {
 		case runStateLocalWaitAck:
 			conn.setRunState(runStateLocalClosed)
 		case runStateWaitAck:
-			conn.setRunState(runStateRecycle)
+			conn.readyToRecycleLocked()
 		default:
 			panic(fmt.Sprint("got final ack in state ", getRunStateText(rs)))
 		}
-	} else if !conn.remoteSendingFinal() {
-		panic("received multiple final frames")
+	} else {
+		conn.remoteSendingFinalLocked()
 	}
 
 	FrameDataFree(fd)
 }
 
-func (conn *Conn) readEOF() error {
-	// send final frame ack
-	conn.writeFinal(true)
+// assumes cmu locked
+func (conn *Conn) readEOFLocked() error {
+	conn.writeFinalAck()
 
 	switch rs := conn.getRunState(); rs {
 	case runStateActive:
 		conn.setRunState(runStateRemoteClosed)
 	case runStateLocalWaitAck:
+		//conn.writeFinal(true)
 		conn.setRunState(runStateWaitAck)
 	case runStateLocalClosed:
-		conn.setRunState(runStateRecycle)
-	case runStateRemoteClosed:
+		//conn.writeFinal(true)
+		conn.readyToRecycleLocked()
+	case runStateWaitAck, runStateRemoteClosed, runStateRecycle:
 		// let it return EOF again
 	default:
 		panic(fmt.Sprint("got final frame in runstate ", getRunStateText(rs)))
@@ -364,9 +362,16 @@ func (conn *Conn) readEOF() error {
 	return errors.WithStack(io.EOF)
 }
 
+func (conn *Conn) readEOF() error {
+	conn.cmu.Lock()
+	defer conn.cmu.Unlock()
+	return conn.readEOFLocked()
+}
+
 // readFrame reads data frames from the read channel.
 // None of the frames seen may be muxer control frames.
 // Also writes acknowledgement frames.
+// Assumes rmu locked.
 func (conn *Conn) readFrame() error {
 	// log.Print("Conn.readFrame(): len(conn.fdr)=", len(conn.fdr), " conn=", conn)
 	if conn.fdr != nil {
@@ -424,7 +429,7 @@ func (conn *Conn) writeStart() error {
 	//	return errors.WithStack(io.EOF)
 	//}
 	select {
-	case <-conn.localClosed:
+	case <-conn.shutdownCh:
 		return errors.WithStack(io.ErrClosedPipe)
 	case <-conn.writeDeadline.wait():
 		return errors.WithStack(timeoutError{})
@@ -665,7 +670,7 @@ func (conn *Conn) writeFrame(fd FrameData) (err error) {
 		select {
 		case <-conn.ackCh:
 			conn.consumeAck()
-		case <-conn.localClosed:
+		case <-conn.shutdownCh:
 			err = errors.WithStack(io.ErrClosedPipe)
 		case <-conn.mux.ConnAbortChannel():
 			err = errors.WithStack(serverClosedError{})
@@ -687,7 +692,7 @@ func (conn *Conn) writeFrame(fd FrameData) (err error) {
 			select {
 			case <-conn.ackCh:
 				conn.consumeAck()
-			case <-conn.localClosed:
+			case <-conn.shutdownCh:
 				err = errors.WithStack(io.ErrClosedPipe)
 			case <-conn.mux.ConnAbortChannel():
 				err = errors.WithStack(serverClosedError{})
@@ -734,18 +739,17 @@ func (conn *Conn) recycleLocked() {
 		panic(err)
 	}
 
-	conn.setRunState(runStateRecycle)
 	conn.forceRecycleLocked()
 }
 
 func (conn *Conn) canRecycleLocked() error {
-	if rs := conn.getRunState(); rs != runStateLocalClosed && rs != runStateWaitAck {
-		return errors.Errorf("recycle(): not in closing state\n%v\n", conn)
-	}
-
 	switch {
-	case !isClosedChan(conn.localClosed):
+	case conn.getRunState() != runStateRecycle:
+		return errors.Errorf("recycle(): not in recycle state\n%v\n", conn)
+	case !isClosedChan(conn.shutdownCh):
 		return errors.Errorf("recycle(): local not closed\n%v\n", conn)
+	case !isClosedChan(conn.recycleCh):
+		return errors.Errorf("recycle(): recycleCh not closed\n%v\n", conn)
 	case len(conn.fdw) > 0:
 		return errors.Errorf("recycle(): still data left in fdw\n%v\n%v\n", conn, conn.fdw)
 	}
@@ -768,9 +772,8 @@ func (conn *Conn) forceRecycleLocked() {
 	}
 
 	conn.readCh = make(chan FrameData, MaxSendWindowSize)
-	conn.localClosed = make(chan struct{})
-	// atomic.StoreInt32(&conn.localSentFinal, 0)
-	// atomic.StoreInt32(&conn.remoteSentFinal, 0)
+	conn.shutdownCh = make(chan struct{})
+	conn.recycleCh = make(chan struct{})
 	atomic.StoreInt32(&conn.sendWindow, int32(SendWindowSize))
 	atomic.StoreInt32(&conn.hijacked, 0)
 	conn.fdw = nil
@@ -802,15 +805,26 @@ func (conn *Conn) makeFinalFrame(isAck bool) (fd FrameData) {
 }
 
 // need wmu locked
-func (conn *Conn) writeFinalLocked(isAck bool) error {
+func (conn *Conn) writeFinalLocked() error {
 	conn.fdw = nil // discard any incomplete frame
-	return conn.mux.ConnWrite(conn.makeFinalFrame(isAck))
+	return conn.mux.ConnWrite(conn.makeFinalFrame(false))
 }
 
-func (conn *Conn) writeFinal(isAck bool) error {
+func (conn *Conn) writeFinal() error {
 	conn.wmu.Lock()
 	defer conn.wmu.Unlock()
-	return conn.writeFinalLocked(isAck)
+	return conn.writeFinalLocked()
+}
+
+// need wmu locked
+func (conn *Conn) writeFinalAckLocked() error {
+	return conn.mux.ConnWrite(conn.makeFinalFrame(true))
+}
+
+func (conn *Conn) writeFinalAck() error {
+	conn.wmu.Lock()
+	defer conn.wmu.Unlock()
+	return conn.writeFinalAckLocked()
 }
 
 // need cmu locked
@@ -825,18 +839,20 @@ func (conn *Conn) shutdownLocked() error {
 	case runStateRemoteClosed:
 		newRunState = runStateWaitAck
 	default:
-		panic(fmt.Sprint("Close() called in state ", getRunStateText(rs)))
+		panic(fmt.Sprint("Shutdown() called in state ", getRunStateText(rs)))
 	}
 
-	err := conn.writeFinal(false)
+	err := conn.writeFinal()
 	if err == nil {
+		close(conn.shutdownCh)
 		conn.setRunState(newRunState)
 	}
 	return err
 }
 
 // Shutdown sends the final frame signalling this Conn won't send any more data,
-// Any future writes will fail until the Conn is closed and recycled.
+// and blocks until all pending writes are sent or the write deadline is reached.
+// Any future writes will fail until the Conn is recycled.
 // You may keep reading data on the Conn.
 func (conn *Conn) Shutdown() error {
 	conn.cmu.Lock()
@@ -851,8 +867,8 @@ func (conn *Conn) close() (err error) {
 	switch rs := conn.getRunState(); rs {
 	case runStateIdle:
 		// Conn was taken from a Muxer but never used.
-		conn.invokeOnRecycleLocked()
-		return nil
+		// conn.invokeOnRecycleLocked()
+		return errors.WithStack(io.EOF)
 	case runStateActive:
 		// send final frame
 		// wait for final frame ack
@@ -865,39 +881,53 @@ func (conn *Conn) close() (err error) {
 	case runStateLocalWaitAck:
 		// wait for both final frame ack and
 		// for remote to send final frame
+		return
 	case runStateLocalClosed:
 		// wait for remote to send final frame
+		return
 	case runStateWaitAck:
 		// remote closed, wait for final frame ack
+		return
 	case runStateRecycle:
-		// already trying to recycle
-		return nil
+		// ready to recycle
+		return
 	default:
 		// should never occur
 		panic(fmt.Sprint("Close() called in unknown state ", getRunStateText(rs)))
 	}
 
-	close(conn.localClosed)
 	return
 }
 
-// Close interrupts any write operations and blocks until the conn is recycled.
-// It will discard incoming data frames on the conn.
-func (conn *Conn) Close() (err error) {
-	if err = conn.close(); err != nil {
+// Close interrupts any write operations in progress and blocks
+// until the conn is recycled or the read or write deadlines are reached.
+// Incoming frames are discarded.
+func (conn *Conn) Close() error {
+	if err := conn.close(); err != nil {
 		return err
 	}
-
-	// wait until state reaches runStateRecycle
-	timeLeft := 1000
-	for conn.getRunState() != runStateRecycle {
-		time.Sleep(time.Millisecond)
-		timeLeft--
-		if timeLeft < 0 {
+	for {
+		select {
+		case <-conn.recycleCh:
+			conn.recycle()
+			return nil
+		case <-conn.ackCh:
+			conn.consumeAck()
+		case fd := <-conn.readCh:
+			if fd == nil {
+				conn.readEOF()
+			} else {
+				FrameDataFree(fd)
+				conn.writeAckFrame()
+			}
+		case <-conn.readDeadline.wait():
 			return errors.WithStack(timeoutError{})
+		case <-conn.writeDeadline.wait():
+			return errors.WithStack(timeoutError{})
+		case <-conn.mux.ConnAbortChannel():
+			return errors.WithStack(serverClosedError{})
 		}
 	}
-	return
 }
 
 // OnRecycle sets the callback to be invoked when the Conn is being recycled.
@@ -1007,18 +1037,16 @@ func (conn *Conn) writeResponseDataLocked(code int, contentLength int64, header 
 	return
 }
 
-func (conn *Conn) discardAndCloseIfNotHijacked() error {
+func (conn *Conn) closeIfNotHijacked() error {
 	if conn.isHijacked() {
 		return nil
-	}
-	for conn.LoadFrameReader() == nil {
 	}
 	return conn.Close()
 }
 
 // Serve waits for a start frame and then invokes the given http.Handler.
 func (conn *Conn) Serve(h http.Handler) (err error) {
-	defer conn.discardAndCloseIfNotHijacked()
+	defer conn.closeIfNotHijacked()
 	if err = conn.LoadFrameReader(); err == nil {
 		if conn.fdr.Header().HasHead() {
 			switch rt := conn.fp.ReadRecordType(); rt {
@@ -1080,7 +1108,7 @@ func (conn *Conn) RemoteAddr() net.Addr {
 // with the connection. It is equivalent to calling both
 // SetReadDeadline and SetWriteDeadline.
 func (conn *Conn) SetDeadline(t time.Time) error {
-	if conn.isClosed() {
+	if conn.isShutdown() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	conn.readDeadline.set(t)
@@ -1092,7 +1120,7 @@ func (conn *Conn) SetDeadline(t time.Time) error {
 // and any currently-blocked Read call.
 // A zero value for t means Read will not time out.
 func (conn *Conn) SetReadDeadline(t time.Time) error {
-	if conn.isClosed() {
+	if conn.isShutdown() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	conn.readDeadline.set(t)
@@ -1105,7 +1133,7 @@ func (conn *Conn) SetReadDeadline(t time.Time) error {
 // some of the data was successfully written.
 // A zero value for t means Write will not time out.
 func (conn *Conn) SetWriteDeadline(t time.Time) error {
-	if conn.isClosed() {
+	if conn.isShutdown() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	conn.writeDeadline.set(t)

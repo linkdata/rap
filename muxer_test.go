@@ -274,7 +274,7 @@ func Test_Muxer_conn_overflow(t *testing.T) {
 	assert.Equal(t, int(MaxConnID), len(mt.muxClient.conns))
 	conn := NewConn(mt.muxClient, 1)
 	conn.OnRecycle(mt.muxClient.ConnRelease)
-	assert.True(t, conn.remoteSendingFinal())
+	conn.remoteSendingFinal()
 	assert.Panics(t, func() { conn.Close() })
 }
 
